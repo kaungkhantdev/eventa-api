@@ -129,6 +129,25 @@ the development guide when implementing:
 - This same service image is also the **check-in pool** deployment and **ships the outbox relay**
   (`relay.ts`) — keep both entrypoints buildable.
 
+## Engineering principles (apply to all code you add)
+
+- **Feature-first, not layer-first.** Organize by bounded context — a module owns its `controller` ·
+  `service` · `repository` · `dto` · `events` together. Never add top-level technical-layer folders
+  (`controllers/`, `services/`, `repositories/`).
+- **SOLID — especially SRP & Dependency Inversion.** One reason to change per class; depend on
+  **abstractions** (another module's service, a repository, an injected provider), never on concretions or
+  another module's tables.
+- **Thin controllers · orchestration-focused services · data-only repositories.** Controllers validate and
+  delegate; services hold the business rules/orchestration; repositories do **only** data access.
+- **Keep domain/business logic out of infrastructure.** Business rules must not touch DB/email/HTTP/queue
+  specifics directly — reach them through injected ports (repository, mailer, publisher).
+- **Side effects go through events / background jobs.** Write to the **outbox** and let the worker handle
+  email/SMS/projections; don't inline them in the request path (keeps core workflows focused and evolvable).
+- **Small functions — aim for ≤ 10 lines.** Extract helpers; a function should read as a short list of
+  intent-level steps.
+- **One level of abstraction per function.** Don't mix high-level orchestration and low-level detail in the
+  same function.
+
 ## Contracts with sibling repos (no shared package)
 
 - **web ↔ api:** this repo emits `openapi.json`; `../eventa-web` generates its typed client from it.
