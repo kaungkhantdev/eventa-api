@@ -6,7 +6,7 @@ export interface RequestStore {
   /** Trace id shared across logs, the response header, and outbound messages. */
   correlationId: string;
   /** Tenant scope — set once auth resolves; drives `organization_id` scoping + RLS. */
-  organizationId?: string;
+  organizationId?: number;
   /** Authenticated principal, when present. */
   userId?: string;
 }
@@ -31,7 +31,7 @@ export class RequestContextService {
     return this.als.getStore()?.correlationId;
   }
 
-  get organizationId(): string | undefined {
+  get organizationId(): number | undefined {
     return this.als.getStore()?.organizationId;
   }
 

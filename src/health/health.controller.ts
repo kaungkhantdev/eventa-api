@@ -5,6 +5,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
+import { Public } from '../common/decorators/public.decorator';
 import { HealthService } from './health.service';
 
 /**
@@ -12,6 +13,7 @@ import { HealthService } from './health.service';
  * - `GET /api/v1/health/live`  — liveness: the process is up (no dependencies).
  * - `GET /api/v1/health/ready` — readiness: dependencies reachable (503 if not).
  */
+@Public()
 @ApiTags('health')
 @Controller('health')
 export class HealthController {

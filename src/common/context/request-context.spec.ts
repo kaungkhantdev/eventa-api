@@ -21,8 +21,8 @@ describe('RequestContextService', () => {
 
   it('merges fields via set()', () => {
     ctx.run({ correlationId: 'abc' }, () => {
-      ctx.set({ organizationId: 'org_1', userId: 'user_1' });
-      expect(ctx.organizationId).toBe('org_1');
+      ctx.set({ organizationId: 1, userId: 'user_1' });
+      expect(ctx.organizationId).toBe(1);
       expect(ctx.userId).toBe('user_1');
       expect(ctx.correlationId).toBe('abc');
     });

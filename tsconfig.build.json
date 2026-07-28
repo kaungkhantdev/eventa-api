@@ -1,7 +1,10 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "rootDir": "src"
+    "rootDir": "src",
+    // Disable incremental: nest-cli's deleteOutDir wipes dist but not the
+    // buildinfo, so an incremental build would skip re-emitting (empty dist).
+    "incremental": false
   },
   "include": ["src"],
   "exclude": ["node_modules", "test", "dist", "**/*spec.ts", "drizzle.config.ts"]
