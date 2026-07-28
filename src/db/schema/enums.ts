@@ -73,3 +73,53 @@ export const webhookStatusEnum = pgEnum('webhook_status', [
   'processed',
   'failed',
 ]);
+
+// ── Events & Program ─────────────────────────────────────────────────────────
+
+export const eventStatusEnum = pgEnum('event_status', [
+  'draft',
+  'planned',
+  'upcoming',
+  'live',
+  'completed',
+  'cancelled',
+]);
+
+export const eventTypeEnum = pgEnum('event_type', [
+  'Conference',
+  'Networking',
+  'Workshop',
+  'Charity & Gala',
+  'Sports & Wellness',
+  'Concert & Festival',
+  'Exhibition',
+  'Seminar',
+]);
+
+export const eventBucketEnum = pgEnum('event_bucket', ['active', 'completed']);
+
+export const visibilityEnum = pgEnum('visibility', [
+  'private',
+  'unlisted',
+  'public',
+]);
+
+export const seatingModeEnum = pgEnum('seating_mode', ['reserved', 'ga']);
+
+export const categoryColorEnum = pgEnum('category_color', [
+  'pink',
+  'blue',
+  'amber',
+  'brand',
+  'violet',
+  'indigo',
+  'teal',
+  'red',
+]);
+
+export const templateIdEnum = pgEnum('template_id', [
+  'aurora',
+  'noir',
+  'minimal',
+  'atlas',
+]);

@@ -12,6 +12,7 @@ import type { Env } from './config/env.validation';
 import { buildLoggerOptions } from './config/logger.config';
 import { DatabaseModule } from './db/database.module';
 import { HealthModule } from './health/health.module';
+import { EventsModule } from './modules/events/events.module';
 import { IdentityModule } from './modules/identity/identity.module';
 
 @Module({
@@ -26,6 +27,7 @@ import { IdentityModule } from './modules/identity/identity.module';
     CommonModule,
     HealthModule,
     IdentityModule,
+    EventsModule,
   ],
 })
 export class AppModule implements NestModule {

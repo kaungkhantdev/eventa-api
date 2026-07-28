@@ -22,6 +22,20 @@
       "when": 1785228868947,
       "tag": "0002_enable_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785248299522,
+      "tag": "0003_events_program",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785248331345,
+      "tag": "0004_rls_events",
+      "breakpoints": true
     }
   ]
 }
