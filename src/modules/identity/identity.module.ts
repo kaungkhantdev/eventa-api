@@ -8,8 +8,10 @@ import { PlatformModule } from '../platform/platform.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { PermissionsGuard } from './guards/permissions.guard';
 import { IdentityRepository } from './identity.repository';
 import { PasswordService } from './password.service';
+import { PermissionsService } from './permissions.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { TokenService } from './token.service';
 
@@ -35,10 +37,17 @@ import { TokenService } from './token.service';
     AuthService,
     IdentityRepository,
     PasswordService,
+    PermissionsService,
+    PermissionsGuard,
     TokenService,
     JwtStrategy,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
   ],
-  exports: [IdentityRepository, PasswordService],
+  exports: [
+    IdentityRepository,
+    PasswordService,
+    PermissionsService,
+    PermissionsGuard,
+  ],
 })
 export class IdentityModule {}

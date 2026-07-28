@@ -24,9 +24,21 @@ const ADMIN = {
   email: 'admin@acme.test',
   password: 'correct horse battery staple',
 } as const;
+// The full permission catalog (permission_key enum). The seeded Admin role is
+// granted all of them, so the admin account can create/publish events, etc.
 const PERMISSIONS = [
+  { key: 'evCreate', group: 'Events', label: 'Create & edit events' },
+  { key: 'evPublish', group: 'Events', label: 'Publish & unpublish events' },
+  { key: 'evSpeakers', group: 'Events', label: 'Manage speakers & program' },
+  { key: 'regView', group: 'Registrations', label: 'View registrations' },
+  { key: 'regCheckin', group: 'Registrations', label: 'Check in attendees' },
+  { key: 'regExport', group: 'Registrations', label: 'Export registrations' },
+  { key: 'finView', group: 'Finance', label: 'View finances' },
+  { key: 'finRefund', group: 'Finance', label: 'Issue refunds' },
+  { key: 'finDiscount', group: 'Finance', label: 'Manage discounts' },
   { key: 'setUsers', group: 'Settings', label: 'Manage team' },
   { key: 'setSettings', group: 'Settings', label: 'Manage settings' },
+  { key: 'setIntegrations', group: 'Settings', label: 'Manage integrations' },
 ] as const;
 // A few workspace categories so the event `categoryId` path is testable.
 // (color values are the `category_color` enum; icon is a Hugeicons slug.)

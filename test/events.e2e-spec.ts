@@ -17,6 +17,7 @@ const ORG_B = { slug: 'evt-e2e-b', name: 'Events E2E B' };
 const ADMIN_A = 'admin@evt-e2e-a.test';
 const ADMIN_B = 'admin@evt-e2e-b.test';
 const ATTENDEE_A = 'attendee@evt-e2e-a.test';
+const LIMITED_A = 'limited@evt-e2e-a.test'; // admin persona, no evCreate
 
 interface SuccessBody<T> {
   success: boolean;
@@ -42,10 +43,28 @@ describe('Events (e2e — create draft + list)', () => {
     pool = new Pool({ connectionString: process.env.DATABASE_URL });
     await cleanup(pool);
     await seedTenant(pool, ORG_A, [
-      { email: ADMIN_A, persona: 'admin' },
+      {
+        email: ADMIN_A,
+        persona: 'admin',
+        roleName: 'Admin',
+        grants: ['evCreate'],
+      },
+      {
+        email: LIMITED_A,
+        persona: 'admin',
+        roleName: 'Staff',
+        grants: ['regView'],
+      },
       { email: ATTENDEE_A, persona: 'attendee' },
     ]);
-    await seedTenant(pool, ORG_B, [{ email: ADMIN_B, persona: 'admin' }]);
+    await seedTenant(pool, ORG_B, [
+      {
+        email: ADMIN_B,
+        persona: 'admin',
+        roleName: 'Admin',
+        grants: ['evCreate'],
+      },
+    ]);
 
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
@@ -127,6 +146,16 @@ describe('Events (e2e — create draft + list)', () => {
     expect(body.data.every((e) => e.bucket === 'completed')).toBe(true);
   });
 
+  it('forbids an admin without the evCreate permission (403)', async () => {
+    const jwt = await token(LIMITED_A, ORG_A.slug, 'admin');
+    const res = await createEvent(jwt, {
+      name: 'No Permission',
+      type: 'Conference',
+      startAt: '2026-09-01T02:00:00Z',
+    });
+    expect(res.status).toBe(403);
+  });
+
   it('forbids an attendee persona from creating events (403)', async () => {
     const jwt = await token(ATTENDEE_A, ORG_A.slug, 'attendee');
     const res = await createEvent(jwt, {
@@ -183,10 +212,22 @@ describe('Events (e2e — create draft + list)', () => {
   });
 });
 
+interface SeedPerson {
+  email: string;
+  persona: 'admin' | 'attendee';
+  roleName?: 'Admin' | 'Staff';
+  grants?: string[];
+}
+
+const PERM_GROUP: Record<string, string> = {
+  evCreate: 'Events',
+  regView: 'Registrations',
+};
+
 async function seedTenant(
   pool: Pool,
   org: { slug: string; name: string },
-  people: { email: string; persona: 'admin' | 'attendee' }[],
+  people: SeedPerson[],
 ): Promise<void> {
   const res = await pool.query<{ id: string }>(
     `INSERT INTO organizations (name, slug) VALUES ($1, $2) RETURNING id`,
@@ -195,12 +236,48 @@ async function seedTenant(
   const orgId = Number(res.rows[0].id);
   const passwordHash = await hash(PASSWORD);
   for (const p of people) {
-    await pool.query(
+    const user = await pool.query<{ id: string }>(
       `INSERT INTO users (organization_id, name, email, persona, status, password_hash)
-       VALUES ($1, 'Seed User', $2, $3, 'Active', $4)`,
+       VALUES ($1, 'Seed User', $2, $3, 'Active', $4) RETURNING id`,
       [orgId, p.email, p.persona, passwordHash],
     );
+    if (p.roleName && p.grants) {
+      await grantRole(pool, orgId, user.rows[0].id, p.roleName, p.grants);
+    }
   }
+}
+
+/** Create a role with the given permission grants and attach the user to it. */
+async function grantRole(
+  pool: Pool,
+  orgId: number,
+  userId: string,
+  roleName: string,
+  grants: string[],
+): Promise<void> {
+  for (const key of grants) {
+    await pool.query(
+      `INSERT INTO permissions (key, "group", label) VALUES ($1, $2, $3)
+       ON CONFLICT (key) DO NOTHING`,
+      [key, PERM_GROUP[key], key],
+    );
+  }
+  const role = await pool.query<{ id: string }>(
+    `INSERT INTO roles (organization_id, name, description) VALUES ($1, $2, 'seed') RETURNING id`,
+    [orgId, roleName],
+  );
+  const roleId = Number(role.rows[0].id);
+  for (const key of grants) {
+    await pool.query(
+      `INSERT INTO role_permissions (role_id, permission_key, granted) VALUES ($1, $2, true)`,
+      [roleId, key],
+    );
+  }
+  await pool.query(
+    `INSERT INTO memberships (organization_id, user_id, role_id, role, status)
+     VALUES ($1, $2, $3, $4, 'Active')`,
+    [orgId, userId, roleId, roleName],
+  );
 }
 
 async function cleanup(pool: Pool): Promise<void> {

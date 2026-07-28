@@ -15,6 +15,8 @@ import { Paginated } from '../../common/http/paginated';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 import type { AuthContext } from '../identity/auth.types';
 import { CurrentAuth } from '../identity/decorators/current-auth.decorator';
+import { RequirePermissions } from '../identity/decorators/require-permissions.decorator';
+import { PermissionsGuard } from '../identity/guards/permissions.guard';
 import { CreateEventDto } from './dto/create-event.dto';
 import { EventResponseDto } from './dto/event-response.dto';
 import { ListEventsQueryDto } from './dto/list-events.query.dto';
@@ -24,15 +26,16 @@ import { AdminGuard } from './guards/admin.guard';
 @ApiTags('events')
 @ApiBearerAuth()
 @ApiForbiddenResponse({
-  description: 'Admin persona required',
+  description: 'Admin persona or required permission missing',
   type: ApiErrorDto,
 })
-@UseGuards(AdminGuard)
+@UseGuards(AdminGuard, PermissionsGuard)
 @Controller('events')
 export class EventsController {
   constructor(private readonly events: EventsService) {}
 
   @Post()
+  @RequirePermissions('evCreate')
   @HttpCode(HttpStatus.CREATED)
   @ResponseMessage('Event created.')
   @ApiData(EventResponseDto, HttpStatus.CREATED)
@@ -54,6 +57,7 @@ export class EventsController {
   }
 
   @Get()
+  @RequirePermissions('evCreate')
   @ResponseMessage('Events retrieved.')
   @ApiPage(EventResponseDto)
   list(
