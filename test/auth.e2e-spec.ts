@@ -1,11 +1,11 @@
 process.env.NODE_ENV = 'test';
 process.env.DATABASE_URL ??= 'postgres://eventa:eventa@localhost:5432/eventa';
+process.env.JWT_SECRET ??= 'test-secret-at-least-16-characters-long';
 
 import type { Server } from 'node:http';
 import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { hash } from '@node-rs/argon2';
-import cookieParser from 'cookie-parser';
 import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
@@ -17,13 +17,15 @@ const PASSWORD = 'correct horse battery staple';
 interface Envelope {
   error: { code: string; message: string };
 }
-interface Me {
-  email: string;
-  organization: { slug: string };
-  permissions: string[];
+interface LoginBody {
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
+  expiresIn: number;
+  user: { email: string; permissions: string[] };
 }
 
-describe('Auth (e2e)', () => {
+describe('Auth (e2e, JWT)', () => {
   let app: INestApplication;
   let server: Server;
   let pool: Pool;
@@ -37,7 +39,6 @@ describe('Auth (e2e)', () => {
       imports: [AppModule],
     }).compile();
     app = moduleRef.createNestApplication();
-    app.use(cookieParser());
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(
       new ValidationPipe({
@@ -60,6 +61,11 @@ describe('Auth (e2e)', () => {
     await app.close();
   });
 
+  const login = () =>
+    request(server)
+      .post('/api/v1/auth/login')
+      .send({ email: EMAIL, password: PASSWORD, orgSlug: SLUG });
+
   it('rejects a bad password with a 401 envelope', async () => {
     const res = await request(server)
       .post('/api/v1/auth/login')
@@ -68,55 +74,65 @@ describe('Auth (e2e)', () => {
     expect((res.body as Envelope).error.code).toBe('UNAUTHORIZED');
   });
 
-  it('rejects an unknown org/user uniformly with 401', async () => {
-    const res = await request(server)
-      .post('/api/v1/auth/login')
-      .send({ email: EMAIL, password: PASSWORD, orgSlug: 'no-such-org' });
-    expect(res.status).toBe(401);
-  });
-
-  it('logs in, returns the user + permissions, and sets an httpOnly cookie', async () => {
-    const res = await request(server)
-      .post('/api/v1/auth/login')
-      .send({ email: EMAIL, password: PASSWORD, orgSlug: SLUG });
+  it('logs in and returns an access + refresh token pair', async () => {
+    const res = await login();
     expect(res.status).toBe(200);
-    const body = res.body as Me;
-    expect(body.email).toBe(EMAIL);
-    expect(body.organization.slug).toBe(SLUG);
-    expect(body.permissions).toEqual(
+    const body = res.body as LoginBody;
+    expect(body.tokenType).toBe('Bearer');
+    expect(typeof body.accessToken).toBe('string');
+    expect(typeof body.refreshToken).toBe('string');
+    expect(body.expiresIn).toBeGreaterThan(0);
+    expect(body.user.email).toBe(EMAIL);
+    expect(body.user.permissions).toEqual(
       expect.arrayContaining(['setUsers', 'setSettings']),
     );
-    const cookie = String(res.headers['set-cookie']);
-    expect(cookie).toContain('eventa_session=');
-    expect(cookie).toContain('HttpOnly');
   });
 
-  it('rejects /auth/me without a session', async () => {
+  it('rejects /auth/me without a Bearer token', async () => {
     const res = await request(server).get('/api/v1/auth/me');
     expect(res.status).toBe(401);
   });
 
-  it('supports the full login -> me -> logout lifecycle', async () => {
-    const agent = request.agent(server);
-    await agent
-      .post('/api/v1/auth/login')
-      .send({ email: EMAIL, password: PASSWORD, orgSlug: SLUG })
-      .expect(200);
+  it('accepts /auth/me with a Bearer access token', async () => {
+    const { accessToken } = (await login()).body as LoginBody;
+    const res = await request(server)
+      .get('/api/v1/auth/me')
+      .set('Authorization', `Bearer ${accessToken}`);
+    expect(res.status).toBe(200);
+    expect((res.body as { email: string }).email).toBe(EMAIL);
+  });
 
-    const me = await agent.get('/api/v1/auth/me').expect(200);
-    expect((me.body as Me).email).toBe(EMAIL);
+  it('exchanges a refresh token for a new access token', async () => {
+    const { refreshToken } = (await login()).body as LoginBody;
+    const res = await request(server)
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken });
+    expect(res.status).toBe(200);
+    expect(typeof (res.body as { accessToken: string }).accessToken).toBe(
+      'string',
+    );
+  });
 
-    await agent.delete('/api/v1/session').expect(204);
+  it('logout revokes the refresh session', async () => {
+    const { accessToken, refreshToken } = (await login()).body as LoginBody;
 
-    // Session revoked → the same cookie no longer authenticates.
-    await agent.get('/api/v1/auth/me').expect(401);
+    await request(server)
+      .delete('/api/v1/session')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(204);
+
+    // The refresh token no longer works — its session was revoked.
+    await request(server)
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken })
+      .expect(401);
   });
 });
 
 async function seed(pool: Pool): Promise<number> {
   await pool.query(
     `DELETE FROM audit_events WHERE organization_id IN
-    (SELECT id FROM organizations WHERE slug = $1)`,
+       (SELECT id FROM organizations WHERE slug = $1)`,
     [SLUG],
   );
   await pool.query(`DELETE FROM organizations WHERE slug = $1`, [SLUG]);

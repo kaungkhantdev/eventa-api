@@ -15,6 +15,11 @@ export const envSchema = z.object({
   REDIS_URL: z.string().min(1).optional(),
   RABBITMQ_URL: z.string().min(1).optional(),
 
+  // Auth (JWT — access + refresh)
+  JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
+  JWT_ACCESS_TTL: z.coerce.number().int().positive().default(900), // seconds (15m)
+  JWT_REFRESH_TTL: z.coerce.number().int().positive().default(604800), // seconds (7d)
+
   // HTTP
   CORS_ORIGINS: z.string().default('*'),
 

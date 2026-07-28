@@ -7,44 +7,42 @@ import {
   HttpStatus,
   Post,
   Req,
-  Res,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import {
+  ApiBearerAuth,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import type { CookieOptions, Request, Response } from 'express';
+import type { Request } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
-import type { Env } from '../../config/env.validation';
 import { AuthService } from './auth.service';
-import { type AuthContext, SESSION_COOKIE, SESSION_TTL_MS } from './auth.types';
+import type { AuthContext } from './auth.types';
 import { CurrentAuth } from './decorators/current-auth.decorator';
 import { LoginDto } from './dto/login.dto';
+import { RefreshDto } from './dto/refresh.dto';
+import { LoginResponseDto, RefreshResponseDto } from './dto/token-response.dto';
 import { MeResponseDto } from './dto/user-response.dto';
+
+const BEARER = 'Bearer';
 
 @ApiTags('auth')
 @Controller()
 export class AuthController {
-  constructor(
-    private readonly auth: AuthService,
-    private readonly config: ConfigService<Env, true>,
-  ) {}
+  constructor(private readonly auth: AuthService) {}
 
   @Public()
   @Post('auth/login')
   @HttpCode(HttpStatus.OK)
-  @ApiOkResponse({ type: MeResponseDto })
+  @ApiOkResponse({ type: LoginResponseDto })
   @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
   async login(
     @Body() dto: LoginDto,
     @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<MeResponseDto> {
+  ): Promise<LoginResponseDto> {
     const device = req.headers['user-agent'] ?? 'Unknown device';
-    const { sessionId, user } = await this.auth.login({
+    const result = await this.auth.login({
       email: dto.email,
       password: dto.password,
       orgSlug: dto.orgSlug,
@@ -52,11 +50,31 @@ export class AuthController {
       device,
       ip: req.ip ?? null,
     });
-    res.cookie(SESSION_COOKIE, sessionId, this.cookieOptions());
-    return user;
+    return {
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      tokenType: BEARER,
+      expiresIn: result.expiresIn,
+      user: result.user,
+    };
+  }
+
+  @Public()
+  @Post('auth/refresh')
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ type: RefreshResponseDto })
+  @ApiUnauthorizedResponse({ description: 'Invalid or revoked refresh token' })
+  async refresh(@Body() dto: RefreshDto): Promise<RefreshResponseDto> {
+    const result = await this.auth.refresh(dto.refreshToken);
+    return {
+      accessToken: result.accessToken,
+      tokenType: BEARER,
+      expiresIn: result.expiresIn,
+    };
   }
 
   @Get('auth/me')
+  @ApiBearerAuth()
   @ApiOkResponse({ type: MeResponseDto })
   me(@CurrentAuth() auth: AuthContext): Promise<MeResponseDto> {
     return this.auth.me(auth);
@@ -64,24 +82,9 @@ export class AuthController {
 
   @Delete('session')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiNoContentResponse({ description: 'Signed out' })
-  async logout(
-    @CurrentAuth() auth: AuthContext,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<void> {
-    await this.auth.logout(auth);
-    res.clearCookie(SESSION_COOKIE, { path: '/' });
-  }
-
-  private cookieOptions(): CookieOptions {
-    const isProd =
-      this.config.get('NODE_ENV', { infer: true }) === 'production';
-    return {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: 'lax',
-      maxAge: SESSION_TTL_MS,
-      path: '/',
-    };
+  @ApiBearerAuth()
+  @ApiNoContentResponse({ description: 'Signed out (refresh session revoked)' })
+  logout(@CurrentAuth() auth: AuthContext): Promise<void> {
+    return this.auth.logout(auth);
   }
 }

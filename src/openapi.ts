@@ -13,7 +13,7 @@ export function buildOpenApiDocument(app: INestApplication) {
     )
     .setVersion('1.0')
     .addServer('/api/v1')
-    .addCookieAuth('session')
+    .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' })
     .build();
 
   return SwaggerModule.createDocument(app, config);

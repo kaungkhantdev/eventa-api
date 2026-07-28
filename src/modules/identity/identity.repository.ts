@@ -70,17 +70,16 @@ export class IdentityRepository {
     return rows[0] ?? null;
   }
 
+  /** Refresh-session validity check (used on token refresh; null if revoked/expired). */
   async findValidSession(
     sessionId: string,
-  ): Promise<{ user: UserRow; org: OrganizationRow } | null> {
+  ): Promise<{ userId: string; organizationId: number } | null> {
     const rows = await this.db
-      .select({ user: users, org: organizations })
+      .select({
+        userId: authSessions.userId,
+        organizationId: authSessions.organizationId,
+      })
       .from(authSessions)
-      .innerJoin(users, eq(authSessions.userId, users.id))
-      .innerJoin(
-        organizations,
-        eq(authSessions.organizationId, organizations.id),
-      )
       .where(
         and(
           eq(authSessions.id, sessionId),
@@ -88,6 +87,19 @@ export class IdentityRepository {
           gt(authSessions.expiresAt, new Date()),
         ),
       )
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
+  /** Load a user + their organization (for /auth/me). */
+  async findProfile(
+    userId: string,
+  ): Promise<{ user: UserRow; org: OrganizationRow } | null> {
+    const rows = await this.db
+      .select({ user: users, org: organizations })
+      .from(users)
+      .innerJoin(organizations, eq(users.organizationId, organizations.id))
+      .where(and(eq(users.id, userId), isNull(users.deletedAt)))
       .limit(1);
     return rows[0] ?? null;
   }

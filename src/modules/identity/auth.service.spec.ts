@@ -1,7 +1,12 @@
 import { AuthService, type LoginInput } from './auth.service';
-import type { OrganizationRow, UserRow } from './auth.types';
+import type {
+  OrganizationRow,
+  RefreshTokenClaims,
+  UserRow,
+} from './auth.types';
 import { IdentityRepository } from './identity.repository';
 import { PasswordService } from './password.service';
+import { TokenService } from './token.service';
 
 const org = {
   id: 1,
@@ -34,72 +39,125 @@ const input: LoginInput = {
   ip: null,
 };
 
-describe('AuthService.login', () => {
+describe('AuthService', () => {
   let repo: jest.Mocked<IdentityRepository>;
   let passwords: jest.Mocked<PasswordService>;
+  let tokens: jest.Mocked<TokenService>;
   let service: AuthService;
 
   beforeEach(() => {
     repo = {
       findLoginUser: jest.fn(),
       findValidSession: jest.fn(),
+      findProfile: jest.fn(),
       createSession: jest.fn(),
       revokeSession: jest.fn(),
       touchLastActive: jest.fn(),
       recordAudit: jest.fn(),
-      getPermissions: jest.fn(),
+      getPermissions: jest.fn().mockResolvedValue([]),
     } as unknown as jest.Mocked<IdentityRepository>;
     passwords = {
       hash: jest.fn(),
       verify: jest.fn(),
     };
-    service = new AuthService(repo, passwords);
+    tokens = {
+      signAccess: jest.fn().mockResolvedValue('access.jwt'),
+      signRefresh: jest.fn().mockResolvedValue('refresh.jwt'),
+      verifyAccess: jest.fn(),
+      verifyRefresh: jest.fn(),
+      accessTtlSeconds: 900,
+      refreshTtlSeconds: 604800,
+    } as unknown as jest.Mocked<TokenService>;
+    service = new AuthService(repo, passwords, tokens);
   });
 
-  it('rejects an unknown user with 401', async () => {
-    repo.findLoginUser.mockResolvedValue(null);
-    await expect(service.login(input)).rejects.toMatchObject({
-      code: 'UNAUTHORIZED',
+  describe('login', () => {
+    it('rejects an unknown user with 401', async () => {
+      repo.findLoginUser.mockResolvedValue(null);
+      await expect(service.login(input)).rejects.toMatchObject({
+        code: 'UNAUTHORIZED',
+      });
+      expect(repo.createSession).not.toHaveBeenCalled();
     });
-    expect(repo.createSession).not.toHaveBeenCalled();
+
+    it('rejects a wrong password with 401 and audits the failure', async () => {
+      repo.findLoginUser.mockResolvedValue({ user: userRow(), org });
+      passwords.verify.mockResolvedValue(false);
+      await expect(service.login(input)).rejects.toMatchObject({
+        code: 'UNAUTHORIZED',
+      });
+      expect(repo.recordAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'fail' }),
+      );
+    });
+
+    it('rejects a non-active account with 403', async () => {
+      repo.findLoginUser.mockResolvedValue({
+        user: userRow({ status: 'Suspended' }),
+        org,
+      });
+      passwords.verify.mockResolvedValue(true);
+      await expect(service.login(input)).rejects.toMatchObject({
+        code: 'FORBIDDEN',
+      });
+      expect(repo.createSession).not.toHaveBeenCalled();
+    });
+
+    it('issues an access + refresh token pair on success', async () => {
+      repo.findLoginUser.mockResolvedValue({ user: userRow(), org });
+      passwords.verify.mockResolvedValue(true);
+      repo.createSession.mockResolvedValue('sess-1');
+      repo.getPermissions.mockResolvedValue(['setUsers']);
+
+      const result = await service.login(input);
+
+      expect(result.accessToken).toBe('access.jwt');
+      expect(result.refreshToken).toBe('refresh.jwt');
+      expect(result.expiresIn).toBe(900);
+      expect(result.user.permissions).toEqual(['setUsers']);
+      expect(tokens.signAccess).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'sess-1', persona: 'admin' }),
+      );
+      expect(repo.recordAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'signin' }),
+      );
+    });
   });
 
-  it('rejects a wrong password with 401 and audits the failure', async () => {
-    repo.findLoginUser.mockResolvedValue({ user: userRow(), org });
-    passwords.verify.mockResolvedValue(false);
-    await expect(service.login(input)).rejects.toMatchObject({
-      code: 'UNAUTHORIZED',
+  describe('refresh', () => {
+    const claims: RefreshTokenClaims = {
+      sub: 'u1',
+      org: 1,
+      sid: 's1',
+      persona: 'admin',
+      typ: 'refresh',
+    };
+
+    it('mints a new access token when the session is live', async () => {
+      tokens.verifyRefresh.mockResolvedValue(claims);
+      repo.findValidSession.mockResolvedValue({
+        userId: 'u1',
+        organizationId: 1,
+      });
+      tokens.signAccess.mockResolvedValue('new.access');
+
+      const result = await service.refresh('refresh.jwt');
+      expect(result.accessToken).toBe('new.access');
     });
-    expect(repo.recordAudit).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'fail' }),
-    );
-  });
 
-  it('rejects a non-active account with 403', async () => {
-    repo.findLoginUser.mockResolvedValue({
-      user: userRow({ status: 'Suspended' }),
-      org,
+    it('rejects when the session was revoked', async () => {
+      tokens.verifyRefresh.mockResolvedValue(claims);
+      repo.findValidSession.mockResolvedValue(null);
+      await expect(service.refresh('refresh.jwt')).rejects.toMatchObject({
+        code: 'UNAUTHORIZED',
+      });
     });
-    passwords.verify.mockResolvedValue(true);
-    await expect(service.login(input)).rejects.toMatchObject({
-      code: 'FORBIDDEN',
+
+    it('rejects an invalid refresh token', async () => {
+      tokens.verifyRefresh.mockRejectedValue(new Error('bad signature'));
+      await expect(service.refresh('nope')).rejects.toMatchObject({
+        code: 'UNAUTHORIZED',
+      });
     });
-    expect(repo.createSession).not.toHaveBeenCalled();
-  });
-
-  it('issues a session and returns the user + permissions on success', async () => {
-    repo.findLoginUser.mockResolvedValue({ user: userRow(), org });
-    passwords.verify.mockResolvedValue(true);
-    repo.createSession.mockResolvedValue('sess-1');
-    repo.getPermissions.mockResolvedValue(['setUsers']);
-
-    const result = await service.login(input);
-
-    expect(result.sessionId).toBe('sess-1');
-    expect(result.user.email).toBe('a@acme.test');
-    expect(result.user.permissions).toEqual(['setUsers']);
-    expect(repo.recordAudit).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'signin' }),
-    );
   });
 });

@@ -1,10 +1,21 @@
 import { validateEnv } from './env.validation';
 
 describe('validateEnv', () => {
-  const base = { DATABASE_URL: 'postgres://u:p@localhost:5432/db' };
+  const base = {
+    DATABASE_URL: 'postgres://u:p@localhost:5432/db',
+    JWT_SECRET: 'a-sufficiently-long-test-secret',
+  };
 
   it('rejects an env missing DATABASE_URL', () => {
-    expect(() => validateEnv({})).toThrow(/DATABASE_URL/);
+    expect(() => validateEnv({ JWT_SECRET: base.JWT_SECRET })).toThrow(
+      /DATABASE_URL/,
+    );
+  });
+
+  it('rejects a too-short JWT_SECRET', () => {
+    expect(() =>
+      validateEnv({ DATABASE_URL: base.DATABASE_URL, JWT_SECRET: 'short' }),
+    ).toThrow(/JWT_SECRET/);
   });
 
   it('applies defaults', () => {
@@ -13,6 +24,8 @@ describe('validateEnv', () => {
     expect(env.PORT).toBe(3000);
     expect(env.LOG_LEVEL).toBe('info');
     expect(env.CORS_ORIGINS).toBe('*');
+    expect(env.JWT_ACCESS_TTL).toBe(900);
+    expect(env.JWT_REFRESH_TTL).toBe(604800);
   });
 
   it('coerces PORT from string to number', () => {

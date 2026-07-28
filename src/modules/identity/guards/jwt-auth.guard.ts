@@ -10,21 +10,22 @@ import { RequestContextService } from '../../../common/context/request-context';
 import { IS_PUBLIC_KEY } from '../../../common/decorators/public.decorator';
 import { DomainException } from '../../../common/errors/domain.exception';
 import { ErrorCode } from '../../../common/errors/error-codes';
-import { type AuthContext, SESSION_COOKIE } from '../auth.types';
-import { IdentityRepository } from '../identity.repository';
+import type { AccessTokenClaims, AuthContext } from '../auth.types';
+import { TokenService } from '../token.service';
 
 type AuthedRequest = Request & { auth?: AuthContext };
 
 /**
  * Global guard. Public routes pass through; every other route requires a valid
- * session cookie, whose principal + tenant are attached to the request and the
- * request context (so downstream queries scope by organization).
+ * Bearer access token. Verification is stateless (no DB) — the token's claims
+ * populate the request + request context (organizationId/userId) for tenant
+ * scoping. Revocation is handled at refresh time via the auth_sessions row.
  */
 @Injectable()
-export class SessionAuthGuard implements CanActivate {
+export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
-    private readonly repo: IdentityRepository,
+    private readonly tokens: TokenService,
     private readonly context: RequestContextService,
   ) {}
 
@@ -36,16 +37,30 @@ export class SessionAuthGuard implements CanActivate {
     if (isPublic) return true;
 
     const req = ctx.switchToHttp().getRequest<AuthedRequest>();
-    const cookies = (req.cookies ?? {}) as Record<string, string | undefined>;
-    const sessionId = cookies[SESSION_COOKIE];
-    if (!sessionId) throw this.unauthorized('Authentication required');
+    const token = this.bearerToken(req.headers.authorization);
+    if (!token) throw this.unauthorized('Authentication required');
 
-    const found = await this.repo.findValidSession(sessionId);
-    if (!found) throw this.unauthorized('Session expired or invalid');
+    let claims: AccessTokenClaims;
+    try {
+      claims = await this.tokens.verifyAccess(token);
+    } catch {
+      throw this.unauthorized('Invalid or expired token');
+    }
+    if (claims.typ !== 'access') throw this.unauthorized('Invalid token type');
 
-    req.auth = { user: found.user, org: found.org, sessionId };
-    this.context.set({ organizationId: found.org.id, userId: found.user.id });
+    req.auth = {
+      userId: claims.sub,
+      organizationId: claims.org,
+      sessionId: claims.sid,
+      persona: claims.persona,
+    };
+    this.context.set({ organizationId: claims.org, userId: claims.sub });
     return true;
+  }
+
+  private bearerToken(header: string | undefined): string | null {
+    if (!header?.startsWith('Bearer ')) return null;
+    return header.slice(7).trim() || null;
   }
 
   private unauthorized(message: string): DomainException {

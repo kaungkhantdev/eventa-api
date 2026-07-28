@@ -1,6 +1,7 @@
 // Env must be valid before ConfigModule validates it at module compile time.
 process.env.NODE_ENV = 'test';
 process.env.DATABASE_URL ??= 'postgres://eventa:eventa@localhost:5432/eventa';
+process.env.JWT_SECRET ??= 'test-secret-at-least-16-characters-long';
 
 import type { Server } from 'node:http';
 import { type INestApplication, ValidationPipe } from '@nestjs/common';
