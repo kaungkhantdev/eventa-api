@@ -1,7 +1,6 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -91,7 +90,8 @@ export class AuthController {
     return this.auth.me(auth);
   }
 
-  @Delete('session')
+  @Post('auth/logout')
+  @HttpCode(HttpStatus.OK)
   @ResponseMessage('Signed out successfully.')
   @ApiBearerAuth()
   @ApiOkResponse({

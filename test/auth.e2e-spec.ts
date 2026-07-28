@@ -154,7 +154,7 @@ describe('Auth (e2e — envelope + passport)', () => {
     const { accessToken, refreshToken } = await loginData();
 
     const out = await request(server)
-      .delete('/api/v1/session')
+      .post('/api/v1/auth/logout')
       .set('Authorization', `Bearer ${accessToken}`);
     expect(out.status).toBe(200);
     const body = out.body as SuccessBody<null>;

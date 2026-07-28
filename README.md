@@ -83,7 +83,7 @@ Open **http://localhost:3000/api/docs** (raw OpenAPI JSON at `/api/docs/json`).
    get back an `accessToken` and `refreshToken`. Copy the **`accessToken`**.
 2. Click **Authorize** (top-right), paste **just the token** (no `Bearer ` prefix — Swagger adds it),
    then **Authorize** → **Close**.
-3. Call the protected endpoints — e.g. **`GET /auth/me`**, **`POST /auth/refresh`**, **`DELETE /session`**.
+3. Call the protected endpoints — e.g. **`GET /auth/me`**, **`POST /auth/refresh`**, **`POST /auth/logout`**.
 
 Access tokens last ~15 minutes; if a call returns `401`, log in again or use `/auth/refresh`, then
 re-Authorize.
