@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { DomainException } from '../../common/errors/domain.exception';
 import { Paginated } from '../../common/http/paginated';
 import { EventResponseDto } from './dto/event-response.dto';
 import { toEventResponse } from './events.mapper';
@@ -6,6 +7,8 @@ import { EventsRepository } from './events.repository';
 import type {
   CreateEventInput,
   EventActor,
+  EventBucket,
+  EventStatus,
   ListEventsOptions,
   ListEventsQuery,
   NewEventValues,
@@ -14,6 +17,13 @@ import { slugify } from './slug';
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
+
+/** event_bucket is derived from lifecycle status (entities.md): terminal → completed. */
+function bucketForStatus(status: EventStatus): EventBucket {
+  return status === 'completed' || status === 'cancelled'
+    ? 'completed'
+    : 'active';
+}
 
 /** Orchestrates event management rules (the Events bounded context). */
 @Injectable()
@@ -25,18 +35,22 @@ export class EventsService {
     actor: EventActor,
     input: CreateEventInput,
   ): Promise<EventResponseDto> {
+    if (input.categoryId !== undefined) {
+      await this.assertCategoryInOrg(actor.organizationId, input.categoryId);
+    }
     const slug = await this.uniqueSlug(actor.organizationId, input.name);
     const organizerName =
       input.organizerName ??
       (await this.repo.organizationName(actor.organizationId));
 
+    const status: EventStatus = 'draft';
     const values: NewEventValues = {
       organizationId: actor.organizationId,
       slug,
       name: input.name,
       type: input.type,
-      status: 'draft',
-      bucket: 'active',
+      status,
+      bucket: bucketForStatus(status),
       startAt: input.startAt,
       description: input.description ?? null,
       categoryId: input.categoryId ?? null,
@@ -44,6 +58,18 @@ export class EventsService {
       createdBy: actor.userId,
     };
     return toEventResponse(await this.repo.insert(values));
+  }
+
+  /** A category referenced on create must exist in the caller's tenant (else 404). */
+  private async assertCategoryInOrg(
+    organizationId: number,
+    categoryId: number,
+  ): Promise<void> {
+    if (!(await this.repo.categoryExists(organizationId, categoryId))) {
+      throw DomainException.notFound(
+        `Category ${categoryId} not found in this workspace.`,
+      );
+    }
   }
 
   /** The organizer's events for this tenant, filtered/sorted, one page at a time. */

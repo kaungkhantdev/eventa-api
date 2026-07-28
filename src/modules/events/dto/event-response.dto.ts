@@ -1,4 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
+import {
+  eventBucketEnum,
+  eventStatusEnum,
+  eventTypeEnum,
+  seatingModeEnum,
+  visibilityEnum,
+} from '../../../db/schema';
 
 /** Response shape for a single event (mapped from the Drizzle row — never raw). */
 export class EventResponseDto {
@@ -14,16 +21,16 @@ export class EventResponseDto {
   @ApiProperty({ nullable: true, type: String })
   description!: string | null;
 
-  @ApiProperty({ example: 'Conference' })
+  @ApiProperty({ enum: eventTypeEnum.enumValues, example: 'Conference' })
   type!: string;
 
-  @ApiProperty({ example: 'draft' })
+  @ApiProperty({ enum: eventStatusEnum.enumValues, example: 'draft' })
   status!: string;
 
-  @ApiProperty({ example: 'active' })
+  @ApiProperty({ enum: eventBucketEnum.enumValues, example: 'active' })
   bucket!: string;
 
-  @ApiProperty({ example: 'private' })
+  @ApiProperty({ enum: visibilityEnum.enumValues, example: 'private' })
   visibility!: string;
 
   @ApiProperty({ format: 'date-time' })
@@ -38,7 +45,7 @@ export class EventResponseDto {
   @ApiProperty()
   isOnline!: boolean;
 
-  @ApiProperty({ example: 'ga' })
+  @ApiProperty({ enum: seatingModeEnum.enumValues, example: 'ga' })
   seatingMode!: string;
 
   @ApiProperty()

@@ -11,7 +11,7 @@ import {
   type SQL,
 } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
-import { events, organizations } from '../../db/schema';
+import { categories, events, organizations } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
 import type {
   EventRow,
@@ -53,6 +53,31 @@ export class EventsRepository {
     });
   }
 
+  /**
+   * Does this category exist in the caller's org? Filters by organization_id
+   * explicitly (in addition to RLS) so a foreign-tenant category id is never
+   * reachable — Postgres FK checks bypass RLS, so the app must guard this.
+   */
+  async categoryExists(
+    organizationId: number,
+    categoryId: number,
+  ): Promise<boolean> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({ id: categories.id })
+        .from(categories)
+        .where(
+          and(
+            eq(categories.id, categoryId),
+            eq(categories.organizationId, organizationId),
+            isNull(categories.deletedAt),
+          ),
+        )
+        .limit(1);
+      return row !== undefined;
+    });
+  }
+
   async insert(values: NewEventValues): Promise<EventRow> {
     return withTenant(this.db, values.organizationId, async (tx) => {
       const [row] = await tx.insert(events).values(values).returning();
@@ -75,7 +100,7 @@ export class EventsRepository {
         .select()
         .from(events)
         .where(where)
-        .orderBy(orderColumn(opts.sort))
+        .orderBy(...orderColumns(opts.sort))
         .limit(opts.limit)
         .offset(opts.offset);
       return { items, total: count };
@@ -88,14 +113,21 @@ export class EventsRepository {
       isNull(events.deletedAt),
       opts.bucket ? eq(events.bucket, opts.bucket) : undefined,
       opts.type ? eq(events.type, opts.type) : undefined,
-      opts.q ? ilike(events.name, `%${opts.q}%`) : undefined,
+      opts.q ? ilike(events.name, `%${likeEscape(opts.q)}%`) : undefined,
     ];
     return and(...filters) as SQL;
   }
 }
 
-function orderColumn(sort: EventSort): SQL {
-  if (sort === 'name') return asc(events.name);
-  if (sort === 'date') return asc(events.startAt);
-  return desc(events.createdAt);
+/** Escape LIKE/ILIKE metacharacters so `%`/`_` in a search term match literally. */
+function likeEscape(term: string): string {
+  return term.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+/** Sort columns, always with a unique `id` tiebreaker so paging can't skip/dup. */
+function orderColumns(sort: EventSort): SQL[] {
+  const tiebreaker = asc(events.id);
+  if (sort === 'name') return [asc(events.name), tiebreaker];
+  if (sort === 'date') return [asc(events.startAt), tiebreaker];
+  return [desc(events.createdAt), tiebreaker];
 }

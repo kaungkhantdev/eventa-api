@@ -137,6 +137,39 @@ describe('Events (e2e — create draft + list)', () => {
     expect(res.status).toBe(403);
   });
 
+  it('rejects a non-existent categoryId with 404, not 500', async () => {
+    const jwt = await token(ADMIN_A, ORG_A.slug, 'admin');
+    const res = await createEvent(jwt, {
+      name: 'Ghost Category',
+      type: 'Conference',
+      startAt: '2026-09-01T02:00:00Z',
+      categoryId: 999999,
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("refuses another tenant's category id (no cross-tenant reference)", async () => {
+    const { rows } = await pool.query<{ id: string }>(
+      `SELECT id FROM organizations WHERE slug = $1`,
+      [ORG_B.slug],
+    );
+    const cat = await pool.query<{ id: string }>(
+      `INSERT INTO categories (organization_id, name, icon, color)
+       VALUES ($1, 'Music', 'music', 'blue') RETURNING id`,
+      [Number(rows[0].id)],
+    );
+    const foreignCategoryId = Number(cat.rows[0].id);
+
+    const jwt = await token(ADMIN_A, ORG_A.slug, 'admin');
+    const res = await createEvent(jwt, {
+      name: 'Cross Tenant Category',
+      type: 'Conference',
+      startAt: '2026-09-01T02:00:00Z',
+      categoryId: foreignCategoryId,
+    });
+    expect(res.status).toBe(404);
+  });
+
   it('does not leak events across tenants', async () => {
     const jwtB = await token(ADMIN_B, ORG_B.slug, 'admin');
     const res = await request(server)

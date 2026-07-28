@@ -1,3 +1,4 @@
+import { DomainException } from '../../common/errors/domain.exception';
 import { EventsRepository } from './events.repository';
 import { EventsService } from './events.service';
 import type { EventRow } from './events.types';
@@ -50,6 +51,7 @@ describe('EventsService.createDraft', () => {
     repo = {
       existingSlugs: jest.fn().mockResolvedValue([]),
       organizationName: jest.fn().mockResolvedValue('Acme'),
+      categoryExists: jest.fn().mockResolvedValue(true),
       insert: jest
         .fn()
         .mockImplementation((v: Partial<EventRow>) =>
@@ -101,5 +103,44 @@ describe('EventsService.createDraft', () => {
 
     expect(res.organizerName).toBe('Acme Foundation');
     expect(repo.organizationName).not.toHaveBeenCalled();
+  });
+
+  it('rejects a categoryId not in the caller org with 404 (no insert)', async () => {
+    repo.categoryExists.mockResolvedValue(false);
+
+    const err = await service
+      .createDraft(auth, {
+        name: 'Bad Category',
+        type: 'Conference',
+        startAt: new Date('2026-09-01T02:00:00Z'),
+        categoryId: 999999,
+      })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(DomainException);
+    expect((err as DomainException).getStatus()).toBe(404);
+    expect(repo.categoryExists).toHaveBeenCalledWith(1, 999999);
+    expect(repo.insert).not.toHaveBeenCalled();
+  });
+
+  it('accepts a categoryId that exists in the org and passes it to insert', async () => {
+    await service.createDraft(auth, {
+      name: 'Good Category',
+      type: 'Conference',
+      startAt: new Date('2026-09-01T02:00:00Z'),
+      categoryId: 5,
+    });
+
+    expect(repo.insert.mock.calls[0][0].categoryId).toBe(5);
+  });
+
+  it('does not check a category when none is provided', async () => {
+    await service.createDraft(auth, {
+      name: 'No Category',
+      type: 'Conference',
+      startAt: new Date('2026-09-01T02:00:00Z'),
+    });
+
+    expect(repo.categoryExists).not.toHaveBeenCalled();
   });
 });

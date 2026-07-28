@@ -12,6 +12,8 @@ export function slugify(name: string): string {
     .toLowerCase()
     .normalize('NFKD')
     .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return slug.length >= MIN_LENGTH ? slug.slice(0, MAX_LENGTH) : FALLBACK;
+    .replace(/^-+|-+$/g, '')
+    .slice(0, MAX_LENGTH)
+    .replace(/-+$/, ''); // truncation may land on a hyphen
+  return slug.length >= MIN_LENGTH ? slug : FALLBACK;
 }

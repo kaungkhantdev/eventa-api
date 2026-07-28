@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiForbiddenResponse, ApiTags } from '@nestjs/swagger';
 import { ApiErrorDto } from '../../common/errors/error-envelope';
-import { ApiData } from '../../common/http/api-data.decorator';
+import { ApiData, ApiPage } from '../../common/http/api-data.decorator';
 import { Paginated } from '../../common/http/paginated';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 import type { AuthContext } from '../identity/auth.types';
@@ -35,7 +35,7 @@ export class EventsController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ResponseMessage('Event created.')
-  @ApiData(EventResponseDto)
+  @ApiData(EventResponseDto, HttpStatus.CREATED)
   create(
     @CurrentAuth() auth: AuthContext,
     @Body() dto: CreateEventDto,
@@ -55,7 +55,7 @@ export class EventsController {
 
   @Get()
   @ResponseMessage('Events retrieved.')
-  @ApiData(EventResponseDto)
+  @ApiPage(EventResponseDto)
   list(
     @CurrentAuth() auth: AuthContext,
     @Query() query: ListEventsQueryDto,

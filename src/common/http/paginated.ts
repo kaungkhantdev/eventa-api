@@ -1,3 +1,5 @@
+import { ApiProperty } from '@nestjs/swagger';
+
 export interface PageMeta {
   page: number;
   limit: number;
@@ -5,6 +7,27 @@ export interface PageMeta {
   totalPages: number;
   hasNext: boolean;
   hasPrevious: boolean;
+}
+
+/** Swagger model for the `meta` block every paginated response carries. */
+export class PageMetaDto implements PageMeta {
+  @ApiProperty({ example: 1 })
+  page!: number;
+
+  @ApiProperty({ example: 20 })
+  limit!: number;
+
+  @ApiProperty({ example: 42 })
+  total!: number;
+
+  @ApiProperty({ example: 3 })
+  totalPages!: number;
+
+  @ApiProperty()
+  hasNext!: boolean;
+
+  @ApiProperty()
+  hasPrevious!: boolean;
 }
 
 /**
