@@ -1,6 +1,7 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { DomainException } from '../../common/errors/domain.exception';
 import { ErrorCode } from '../../common/errors/error-codes';
+import { Clock } from '../../common/time/clock';
 import type {
   AuthContext,
   OrganizationRow,
@@ -37,6 +38,7 @@ export class AuthService {
     private readonly repo: IdentityRepository,
     private readonly passwords: PasswordService,
     private readonly tokens: TokenService,
+    private readonly clock: Clock,
   ) {}
 
   async login(input: LoginInput): Promise<LoginResult> {
@@ -113,7 +115,7 @@ export class AuthService {
 
   private openSession(found: LoginUser, input: LoginInput): Promise<string> {
     const expiresAt = new Date(
-      Date.now() + this.tokens.refreshTtlSeconds * 1000,
+      this.clock.now().getTime() + this.tokens.refreshTtlSeconds * 1000,
     );
     return this.repo.createSession({
       organizationId: found.org.id,

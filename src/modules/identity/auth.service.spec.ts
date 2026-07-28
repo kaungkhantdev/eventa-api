@@ -1,3 +1,4 @@
+import { Clock } from '../../common/time/clock';
 import { AuthService, type LoginInput } from './auth.service';
 import type {
   OrganizationRow,
@@ -7,6 +8,8 @@ import type {
 import { IdentityRepository } from './identity.repository';
 import { PasswordService } from './password.service';
 import { TokenService } from './token.service';
+
+const clock: Clock = { now: () => new Date('2026-01-01T00:00:00Z') };
 
 const org = {
   id: 1,
@@ -68,7 +71,7 @@ describe('AuthService', () => {
       accessTtlSeconds: 900,
       refreshTtlSeconds: 604800,
     } as unknown as jest.Mocked<TokenService>;
-    service = new AuthService(repo, passwords, tokens);
+    service = new AuthService(repo, passwords, tokens, clock);
   });
 
   describe('login', () => {

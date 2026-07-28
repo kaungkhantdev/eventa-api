@@ -79,10 +79,9 @@ test in the same change.
 - **Two separate jest configs.** Unit config is inline in `package.json` (`rootDir: src`, matches
   `*.spec.ts`) — put fast tests beside the code. E2e is `test/jest-e2e.json` (`rootDir: .`, matches
   `*.e2e-spec.ts`) — put full-stack flows in `test/`.
-- **TypeScript is only partly strict.** `tsconfig.json` sets `strictNullChecks` but **not** full
-  `strict`: `noImplicitAny` is `false`, and eslint's `no-explicit-any` is turned **off**. This is looser
-  than both the development guide's "strict, no `any`" intent and the `../eventa-web` repo. Prefer
-  explicit types; consider tightening `tsconfig` before the domain code grows.
+- **TypeScript is full `strict`** (`tsconfig.json` → `"strict": true`). eslint's `no-explicit-any` is still
+  **off** (so an explicit `any` won't error), but the type-aware `no-unsafe-*` rules do — prefer explicit
+  types and avoid `any`/`@ts-ignore`/nested ternaries per the engineering standard.
 - **ESLint is type-aware** (`recommendedTypeChecked` + `projectService`), so it needs a valid tsconfig to
   run. `no-floating-promises` and `no-unsafe-argument` are **warnings** — heed them on the async/money
   paths especially. `module: nodenext`, `target: ES2023`.
@@ -184,9 +183,8 @@ TypeORM/entities.)
 **Methods, TypeScript, naming**
 - **Small methods** — **house target ≤ 10 lines**, ~40 hard ceiling; extract private methods over giant
   functions; **one level of abstraction** each.
-- **TypeScript** — `readonly` where possible, async/await, optional chaining, nullish coalescing. Avoid
-  `any`, `@ts-ignore`, **nested ternaries**, deep nesting. *(Repo tsconfig is only partly strict today —
-  `noImplicitAny:false`; full `strict` is the target — see Config gotchas.)*
+- **TypeScript** — full `strict` is on; use `readonly` where possible, async/await, optional chaining,
+  nullish coalescing. Avoid `any`, `@ts-ignore`, **nested ternaries**, deep nesting.
 - **Explicit names** — `IdentityRepository`, `PasswordService`, `JwtAuthGuard`. Avoid `Helper`/`Util`/
   `Manager`/`CommonService`/`GeneralService`.
 
