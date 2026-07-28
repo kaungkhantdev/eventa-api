@@ -189,8 +189,13 @@ TypeORM/entities.)
   `Manager`/`CommonService`/`GeneralService`.
 
 **API, data, security**
-- **REST** under `/api/v1`; **consistent response format** (standard error envelope; lists paginated);
-  correct HTTP status codes.
+- **REST** under `/api/v1`; **consistent response format** — success responses are wrapped as `{ data }`
+  (or `{ data, meta }` for a `Paginated<T>`) by the global `ResponseInterceptor`; errors are
+  `{ error: { code, message, details, correlationId } }` from the filter; opt a route out with
+  `@SkipResponseEnvelope` (health probes do). Correct HTTP status codes.
+- **Auth** is **passport-jwt**: `JwtStrategy` verifies the Bearer access token; `JwtAuthGuard` (global,
+  `AuthGuard('jwt')`) honours `@Public` and stamps tenant context; `TokenService` signs. Principal is on
+  `req.user` — read it via `@CurrentAuth()`.
 - **Postgres/Drizzle** — explicit FKs/relations; **paginate** list endpoints; index searchable columns;
   transactions for multi-table writes; no N+1; no business logic in schema; never expose schema types.
 - **Security** — validate + sanitize input; parameterized queries (Drizzle); enforce authz **server-side**;
