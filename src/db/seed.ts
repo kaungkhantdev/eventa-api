@@ -1,14 +1,116 @@
 /**
- * Seed local/test data. Run: `pnpm seed`.
+ * Seed local dev data so you can exercise the API by hand (Swagger at /api/docs).
  *
- * Target (development-guide §6): ≥2 tenants, events across states, ticket types,
- * test cards, sandbox PromptPay. Stubbed until the domain schema exists
- * (see ../../../eventa-docs/04-architecture/entities.md).
+ * Creates one tenant with an admin you can sign in as — these are the exact
+ * example values shown in the Swagger `login` schema, so POST /auth/login →
+ * "Try it out" → Execute works with no edits:
+ *
+ *   orgSlug   acme
+ *   email     admin@acme.test
+ *   password  correct horse battery staple
+ *
+ * Idempotent: re-running wipes and recreates the `acme` tenant (cascades to its
+ * users/roles/memberships). Dev tooling — like drizzle.config.ts it reads
+ * DATABASE_URL directly and never runs in the request path.
+ *
+ * Run: `pnpm seed` (needs `docker compose up -d` + `pnpm migrate` first).
  */
-function seed(): void {
-  console.log(
-    '[seed] no domain tables yet — translate entities.md into src/db/schema first.',
+import { hash } from '@node-rs/argon2';
+import { Pool } from 'pg';
+
+const ORG = { name: 'Acme', slug: 'acme' } as const;
+const ADMIN = {
+  name: 'Acme Admin',
+  email: 'admin@acme.test',
+  password: 'correct horse battery staple',
+} as const;
+const PERMISSIONS = [
+  { key: 'setUsers', group: 'Settings', label: 'Manage team' },
+  { key: 'setSettings', group: 'Settings', label: 'Manage settings' },
+] as const;
+
+function databaseUrl(): string {
+  const url = process.env.DATABASE_URL;
+  if (!url)
+    throw new Error('DATABASE_URL is required (copy .env.example → .env)');
+  return url;
+}
+
+async function resetTenant(pool: Pool): Promise<void> {
+  await pool.query(`DELETE FROM organizations WHERE slug = $1`, [ORG.slug]);
+}
+
+async function insertOrg(pool: Pool): Promise<number> {
+  const res = await pool.query<{ id: string }>(
+    `INSERT INTO organizations (name, slug) VALUES ($1, $2) RETURNING id`,
+    [ORG.name, ORG.slug],
+  );
+  return Number(res.rows[0].id);
+}
+
+async function insertPermissions(pool: Pool): Promise<void> {
+  for (const p of PERMISSIONS) {
+    await pool.query(
+      `INSERT INTO permissions (key, "group", label) VALUES ($1, $2, $3)
+       ON CONFLICT (key) DO NOTHING`,
+      [p.key, p.group, p.label],
+    );
+  }
+}
+
+async function insertAdminRole(pool: Pool, orgId: number): Promise<number> {
+  const res = await pool.query<{ id: string }>(
+    `INSERT INTO roles (organization_id, name, description)
+     VALUES ($1, 'Admin', 'Full access') RETURNING id`,
+    [orgId],
+  );
+  const roleId = Number(res.rows[0].id);
+  for (const p of PERMISSIONS) {
+    await pool.query(
+      `INSERT INTO role_permissions (role_id, permission_key, granted) VALUES ($1, $2, true)`,
+      [roleId, p.key],
+    );
+  }
+  return roleId;
+}
+
+async function insertAdminUser(
+  pool: Pool,
+  orgId: number,
+  roleId: number,
+): Promise<void> {
+  const passwordHash = await hash(ADMIN.password);
+  const res = await pool.query<{ id: string }>(
+    `INSERT INTO users (organization_id, name, email, persona, status, password_hash)
+     VALUES ($1, $2, $3, 'admin', 'Active', $4) RETURNING id`,
+    [orgId, ADMIN.name, ADMIN.email, passwordHash],
+  );
+  await pool.query(
+    `INSERT INTO memberships (organization_id, user_id, role_id, role, status)
+     VALUES ($1, $2, $3, 'Admin', 'Active')`,
+    [orgId, res.rows[0].id, roleId],
   );
 }
 
-seed();
+function printCredentials(): void {
+  console.log('[seed] ready — sign in at /api/docs → POST /auth/login:');
+  console.log(`  orgSlug   ${ORG.slug}`);
+  console.log(`  email     ${ADMIN.email}`);
+  console.log(`  password  ${ADMIN.password}`);
+}
+
+async function seed(): Promise<void> {
+  const pool = new Pool({ connectionString: databaseUrl() });
+  try {
+    await resetTenant(pool);
+    const orgId = await insertOrg(pool);
+    await insertPermissions(pool);
+    const roleId = await insertAdminRole(pool, orgId);
+    await insertAdminUser(pool, orgId, roleId);
+    printCredentials();
+  } finally {
+    await pool.end();
+  }
+}
+
+void seed();
