@@ -14,9 +14,12 @@ request context, correlation-id middleware, `DomainException` + global error-env
 structured logging), the `/api/v1` global prefix + `ValidationPipe`, Swagger/`openapi.json`, a
 `/api/v1/health/{live,ready}` probe pair, and a `docker-compose.yml` for Postgres/Redis/RabbitMQ.
 Installed stack: `drizzle-orm`/`pg`, `@nestjs/config`, `@nestjs/swagger`, `class-validator`/`-transformer`,
-`zod`, `nestjs-pino`. **The domain modules are not built yet** — `src/modules/*` is empty and
-`src/db/schema` has no tables; translate `entities.md` one bounded context at a time. The RabbitMQ client
-and the outbox relay are still stubs (`src/relay.ts`).
+`zod`, `nestjs-pino`, `@nestjs/passport`+`passport-jwt`, `@node-rs/argon2`, `amqplib`. **Built so far:** the
+full identity/organization/platform **schema** (14 tables + RLS migrations) in `src/db/schema`; the
+**identity** module (JWT auth — login/refresh/me/logout via passport-jwt) and **platform** module
+(transactional **outbox**); and the **outbox relay** (`src/relay.ts` → `RelayModule`) that publishes
+`outbox_events` to RabbitMQ (consumed by `../eventa-worker`). More domain modules (events, ticketing,
+registration, …) are still to come — translate `entities.md` one bounded context at a time.
 
 The build plan is **not in this repo** — it lives in the sibling SDLC docs at **`../eventa-docs`**. Read
 these before adding anything:
@@ -55,7 +58,7 @@ Run a **single test**: `pnpm test -- <path-or-name-pattern>` — e.g. `pnpm test
 ```bash
 docker compose up -d   # Postgres :5432 · Redis :6379 · RabbitMQ :5672 (+ mgmt :15672)
 pnpm dev               # HTTP API in watch mode (http://localhost:3000, prefix /api/v1)
-pnpm relay             # outbox relay entrypoint (stub for now)
+pnpm relay             # outbox relay entrypoint (polls outbox_events → RabbitMQ)
 pnpm generate          # drizzle-kit: diff src/db/schema → SQL migration in src/db/migrations
 pnpm migrate           # drizzle-kit: apply pending migrations
 pnpm seed              # local seed data (stub until domain tables exist)
