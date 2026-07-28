@@ -1,6 +1,11 @@
 import type { organizations, users } from '../../db/schema';
 
-export type Persona = 'admin' | 'attendee';
+/** The two audiences; a login belongs to exactly one (ADR-8). */
+export const Persona = {
+  Admin: 'admin',
+  Attendee: 'attendee',
+} as const;
+export type Persona = (typeof Persona)[keyof typeof Persona];
 
 export type UserRow = typeof users.$inferSelect;
 export type OrganizationRow = typeof organizations.$inferSelect;

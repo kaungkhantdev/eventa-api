@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { DomainException } from '../../../common/errors/domain.exception';
-import type { AuthContext } from '../../identity/auth.types';
+import { type AuthContext, Persona } from '../../identity/auth.types';
 
 /**
  * Organizer-console gate: only the `admin` persona may reach event-management
@@ -18,7 +18,7 @@ export class AdminGuard implements CanActivate {
     const req = context
       .switchToHttp()
       .getRequest<Request & { user?: AuthContext }>();
-    if (req.user?.persona !== 'admin') {
+    if (req.user?.persona !== Persona.Admin) {
       throw DomainException.forbidden(
         'Organizer console access requires an admin account.',
       );
