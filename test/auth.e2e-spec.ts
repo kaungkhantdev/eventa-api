@@ -25,7 +25,7 @@ interface LoginBody {
   user: { email: string; permissions: string[] };
 }
 
-describe('Auth (e2e, JWT)', () => {
+describe('Auth (e2e, JWT + passport)', () => {
   let app: INestApplication;
   let server: Server;
   let pool: Pool;
@@ -52,7 +52,6 @@ describe('Auth (e2e, JWT)', () => {
   });
 
   afterAll(async () => {
-    // audit_events -> organizations is ON DELETE RESTRICT, so clear it first.
     await pool.query(`DELETE FROM audit_events WHERE organization_id = $1`, [
       orgId,
     ]);
@@ -66,7 +65,10 @@ describe('Auth (e2e, JWT)', () => {
       .post('/api/v1/auth/login')
       .send({ email: EMAIL, password: PASSWORD, orgSlug: SLUG });
 
-  it('rejects a bad password with a 401 envelope', async () => {
+  const loginData = async (): Promise<LoginBody> =>
+    ((await login()).body as { data: LoginBody }).data;
+
+  it('rejects a bad password with a 401 error envelope', async () => {
     const res = await request(server)
       .post('/api/v1/auth/login')
       .send({ email: EMAIL, password: 'wrong-password', orgSlug: SLUG });
@@ -74,10 +76,17 @@ describe('Auth (e2e, JWT)', () => {
     expect((res.body as Envelope).error.code).toBe('UNAUTHORIZED');
   });
 
-  it('logs in and returns an access + refresh token pair', async () => {
+  it('rejects an unknown org/user uniformly with 401', async () => {
+    const res = await request(server)
+      .post('/api/v1/auth/login')
+      .send({ email: EMAIL, password: PASSWORD, orgSlug: 'no-such-org' });
+    expect(res.status).toBe(401);
+  });
+
+  it('logs in and returns { data } with an access + refresh token pair', async () => {
     const res = await login();
     expect(res.status).toBe(200);
-    const body = res.body as LoginBody;
+    const body = (res.body as { data: LoginBody }).data;
     expect(body.tokenType).toBe('Bearer');
     expect(typeof body.accessToken).toBe('string');
     expect(typeof body.refreshToken).toBe('string');
@@ -94,34 +103,33 @@ describe('Auth (e2e, JWT)', () => {
   });
 
   it('accepts /auth/me with a Bearer access token', async () => {
-    const { accessToken } = (await login()).body as LoginBody;
+    const { accessToken } = await loginData();
     const res = await request(server)
       .get('/api/v1/auth/me')
       .set('Authorization', `Bearer ${accessToken}`);
     expect(res.status).toBe(200);
-    expect((res.body as { email: string }).email).toBe(EMAIL);
+    expect((res.body as { data: { email: string } }).data.email).toBe(EMAIL);
   });
 
   it('exchanges a refresh token for a new access token', async () => {
-    const { refreshToken } = (await login()).body as LoginBody;
+    const { refreshToken } = await loginData();
     const res = await request(server)
       .post('/api/v1/auth/refresh')
       .send({ refreshToken });
     expect(res.status).toBe(200);
-    expect(typeof (res.body as { accessToken: string }).accessToken).toBe(
-      'string',
-    );
+    expect(
+      typeof (res.body as { data: { accessToken: string } }).data.accessToken,
+    ).toBe('string');
   });
 
   it('logout revokes the refresh session', async () => {
-    const { accessToken, refreshToken } = (await login()).body as LoginBody;
+    const { accessToken, refreshToken } = await loginData();
 
     await request(server)
       .delete('/api/v1/session')
       .set('Authorization', `Bearer ${accessToken}`)
       .expect(204);
 
-    // The refresh token no longer works — its session was revoked.
     await request(server)
       .post('/api/v1/auth/refresh')
       .send({ refreshToken })

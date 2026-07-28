@@ -11,12 +11,12 @@ import {
 import {
   ApiBearerAuth,
   ApiNoContentResponse,
-  ApiOkResponse,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
+import { ApiData } from '../../common/http/api-data.decorator';
 import { AuthService } from './auth.service';
 import type { AuthContext } from './auth.types';
 import { CurrentAuth } from './decorators/current-auth.decorator';
@@ -35,7 +35,7 @@ export class AuthController {
   @Public()
   @Post('auth/login')
   @HttpCode(HttpStatus.OK)
-  @ApiOkResponse({ type: LoginResponseDto })
+  @ApiData(LoginResponseDto)
   @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
   async login(
     @Body() dto: LoginDto,
@@ -62,7 +62,7 @@ export class AuthController {
   @Public()
   @Post('auth/refresh')
   @HttpCode(HttpStatus.OK)
-  @ApiOkResponse({ type: RefreshResponseDto })
+  @ApiData(RefreshResponseDto)
   @ApiUnauthorizedResponse({ description: 'Invalid or revoked refresh token' })
   async refresh(@Body() dto: RefreshDto): Promise<RefreshResponseDto> {
     const result = await this.auth.refresh(dto.refreshToken);
@@ -75,7 +75,7 @@ export class AuthController {
 
   @Get('auth/me')
   @ApiBearerAuth()
-  @ApiOkResponse({ type: MeResponseDto })
+  @ApiData(MeResponseDto)
   me(@CurrentAuth() auth: AuthContext): Promise<MeResponseDto> {
     return this.auth.me(auth);
   }

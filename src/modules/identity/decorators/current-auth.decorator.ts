@@ -2,15 +2,15 @@ import { createParamDecorator, type ExecutionContext } from '@nestjs/common';
 import type { Request } from 'express';
 import type { AuthContext } from '../auth.types';
 
-/** Injects the authenticated {@link AuthContext} (set by SessionAuthGuard). */
+/** Injects the authenticated {@link AuthContext} (set on req.user by the jwt strategy). */
 export const CurrentAuth = createParamDecorator(
   (_data: unknown, ctx: ExecutionContext): AuthContext => {
     const req = ctx
       .switchToHttp()
-      .getRequest<Request & { auth?: AuthContext }>();
-    if (!req.auth) {
-      throw new Error('CurrentAuth used on a route without SessionAuthGuard');
+      .getRequest<Request & { user?: AuthContext }>();
+    if (!req.user) {
+      throw new Error('CurrentAuth used on a route without JwtAuthGuard');
     }
-    return req.auth;
+    return req.user;
   },
 );
