@@ -129,24 +129,82 @@ the development guide when implementing:
 - This same service image is also the **check-in pool** deployment and **ships the outbox relay**
   (`relay.ts`) — keep both entrypoints buildable.
 
-## Engineering principles (apply to all code you add)
+## Engineering standards (house rules — apply to all code you add)
 
-- **Feature-first, not layer-first.** Organize by bounded context — a module owns its `controller` ·
-  `service` · `repository` · `dto` · `events` together. Never add top-level technical-layer folders
-  (`controllers/`, `services/`, `repositories/`).
-- **SOLID — especially SRP & Dependency Inversion.** One reason to change per class; depend on
-  **abstractions** (another module's service, a repository, an injected provider), never on concretions or
-  another module's tables.
-- **Thin controllers · orchestration-focused services · data-only repositories.** Controllers validate and
-  delegate; services hold the business rules/orchestration; repositories do **only** data access.
-- **Keep domain/business logic out of infrastructure.** Business rules must not touch DB/email/HTTP/queue
-  specifics directly — reach them through injected ports (repository, mailer, publisher).
-- **Side effects go through events / background jobs.** Write to the **outbox** and let the worker handle
-  email/SMS/projections; don't inline them in the request path (keeps core workflows focused and evolvable).
-- **Small functions — aim for ≤ 10 lines.** Extract helpers; a function should read as a short list of
-  intent-level steps.
-- **One level of abstraction per function.** Don't mix high-level orchestration and low-level detail in the
-  same function.
+Built for long-term maintainability. **Priority order** (never sacrifice architecture for short-term
+speed): **Correctness → Maintainability → Readability → Testability → Performance → DX.** The canonical,
+exhaustive version is [development-guide.md → Appendix A](../eventa-docs/05-development/development-guide.md);
+this is the enforced summary. (Note: the standard is written stack-adapted — we use **Drizzle**, not
+TypeORM/entities.)
+
+**SOLID & responsibilities**
+- **Single Responsibility** — one job per class: controller = HTTP; service = orchestration; repository =
+  DB (Drizzle); `toXResponse` mapper = DTO conversion; DTO/validator = validation; guard/policy = authz +
+  business rules; factory = construction. Never mix.
+- **Dependency Inversion** — depend on abstractions (injected services, a repository, provider ports /
+  injection tokens), not concretions. *(Current gap: repos are injected as concrete classes — acceptable in
+  Nest DI; introduce port interfaces when a second impl or heavy mocking appears.)*
+- **Open/Closed** — extend via strategy/polymorphism, not long `if/else`; don't edit working business logic
+  when you can extend it.
+
+**Structure & layering**
+- **Feature-first** — `src/modules/<feature>/` owns its `controller` · `service` · `repository` · `dto` ·
+  `events` (and, as it grows: `validators/`, `policies/`, `mappers/`, `listeners/`, `interfaces/`,
+  `use-cases/`). **Never** top-level `controllers/`·`services/` layer folders. DB schema is centralized in
+  `src/db/schema` (Drizzle; the api owns it).
+- **Thin controllers** — validate · authenticate · authorize · call service · return. **No business logic.**
+- **Services orchestrate** — no SQL, HTTP calls, email, or storage code inside a service; delegate to
+  repositories / provider services.
+- **Repository pattern** — all DB access lives in repositories with **descriptive** methods
+  (`findValidSession`, `getPermissions`), never Drizzle queries in a service.
+- **DTOs at the edge** — never return raw Drizzle row/schema types; map request → domain → response DTO
+  (`toMeResponse`). Validate every input with **class-validator** DTOs (never trust the client).
+
+**Domain & correctness**
+- **Business rules live in a policy / domain service / validator** — never scattered in controllers or inlined.
+- **Custom, meaningful exceptions** — throw `DomainException` (factories `.notFound()`/`.forbidden()`/
+  `.conflict()`/`.validation()`) with a stable `ErrorCode`; never leak internals.
+- **Enums over magic strings** (`pgEnum`, `ErrorCode`); **constants over magic numbers** (module-level `const`).
+- **Transactions for multi-table writes** — use `withTenant(db, orgId, cb)` / `db.transaction` (also sets
+  `SET LOCAL app.current_org` for RLS).
+- **Side effects via domain events / background jobs** — emit outbox events (→ RabbitMQ → `eventa-worker`)
+  for email/SMS/notifications/audit/ERP-sync/reports; keep the request path focused. *(Current: audit +
+  last-active are inline until the worker lands.)*
+
+**Cross-cutting**
+- **Config only via `ConfigService`** (zod-validated `Env`) — never read `process.env` outside the env schema.
+- **Logging via the Nest/pino `Logger`** — never `console.log` in app code; every line carries the
+  correlation id (+ user/org/timing where useful). **Never log secrets/tokens/passwords** (pino redacts auth
+  headers/cookies).
+- **DI budget** — a service with more than ~6 injected deps is a design smell; split responsibilities.
+- **No circular dependencies** — extract shared logic or publish an event.
+- **Infrastructure behind adapters** — domain code must not import AWS/email/DB/HTTP clients directly; reach
+  them through injected services (argon2 → `PasswordService`, jwt → `TokenService`, Drizzle → repository).
+
+**Methods, TypeScript, naming**
+- **Small methods** — **house target ≤ 10 lines**, ~40 hard ceiling; extract private methods over giant
+  functions; **one level of abstraction** each.
+- **TypeScript** — `readonly` where possible, async/await, optional chaining, nullish coalescing. Avoid
+  `any`, `@ts-ignore`, **nested ternaries**, deep nesting. *(Repo tsconfig is only partly strict today —
+  `noImplicitAny:false`; full `strict` is the target — see Config gotchas.)*
+- **Explicit names** — `IdentityRepository`, `PasswordService`, `JwtAuthGuard`. Avoid `Helper`/`Util`/
+  `Manager`/`CommonService`/`GeneralService`.
+
+**API, data, security**
+- **REST** under `/api/v1`; **consistent response format** (standard error envelope; lists paginated);
+  correct HTTP status codes.
+- **Postgres/Drizzle** — explicit FKs/relations; **paginate** list endpoints; index searchable columns;
+  transactions for multi-table writes; no N+1; no business logic in schema; never expose schema types.
+- **Security** — validate + sanitize input; parameterized queries (Drizzle); enforce authz **server-side**;
+  never expose secrets; never log PANs/passwords/tokens; PCI SAQ-A (Stripe hosted fields).
+
+**Review checklist (before finishing a task):** SRP/SOLID respected · no duplicated code · no magic
+strings/numbers · DTOs used · validation added · logging where useful · meaningful exceptions · repository
+pattern respected · no business logic in controllers · tenant scoping + idempotency on money paths · tests
+updated if behavior changed.
+
+**When unsure** — prefer maintainability over clever code; **ask before architectural changes**; don't
+refactor unrelated code while implementing a feature.
 
 ## Contracts with sibling repos (no shared package)
 
