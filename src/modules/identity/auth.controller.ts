@@ -10,12 +10,14 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
-  ApiNoContentResponse,
+  ApiOkResponse,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
+import { ResponseMessage } from '../../common/decorators/response-message.decorator';
+import { ApiErrorDto } from '../../common/errors/error-envelope';
 import { ApiData } from '../../common/http/api-data.decorator';
 import { AuthService } from './auth.service';
 import type { AuthContext } from './auth.types';
@@ -35,8 +37,12 @@ export class AuthController {
   @Public()
   @Post('auth/login')
   @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Signed in successfully.')
   @ApiData(LoginResponseDto)
-  @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
+  @ApiUnauthorizedResponse({
+    description: 'Invalid credentials',
+    type: ApiErrorDto,
+  })
   async login(
     @Body() dto: LoginDto,
     @Req() req: Request,
@@ -62,8 +68,12 @@ export class AuthController {
   @Public()
   @Post('auth/refresh')
   @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Access token refreshed.')
   @ApiData(RefreshResponseDto)
-  @ApiUnauthorizedResponse({ description: 'Invalid or revoked refresh token' })
+  @ApiUnauthorizedResponse({
+    description: 'Invalid or revoked refresh token',
+    type: ApiErrorDto,
+  })
   async refresh(@Body() dto: RefreshDto): Promise<RefreshResponseDto> {
     const result = await this.auth.refresh(dto.refreshToken);
     return {
@@ -74,6 +84,7 @@ export class AuthController {
   }
 
   @Get('auth/me')
+  @ResponseMessage('Profile retrieved successfully.')
   @ApiBearerAuth()
   @ApiData(MeResponseDto)
   me(@CurrentAuth() auth: AuthContext): Promise<MeResponseDto> {
@@ -81,9 +92,11 @@ export class AuthController {
   }
 
   @Delete('session')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @ResponseMessage('Signed out successfully.')
   @ApiBearerAuth()
-  @ApiNoContentResponse({ description: 'Signed out (refresh session revoked)' })
+  @ApiOkResponse({
+    description: 'Signed out (refresh session revoked); data is null',
+  })
   logout(@CurrentAuth() auth: AuthContext): Promise<void> {
     return this.auth.logout(auth);
   }

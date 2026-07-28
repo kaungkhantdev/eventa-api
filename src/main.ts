@@ -1,8 +1,9 @@
-import { type INestApplication, ValidationPipe } from '@nestjs/common';
+import { type INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
+import { buildValidationPipe } from './common/http/validation';
 import type { Env } from './config/env.validation';
 import { setupOpenApi } from './openapi';
 
@@ -15,14 +16,7 @@ function resolveCorsOrigins(config: TypedConfig): true | string[] {
 
 function configureApp(app: INestApplication, config: TypedConfig): void {
   app.setGlobalPrefix('api/v1');
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-      transformOptions: { enableImplicitConversion: true },
-    }),
-  );
+  app.useGlobalPipes(buildValidationPipe());
   app.enableShutdownHooks();
   app.enableCors({ origin: resolveCorsOrigins(config), credentials: true });
 }

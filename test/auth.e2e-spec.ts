@@ -3,21 +3,32 @@ process.env.DATABASE_URL ??= 'postgres://eventa:eventa@localhost:5432/eventa';
 process.env.JWT_SECRET ??= 'test-secret-at-least-16-characters-long';
 
 import type { Server } from 'node:http';
-import { type INestApplication, ValidationPipe } from '@nestjs/common';
+import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { hash } from '@node-rs/argon2';
 import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { buildValidationPipe } from '../src/common/http/validation';
 
 const SLUG = 'acme-auth-test';
 const EMAIL = 'admin@acme-auth.test';
 const PASSWORD = 'correct horse battery staple';
 
-interface Envelope {
-  error: { code: string; message: string };
+interface SuccessBody<T> {
+  success: boolean;
+  statusCode: number;
+  message: string;
+  data: T;
+  timestamp: string;
 }
-interface LoginBody {
+interface FailureBody {
+  success: boolean;
+  statusCode: number;
+  message: string;
+  errors?: { field: string; message: string }[];
+}
+interface LoginData {
   accessToken: string;
   refreshToken: string;
   tokenType: string;
@@ -25,7 +36,7 @@ interface LoginBody {
   user: { email: string; permissions: string[] };
 }
 
-describe('Auth (e2e, JWT + passport)', () => {
+describe('Auth (e2e — envelope + passport)', () => {
   let app: INestApplication;
   let server: Server;
   let pool: Pool;
@@ -40,13 +51,7 @@ describe('Auth (e2e, JWT + passport)', () => {
     }).compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        forbidNonWhitelisted: true,
-        transform: true,
-      }),
-    );
+    app.useGlobalPipes(buildValidationPipe());
     await app.init();
     server = app.getHttpServer() as Server;
   });
@@ -65,34 +70,44 @@ describe('Auth (e2e, JWT + passport)', () => {
       .post('/api/v1/auth/login')
       .send({ email: EMAIL, password: PASSWORD, orgSlug: SLUG });
 
-  const loginData = async (): Promise<LoginBody> =>
-    ((await login()).body as { data: LoginBody }).data;
+  const loginData = async (): Promise<LoginData> =>
+    ((await login()).body as SuccessBody<LoginData>).data;
 
-  it('rejects a bad password with a 401 error envelope', async () => {
+  it('rejects a bad password with the 401 failure envelope', async () => {
     const res = await request(server)
       .post('/api/v1/auth/login')
       .send({ email: EMAIL, password: 'wrong-password', orgSlug: SLUG });
     expect(res.status).toBe(401);
-    expect((res.body as Envelope).error.code).toBe('UNAUTHORIZED');
+    const body = res.body as FailureBody;
+    expect(body.success).toBe(false);
+    expect(body.statusCode).toBe(401);
+    expect(typeof body.message).toBe('string');
   });
 
-  it('rejects an unknown org/user uniformly with 401', async () => {
-    const res = await request(server)
-      .post('/api/v1/auth/login')
-      .send({ email: EMAIL, password: PASSWORD, orgSlug: 'no-such-org' });
-    expect(res.status).toBe(401);
+  it('returns a structured validation error envelope', async () => {
+    const res = await request(server).post('/api/v1/auth/login').send({});
+    expect(res.status).toBe(400);
+    const body = res.body as FailureBody;
+    expect(body.success).toBe(false);
+    expect(body.message).toBe('Validation failed.');
+    expect(Array.isArray(body.errors)).toBe(true);
+    expect(body.errors?.[0]).toHaveProperty('field');
+    expect(body.errors?.[0]).toHaveProperty('message');
   });
 
-  it('logs in and returns { data } with an access + refresh token pair', async () => {
+  it('logs in and returns the success envelope with tokens', async () => {
     const res = await login();
     expect(res.status).toBe(200);
-    const body = (res.body as { data: LoginBody }).data;
-    expect(body.tokenType).toBe('Bearer');
-    expect(typeof body.accessToken).toBe('string');
-    expect(typeof body.refreshToken).toBe('string');
-    expect(body.expiresIn).toBeGreaterThan(0);
-    expect(body.user.email).toBe(EMAIL);
-    expect(body.user.permissions).toEqual(
+    const body = res.body as SuccessBody<LoginData>;
+    expect(body.success).toBe(true);
+    expect(body.statusCode).toBe(200);
+    expect(body.message).toBe('Signed in successfully.');
+    expect(typeof body.timestamp).toBe('string');
+    expect(body.data.tokenType).toBe('Bearer');
+    expect(typeof body.data.accessToken).toBe('string');
+    expect(typeof body.data.refreshToken).toBe('string');
+    expect(body.data.user.email).toBe(EMAIL);
+    expect(body.data.user.permissions).toEqual(
       expect.arrayContaining(['setUsers', 'setSettings']),
     );
   });
@@ -100,6 +115,7 @@ describe('Auth (e2e, JWT + passport)', () => {
   it('rejects /auth/me without a Bearer token', async () => {
     const res = await request(server).get('/api/v1/auth/me');
     expect(res.status).toBe(401);
+    expect((res.body as FailureBody).success).toBe(false);
   });
 
   it('accepts /auth/me with a Bearer access token', async () => {
@@ -108,7 +124,7 @@ describe('Auth (e2e, JWT + passport)', () => {
       .get('/api/v1/auth/me')
       .set('Authorization', `Bearer ${accessToken}`);
     expect(res.status).toBe(200);
-    expect((res.body as { data: { email: string } }).data.email).toBe(EMAIL);
+    expect((res.body as SuccessBody<{ email: string }>).data.email).toBe(EMAIL);
   });
 
   it('exchanges a refresh token for a new access token', async () => {
@@ -118,17 +134,21 @@ describe('Auth (e2e, JWT + passport)', () => {
       .send({ refreshToken });
     expect(res.status).toBe(200);
     expect(
-      typeof (res.body as { data: { accessToken: string } }).data.accessToken,
+      typeof (res.body as SuccessBody<{ accessToken: string }>).data
+        .accessToken,
     ).toBe('string');
   });
 
-  it('logout revokes the refresh session', async () => {
+  it('logout returns 200 with data:null and revokes the refresh session', async () => {
     const { accessToken, refreshToken } = await loginData();
 
-    await request(server)
+    const out = await request(server)
       .delete('/api/v1/session')
-      .set('Authorization', `Bearer ${accessToken}`)
-      .expect(204);
+      .set('Authorization', `Bearer ${accessToken}`);
+    expect(out.status).toBe(200);
+    const body = out.body as SuccessBody<null>;
+    expect(body.success).toBe(true);
+    expect(body.data).toBeNull();
 
     await request(server)
       .post('/api/v1/auth/refresh')

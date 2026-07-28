@@ -1,31 +1,20 @@
 import { ApiProperty } from '@nestjs/swagger';
 
-/** The single response shape for every error (development-guide §6, §7). */
-export interface ErrorEnvelope {
-  error: {
-    code: string;
-    message: string;
-    details?: unknown;
-    correlationId?: string;
-  };
+export class FieldErrorDto {
+  @ApiProperty({ example: 'email' }) field!: string;
+  @ApiProperty({ example: 'Email is invalid.' }) message!: string;
 }
 
-/** Swagger/OpenAPI documentation of {@link ErrorEnvelope}. */
-export class ErrorBodyDto {
-  @ApiProperty({ example: 'NOT_FOUND' })
-  code!: string;
-
-  @ApiProperty({ example: 'Resource not found' })
-  message!: string;
-
-  @ApiProperty({ required: false, nullable: true })
-  details?: unknown;
-
-  @ApiProperty({ required: false, example: 'a1b2c3d4-...' })
-  correlationId?: string;
-}
-
-export class ErrorResponseDto implements ErrorEnvelope {
-  @ApiProperty({ type: ErrorBodyDto })
-  error!: ErrorBodyDto;
+/** Failure envelope produced by the global exception filter. */
+export class ApiErrorDto {
+  @ApiProperty({ example: false }) success!: boolean;
+  @ApiProperty({ example: 400 }) statusCode!: number;
+  @ApiProperty({ example: 'Validation failed.' }) message!: string;
+  @ApiProperty({
+    required: false,
+    type: [FieldErrorDto],
+    description: 'Present on validation (400) errors only',
+  })
+  errors?: FieldErrorDto[];
+  @ApiProperty({ example: '2026-07-28T10:00:00Z' }) timestamp!: string;
 }
