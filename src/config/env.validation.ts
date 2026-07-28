@@ -15,6 +15,11 @@ export const envSchema = z.object({
   REDIS_URL: z.string().min(1).optional(),
   RABBITMQ_URL: z.string().min(1).optional(),
 
+  // Outbox relay (separate entrypoint)
+  RABBITMQ_EXCHANGE: z.string().default('eventa.events'),
+  OUTBOX_POLL_MS: z.coerce.number().int().positive().default(1000),
+  OUTBOX_BATCH: z.coerce.number().int().positive().default(100),
+
   // Auth (JWT — access + refresh)
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
   JWT_ACCESS_TTL: z.coerce.number().int().positive().default(900), // seconds (15m)
