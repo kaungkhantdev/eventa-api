@@ -5,6 +5,7 @@ import type {
   RefreshTokenClaims,
   UserRow,
 } from './auth.types';
+import { OutboxPort } from '../platform/outbox.port';
 import { IdentityRepository } from './identity.repository';
 import { PasswordService } from './password.service';
 import { TokenService } from './token.service';
@@ -46,6 +47,7 @@ describe('AuthService', () => {
   let repo: jest.Mocked<IdentityRepository>;
   let passwords: jest.Mocked<PasswordService>;
   let tokens: jest.Mocked<TokenService>;
+  let outbox: jest.Mocked<OutboxPort>;
   let service: AuthService;
 
   beforeEach(() => {
@@ -71,7 +73,10 @@ describe('AuthService', () => {
       accessTtlSeconds: 900,
       refreshTtlSeconds: 604800,
     } as unknown as jest.Mocked<TokenService>;
-    service = new AuthService(repo, passwords, tokens, clock);
+    outbox = {
+      enqueue: jest.fn().mockResolvedValue(undefined),
+    };
+    service = new AuthService(repo, passwords, tokens, clock, outbox);
   });
 
   describe('login', () => {
@@ -121,7 +126,21 @@ describe('AuthService', () => {
       expect(tokens.signAccess).toHaveBeenCalledWith(
         expect.objectContaining({ sessionId: 'sess-1', persona: 'admin' }),
       );
-      expect(repo.recordAudit).toHaveBeenCalledWith(
+    });
+
+    it('enqueues an identity.signed_in outbox event and does NOT audit the sign-in inline', async () => {
+      repo.findLoginUser.mockResolvedValue({ user: userRow(), org });
+      passwords.verify.mockResolvedValue(true);
+      repo.createSession.mockResolvedValue('sess-1');
+
+      await service.login(input);
+
+      const [event] = outbox.enqueue.mock.calls[0];
+      expect(event.routingKey).toBe('identity.signed_in');
+      expect(event.organizationId).toBe(1);
+      expect(event.aggregateId).toBe('u1');
+      expect(event.payload).toMatchObject({ userId: 'u1', device: 'jest' });
+      expect(repo.recordAudit).not.toHaveBeenCalledWith(
         expect.objectContaining({ type: 'signin' }),
       );
     });

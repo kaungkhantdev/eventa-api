@@ -2,6 +2,8 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { DomainException } from '../../common/errors/domain.exception';
 import { ErrorCode } from '../../common/errors/error-codes';
 import { Clock } from '../../common/time/clock';
+import { OutboxPort } from '../platform/outbox.port';
+import { signedInEvent } from './events/signed-in.event';
 import type {
   AuthContext,
   OrganizationRow,
@@ -39,6 +41,7 @@ export class AuthService {
     private readonly passwords: PasswordService,
     private readonly tokens: TokenService,
     private readonly clock: Clock,
+    private readonly outbox: OutboxPort,
   ) {}
 
   async login(input: LoginInput): Promise<LoginResult> {
@@ -131,13 +134,15 @@ export class AuthService {
     input: LoginInput,
   ): Promise<void> {
     await this.repo.touchLastActive(found.user.id);
-    await this.repo.recordAudit({
-      organizationId: found.org.id,
-      type: 'signin',
-      title: `Signed in from ${input.device}`,
-      actorUserId: found.user.id,
-      ip: input.ip,
-    });
+    await this.outbox.enqueue(
+      signedInEvent({
+        organizationId: found.org.id,
+        userId: found.user.id,
+        device: input.device,
+        ip: input.ip,
+        occurredAt: this.clock.now().toISOString(),
+      }),
+    );
   }
 
   private async issueTokens(

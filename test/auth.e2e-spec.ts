@@ -73,6 +73,14 @@ describe('Auth (e2e — envelope + passport)', () => {
   const loginData = async (): Promise<LoginData> =>
     ((await login()).body as SuccessBody<LoginData>).data;
 
+  const countOutbox = async (): Promise<number> => {
+    const r = await pool.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM outbox_events WHERE organization_id=$1 AND routing_key='identity.signed_in'`,
+      [orgId],
+    );
+    return r.rows[0].n;
+  };
+
   it('rejects a bad password with the 401 failure envelope', async () => {
     const res = await request(server)
       .post('/api/v1/auth/login')
@@ -110,6 +118,9 @@ describe('Auth (e2e — envelope + passport)', () => {
     expect(body.data.user.permissions).toEqual(
       expect.arrayContaining(['setUsers', 'setSettings']),
     );
+    // sign-in side effect is enqueued to the transactional outbox (the worker
+    // consumes it and writes the audit), not written inline on the request path.
+    expect(await countOutbox()).toBeGreaterThan(0);
   });
 
   it('rejects /auth/me without a Bearer token', async () => {
