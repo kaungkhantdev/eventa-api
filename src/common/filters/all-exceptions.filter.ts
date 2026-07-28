@@ -19,6 +19,13 @@ interface Normalized {
   details?: unknown;
 }
 
+type ErrorBody = {
+  code?: string;
+  message?: string | string[];
+  details?: unknown;
+  error?: string;
+};
+
 // HTTP status → stable error code. Computed keys keep status handling in plain
 // numbers (avoids enum/number comparisons) and drops the need for a switch.
 const CODE_BY_STATUS: Record<number, string> = {
@@ -50,66 +57,81 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const res = host.switchToHttp().getResponse<Response>();
     const { status, code, message, details } = this.normalize(exception);
     const correlationId = this.context.correlationId;
-
-    if (status >= HTTP_SERVER_ERROR) {
-      this.logger.error(
-        { correlationId, code, status },
-        exception instanceof Error ? exception.stack : String(exception),
-      );
-    } else {
-      this.logger.warn({ correlationId, code, status, message });
-    }
-
+    this.log({ status, code, message, details }, correlationId, exception);
     const body: ErrorEnvelope = {
       error: { code, message, details, correlationId },
     };
     res.status(status).json(body);
   }
 
+  private log(
+    n: Normalized,
+    correlationId: string | undefined,
+    exception: unknown,
+  ): void {
+    if (n.status >= HTTP_SERVER_ERROR) {
+      const detail =
+        exception instanceof Error ? exception.stack : String(exception);
+      this.logger.error(
+        { correlationId, code: n.code, status: n.status },
+        detail,
+      );
+    } else {
+      this.logger.warn({
+        correlationId,
+        code: n.code,
+        status: n.status,
+        message: n.message,
+      });
+    }
+  }
+
   private normalize(exception: unknown): Normalized {
-    if (exception instanceof HttpException) {
-      const status = exception.getStatus();
-      const response = exception.getResponse();
+    if (!(exception instanceof HttpException)) return this.unknownError();
+    const response = exception.getResponse();
+    if (typeof response === 'string') {
+      return this.fromString(exception.getStatus(), response);
+    }
+    return this.fromObject(exception, response);
+  }
 
-      if (typeof response === 'string') {
-        return { status, code: this.statusToCode(status), message: response };
-      }
+  private fromObject(exception: HttpException, body: ErrorBody): Normalized {
+    const status = exception.getStatus();
+    if (typeof body.code === 'string') return this.fromDomain(status, body);
+    return this.fromNest(status, body, exception);
+  }
 
-      const body = response as {
-        code?: string;
-        message?: string | string[];
-        details?: unknown;
-        error?: string;
-      };
+  /** Our DomainException shape: { code, message, details }. */
+  private fromDomain(status: number, body: ErrorBody): Normalized {
+    const message = typeof body.message === 'string' ? body.message : 'Error';
+    return { status, code: body.code!, message, details: body.details };
+  }
 
-      // DomainException shape: { code, message, details }
-      if (typeof body.code === 'string') {
-        return {
-          status,
-          code: body.code,
-          message: typeof body.message === 'string' ? body.message : 'Error',
-          details: body.details,
-        };
-      }
-
-      // Nest built-in / ValidationPipe shape: { statusCode, message, error }
-      const isValidation =
-        status === HTTP_BAD_REQUEST && Array.isArray(body.message);
+  /** Nest built-in / ValidationPipe shape: { statusCode, message, error }. */
+  private fromNest(
+    status: number,
+    body: ErrorBody,
+    exception: HttpException,
+  ): Normalized {
+    if (status === HTTP_BAD_REQUEST && Array.isArray(body.message)) {
       return {
         status,
-        code: isValidation
-          ? ErrorCode.VALIDATION_ERROR
-          : this.statusToCode(status),
-        message: isValidation
-          ? 'Validation failed'
-          : Array.isArray(body.message)
-            ? body.message.join(', ')
-            : (body.message ?? body.error ?? exception.message),
-        details: Array.isArray(body.message) ? body.message : undefined,
+        code: ErrorCode.VALIDATION_ERROR,
+        message: 'Validation failed',
+        details: body.message,
       };
     }
+    const message = Array.isArray(body.message)
+      ? body.message.join(', ')
+      : (body.message ?? body.error ?? exception.message);
+    return { status, code: this.statusToCode(status), message };
+  }
 
-    // Unknown / programmer error — do not leak internals.
+  private fromString(status: number, message: string): Normalized {
+    return { status, code: this.statusToCode(status), message };
+  }
+
+  private unknownError(): Normalized {
     return {
       status: HttpStatus.INTERNAL_SERVER_ERROR,
       code: ErrorCode.INTERNAL_ERROR,

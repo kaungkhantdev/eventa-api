@@ -1,4 +1,4 @@
-import { ValidationPipe } from '@nestjs/common';
+import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from 'nestjs-pino';
@@ -6,12 +6,14 @@ import { AppModule } from './app.module';
 import type { Env } from './config/env.validation';
 import { setupOpenApi } from './openapi';
 
-async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
-  app.useLogger(app.get(Logger));
+type TypedConfig = ConfigService<Env, true>;
 
-  const config = app.get<ConfigService<Env, true>>(ConfigService);
+function resolveCorsOrigins(config: TypedConfig): true | string[] {
+  const origins = config.get('CORS_ORIGINS', { infer: true });
+  return origins === '*' ? true : origins.split(',').map((o) => o.trim());
+}
 
+function configureApp(app: INestApplication, config: TypedConfig): void {
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(
     new ValidationPipe({
@@ -22,13 +24,15 @@ async function bootstrap(): Promise<void> {
     }),
   );
   app.enableShutdownHooks();
+  app.enableCors({ origin: resolveCorsOrigins(config), credentials: true });
+}
 
-  const origins = config.get('CORS_ORIGINS', { infer: true });
-  app.enableCors({
-    origin: origins === '*' ? true : origins.split(',').map((o) => o.trim()),
-    credentials: true,
-  });
+async function bootstrap(): Promise<void> {
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  app.useLogger(app.get(Logger));
 
+  const config = app.get<TypedConfig>(ConfigService);
+  configureApp(app, config);
   setupOpenApi(app, config);
 
   const port = config.get('PORT', { infer: true });
