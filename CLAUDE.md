@@ -189,10 +189,14 @@ TypeORM/entities.)
   `Manager`/`CommonService`/`GeneralService`.
 
 **API, data, security**
-- **REST** under `/api/v1`; **consistent response format** — success responses are wrapped as `{ data }`
-  (or `{ data, meta }` for a `Paginated<T>`) by the global `ResponseInterceptor`; errors are
-  `{ error: { code, message, details, correlationId } }` from the filter; opt a route out with
-  `@SkipResponseEnvelope` (health probes do). Correct HTTP status codes.
+- **REST** under `/api/v1`; **one response envelope for every endpoint**. Success =
+  `{ success, statusCode, message, data, [meta], timestamp }` (global `ResponseInterceptor`;
+  `@ResponseMessage('…')` sets the message; return a `Paginated<T>` for lists → `meta` with
+  `page/limit/total/totalPages/hasNext/hasPrevious`). Failure =
+  `{ success:false, statusCode, message, [errors], timestamp }` (filter; validation → structured
+  `errors:[{field,message}]` via `buildValidationPipe`; 500 → generic message, internals never leaked).
+  `correlationId` is on the `x-correlation-id` header, not the body. Opt out with `@SkipResponseEnvelope`
+  (health probes). Correct HTTP status codes.
 - **Auth** is **passport-jwt**: `JwtStrategy` verifies the Bearer access token; `JwtAuthGuard` (global,
   `AuthGuard('jwt')`) honours `@Public` and stamps tenant context; `TokenService` signs. Principal is on
   `req.user` — read it via `@CurrentAuth()`.
