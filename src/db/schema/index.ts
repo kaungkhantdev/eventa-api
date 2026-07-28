@@ -1,9 +1,11 @@
 // Drizzle schema barrel — the schema source of truth is
-// ../../../eventa-docs/04-architecture/entities.md (47 tables).
+// ../../../eventa-docs/04-architecture/entities.md.
 //
-// Domain tables land here one module at a time (identity, organization, events,
-// ticketing, registration, attendance, payments, engagement, meetings, platform).
-// `pnpm generate` diffs whatever is exported here into SQL migrations.
-//
-// Empty for now (foundation only): no domain tables translated yet.
-export {};
+// Grouped by bounded context; drizzle-kit diffs everything exported here into
+// SQL migrations, and the runtime `drizzle(pool, { schema })` picks it up.
+
+export * from './enums';
+export * from './organizations';
+export * from './identity'; // users, roles, permissions, role_permissions, memberships, auth_sessions, two_factors, recovery_codes
+export * from './settings'; // api_keys, notification_preferences
+export * from './platform'; // audit_events, outbox_events, webhook_events
