@@ -28,6 +28,13 @@ const PERMISSIONS = [
   { key: 'setUsers', group: 'Settings', label: 'Manage team' },
   { key: 'setSettings', group: 'Settings', label: 'Manage settings' },
 ] as const;
+// A few workspace categories so the event `categoryId` path is testable.
+// (color values are the `category_color` enum; icon is a Hugeicons slug.)
+const CATEGORIES = [
+  { name: 'Conference', icon: 'presentation-01', color: 'blue' },
+  { name: 'Workshop', icon: 'tools', color: 'amber' },
+  { name: 'Concert', icon: 'music-note-01', color: 'violet' },
+] as const;
 
 function databaseUrl(): string {
   const url = process.env.DATABASE_URL;
@@ -92,6 +99,18 @@ async function insertAdminUser(
   );
 }
 
+async function insertCategories(pool: Pool, orgId: number): Promise<void> {
+  console.log('[seed] categories (use one as `categoryId` on POST /events):');
+  for (const c of CATEGORIES) {
+    const res = await pool.query<{ id: string }>(
+      `INSERT INTO categories (organization_id, name, icon, color)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [orgId, c.name, c.icon, c.color],
+    );
+    console.log(`  ${c.name.padEnd(12)} id ${res.rows[0].id}`);
+  }
+}
+
 function printCredentials(): void {
   console.log('[seed] ready — sign in at /api/docs → POST /auth/login:');
   console.log(`  orgSlug   ${ORG.slug}`);
@@ -107,6 +126,7 @@ async function seed(): Promise<void> {
     await insertPermissions(pool);
     const roleId = await insertAdminRole(pool, orgId);
     await insertAdminUser(pool, orgId, roleId);
+    await insertCategories(pool, orgId);
     printCredentials();
   } finally {
     await pool.end();
