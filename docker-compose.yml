@@ -1,0 +1,48 @@
+# Local development backing services for eventa-api.
+# `docker compose up -d` → Postgres, Redis, RabbitMQ. Credentials match .env.example.
+# (In production these are managed infra provisioned from eventa-infra; this file is dev-only.)
+name: eventa
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: eventa
+      POSTGRES_PASSWORD: eventa
+      POSTGRES_DB: eventa
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U eventa -d eventa']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: eventa
+      RABBITMQ_DEFAULT_PASS: eventa
+    ports:
+      - '5672:5672' # AMQP
+      - '15672:15672' # management UI
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:

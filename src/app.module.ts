@@ -1,10 +1,34 @@
-import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
+import {
+  type MiddlewareConsumer,
+  Module,
+  type NestModule,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { LoggerModule } from 'nestjs-pino';
+import { CommonModule } from './common/common.module';
+import { CorrelationIdMiddleware } from './common/context/correlation-id.middleware';
+import { AppConfigModule } from './config/config.module';
+import type { Env } from './config/env.validation';
+import { buildLoggerOptions } from './config/logger.config';
+import { DatabaseModule } from './db/database.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
-  imports: [],
-  controllers: [AppController],
-  providers: [AppService],
+  imports: [
+    AppConfigModule,
+    LoggerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService<Env, true>) =>
+        buildLoggerOptions(config),
+    }),
+    DatabaseModule,
+    CommonModule,
+    HealthModule,
+  ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    // Establish correlation id + request context for every request.
+    consumer.apply(CorrelationIdMiddleware).forRoutes('*');
+  }
+}
