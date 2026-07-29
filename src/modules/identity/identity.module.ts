@@ -5,6 +5,9 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import type { Env } from '../../config/env.validation';
 import { PlatformModule } from '../platform/platform.module';
+import { AccessController } from './access/access.controller';
+import { AccessRepository } from './access/access.repository';
+import { AccessService } from './access/access.service';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -32,8 +35,10 @@ import { TokenService } from './token.service';
       }),
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, AccessController],
   providers: [
+    AccessService,
+    AccessRepository,
     AuthService,
     IdentityRepository,
     PasswordService,
