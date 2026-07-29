@@ -2,9 +2,12 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseIntPipe,
   Patch,
+  Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -21,6 +24,8 @@ import {
 } from '../decorators/require-permissions.decorator';
 import { PermissionsGuard } from '../guards/permissions.guard';
 import { AccessService } from './access.service';
+import { InviteMemberDto } from './dto/invite-member.dto';
+import { InviteResponseDto } from './dto/invite-response.dto';
 import { ListMembersQueryDto } from './dto/list-members.query.dto';
 import { MemberResponseDto } from './dto/member-response.dto';
 import { UpdateMemberDto } from './dto/update-member.dto';
@@ -43,6 +48,22 @@ export class MembersController {
     @Query() query: ListMembersQueryDto,
   ): Promise<Paginated<MemberResponseDto>> {
     return this.access.listMembers(auth.organizationId, query);
+  }
+
+  @Post()
+  @RequirePermissions(Permission.setUsers)
+  @HttpCode(HttpStatus.CREATED)
+  @ResponseMessage('Teammate invited.')
+  @ApiData(InviteResponseDto, HttpStatus.CREATED)
+  invite(
+    @CurrentAuth() auth: AuthContext,
+    @Body() dto: InviteMemberDto,
+  ): Promise<InviteResponseDto> {
+    return this.access.inviteMember(auth.organizationId, {
+      name: dto.name,
+      email: dto.email,
+      roleId: dto.roleId,
+    });
   }
 
   @Patch(':id')

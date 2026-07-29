@@ -33,3 +33,11 @@ export interface AccessTokenClaims extends BaseClaims {
 export interface RefreshTokenClaims extends BaseClaims {
   typ: 'refresh';
 }
+
+/** Claims of a workspace-invite token (accepted to set a password + activate). */
+export interface InviteTokenClaims {
+  sub: string; // userId
+  org: number; // organizationId
+  mid: number; // membership id
+  typ: 'invite';
+}

@@ -128,6 +128,47 @@ export class IdentityRepository {
       );
   }
 
+  /** An Invited membership (+ the user's email), or null once accepted/absent.
+   *  Pre-auth lookup (the invitee isn't signed in) — not tenant-scoped. */
+  async findInvitedMembership(
+    membershipId: number,
+  ): Promise<{ userId: string; organizationId: number; email: string } | null> {
+    const rows = await this.db
+      .select({
+        userId: memberships.userId,
+        organizationId: memberships.organizationId,
+        email: users.email,
+      })
+      .from(memberships)
+      .innerJoin(users, eq(users.id, memberships.userId))
+      .where(
+        and(
+          eq(memberships.id, membershipId),
+          eq(memberships.status, 'Invited'),
+        ),
+      )
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
+  /** Set the invitee's password and flip both the user and membership to Active. */
+  async activateInvite(
+    userId: string,
+    membershipId: number,
+    passwordHash: string,
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(users)
+        .set({ passwordHash, status: 'Active' })
+        .where(eq(users.id, userId));
+      await tx
+        .update(memberships)
+        .set({ status: 'Active', joinedAt: new Date() })
+        .where(eq(memberships.id, membershipId));
+    });
+  }
+
   async touchLastActive(userId: string): Promise<void> {
     await this.db
       .update(users)

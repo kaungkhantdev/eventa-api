@@ -31,3 +31,10 @@ export interface ListMembersOptions {
   limit: number;
   offset: number;
 }
+
+/** Payload to invite a teammate (admin side). */
+export interface InviteMemberInput {
+  name: string;
+  email: string;
+  roleId: number;
+}

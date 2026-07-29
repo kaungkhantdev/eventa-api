@@ -4,15 +4,25 @@ import { JwtService } from '@nestjs/jwt';
 import type { Env } from '../../config/env.validation';
 import type {
   AccessTokenClaims,
+  InviteTokenClaims,
   Persona,
   RefreshTokenClaims,
 } from './auth.types';
+
+/** Workspace invites are valid for 7 days. */
+const INVITE_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 export interface TokenSubject {
   userId: string;
   organizationId: number;
   sessionId: string;
   persona: Persona;
+}
+
+export interface InviteSubject {
+  userId: string;
+  organizationId: number;
+  membershipId: number;
 }
 
 /**
@@ -57,11 +67,25 @@ export class TokenService {
     return this.jwt.signAsync(claims, { expiresIn: this.refreshTtlSeconds });
   }
 
+  signInvite(s: InviteSubject): Promise<string> {
+    const claims: InviteTokenClaims = {
+      sub: s.userId,
+      org: s.organizationId,
+      mid: s.membershipId,
+      typ: 'invite',
+    };
+    return this.jwt.signAsync(claims, { expiresIn: INVITE_TTL_SECONDS });
+  }
+
   verifyAccess(token: string): Promise<AccessTokenClaims> {
     return this.jwt.verifyAsync<AccessTokenClaims>(token);
   }
 
   verifyRefresh(token: string): Promise<RefreshTokenClaims> {
     return this.jwt.verifyAsync<RefreshTokenClaims>(token);
+  }
+
+  verifyInvite(token: string): Promise<InviteTokenClaims> {
+    return this.jwt.verifyAsync<InviteTokenClaims>(token);
   }
 }

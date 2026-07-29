@@ -1,4 +1,5 @@
 import { DomainException } from '../../../common/errors/domain.exception';
+import { TokenService } from '../token.service';
 import { AccessRepository } from './access.repository';
 import { AccessService } from './access.service';
 
@@ -6,6 +7,7 @@ const orgId = 1;
 
 describe('AccessService', () => {
   let repo: jest.Mocked<AccessRepository>;
+  let tokens: jest.Mocked<TokenService>;
   let service: AccessService;
 
   beforeEach(() => {
@@ -19,8 +21,13 @@ describe('AccessService', () => {
       memberExists: jest.fn(),
       updateMemberRole: jest.fn().mockResolvedValue(undefined),
       getMember: jest.fn(),
+      emailInOrg: jest.fn(),
+      createInvitedMember: jest.fn(),
     } as unknown as jest.Mocked<AccessRepository>;
-    service = new AccessService(repo);
+    tokens = {
+      signInvite: jest.fn().mockResolvedValue('invite.jwt'),
+    } as unknown as jest.Mocked<TokenService>;
+    service = new AccessService(repo, tokens);
   });
 
   describe('listRoles', () => {
@@ -152,6 +159,62 @@ describe('AccessService', () => {
 
       expect(repo.updateMemberRole).toHaveBeenCalledWith(orgId, 10, 7);
       expect(result).toMatchObject({ id: 10, roleId: 7, role: 'Organizer' });
+    });
+  });
+
+  describe('inviteMember', () => {
+    const input = { name: 'New Person', email: 'new@acme.test', roleId: 7 };
+
+    it('rejects an unknown role with 404 (no create)', async () => {
+      repo.roleExists.mockResolvedValue(false);
+
+      const err = await service
+        .inviteMember(orgId, input)
+        .catch((e: unknown) => e);
+
+      expect((err as DomainException).getStatus()).toBe(404);
+      expect(repo.createInvitedMember).not.toHaveBeenCalled();
+    });
+
+    it('rejects a duplicate email with 409 (no create)', async () => {
+      repo.roleExists.mockResolvedValue(true);
+      repo.emailInOrg.mockResolvedValue(true);
+
+      const err = await service
+        .inviteMember(orgId, input)
+        .catch((e: unknown) => e);
+
+      expect((err as DomainException).getStatus()).toBe(409);
+      expect(repo.createInvitedMember).not.toHaveBeenCalled();
+    });
+
+    it('creates an invited member and returns it with an invite token', async () => {
+      repo.roleExists.mockResolvedValue(true);
+      repo.emailInOrg.mockResolvedValue(false);
+      repo.createInvitedMember.mockResolvedValue({
+        membershipId: 11,
+        userId: 'u9',
+      });
+      repo.getMember.mockResolvedValue({
+        id: 11,
+        userId: 'u9',
+        name: 'New Person',
+        email: 'new@acme.test',
+        roleId: 7,
+        role: 'Organizer',
+        status: 'Invited',
+      });
+
+      const result = await service.inviteMember(orgId, input);
+
+      expect(repo.createInvitedMember).toHaveBeenCalledWith(orgId, input);
+      expect(tokens.signInvite).toHaveBeenCalledWith({
+        userId: 'u9',
+        organizationId: orgId,
+        membershipId: 11,
+      });
+      expect(result.inviteToken).toBe('invite.jwt');
+      expect(result.member).toMatchObject({ id: 11, status: 'Invited' });
     });
   });
 

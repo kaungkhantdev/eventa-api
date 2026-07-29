@@ -2,8 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { DomainException } from '../../../common/errors/domain.exception';
 import { Paginated } from '../../../common/http/paginated';
 import type { PermissionKey } from '../decorators/require-permissions.decorator';
+import { TokenService } from '../token.service';
 import { AccessRepository } from './access.repository';
 import type {
+  InviteMemberInput,
   ListMembersQuery,
   MemberRow,
   PermissionCatalogItem,
@@ -16,7 +18,38 @@ const MAX_LIMIT = 100;
 /** RBAC management rules: view the catalog/roles and grant/revoke on a role. */
 @Injectable()
 export class AccessService {
-  constructor(private readonly repo: AccessRepository) {}
+  constructor(
+    private readonly repo: AccessRepository,
+    private readonly tokens: TokenService,
+  ) {}
+
+  /** Invite a teammate: create an Invited user + membership, return an invite token. */
+  async inviteMember(
+    organizationId: number,
+    input: InviteMemberInput,
+  ): Promise<{ member: MemberRow; inviteToken: string }> {
+    if (!(await this.repo.roleExists(organizationId, input.roleId))) {
+      throw DomainException.notFound(
+        `Role ${input.roleId} not found in this workspace.`,
+      );
+    }
+    if (await this.repo.emailInOrg(organizationId, input.email)) {
+      throw DomainException.conflict(
+        'A member with this email already exists in the workspace.',
+      );
+    }
+    const { membershipId, userId } = await this.repo.createInvitedMember(
+      organizationId,
+      input,
+    );
+    const inviteToken = await this.tokens.signInvite({
+      userId,
+      organizationId,
+      membershipId,
+    });
+    const member = await this.repo.getMember(organizationId, membershipId);
+    return { member, inviteToken };
+  }
 
   listPermissions(): Promise<PermissionCatalogItem[]> {
     return this.repo.listPermissions();

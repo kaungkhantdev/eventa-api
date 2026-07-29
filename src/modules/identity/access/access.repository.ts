@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { DomainException } from '../../../common/errors/domain.exception';
 import { DRIZZLE, type Database } from '../../../db/drizzle.constants';
 import {
   memberships,
@@ -10,8 +11,10 @@ import {
 } from '../../../db/schema';
 import { withTenant } from '../../../db/tenant';
 import type { Tx } from '../../../db/tenant';
+import { Persona } from '../auth.types';
 import type { PermissionKey } from '../decorators/require-permissions.decorator';
 import type {
+  InviteMemberInput,
   ListMembersOptions,
   MemberRow,
   PermissionCatalogItem,
@@ -160,6 +163,68 @@ export class AccessRepository {
         )
         .limit(1);
       return row;
+    });
+  }
+
+  /** Is this email already a console member of the org? */
+  async emailInOrg(organizationId: number, email: string): Promise<boolean> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({ id: users.id })
+        .from(users)
+        .where(
+          and(
+            eq(users.organizationId, organizationId),
+            eq(users.email, email),
+            eq(users.persona, Persona.Admin),
+            isNull(users.deletedAt),
+          ),
+        )
+        .limit(1);
+      return row !== undefined;
+    });
+  }
+
+  /** Create an Invited user + Invited membership (the target role must be in org). */
+  async createInvitedMember(
+    organizationId: number,
+    input: InviteMemberInput,
+  ): Promise<{ membershipId: number; userId: string }> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [role] = await tx
+        .select({ name: roles.name })
+        .from(roles)
+        .where(
+          and(
+            eq(roles.id, input.roleId),
+            eq(roles.organizationId, organizationId),
+          ),
+        )
+        .limit(1);
+      if (!role) throw DomainException.notFound('Role not found.');
+
+      const [user] = await tx
+        .insert(users)
+        .values({
+          organizationId,
+          name: input.name,
+          email: input.email,
+          persona: Persona.Admin,
+          status: 'Invited',
+        })
+        .returning({ id: users.id });
+      const [membership] = await tx
+        .insert(memberships)
+        .values({
+          organizationId,
+          userId: user.id,
+          roleId: input.roleId,
+          role: role.name,
+          status: 'Invited',
+          invitedAt: new Date(),
+        })
+        .returning({ id: memberships.id });
+      return { membershipId: membership.id, userId: user.id };
     });
   }
 

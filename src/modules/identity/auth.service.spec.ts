@@ -1,3 +1,4 @@
+import { DomainException } from '../../common/errors/domain.exception';
 import { Clock } from '../../common/time/clock';
 import { AuthService, type LoginInput } from './auth.service';
 import type {
@@ -60,6 +61,8 @@ describe('AuthService', () => {
       touchLastActive: jest.fn(),
       recordAudit: jest.fn(),
       getPermissions: jest.fn().mockResolvedValue([]),
+      findInvitedMembership: jest.fn(),
+      activateInvite: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<IdentityRepository>;
     passwords = {
       hash: jest.fn(),
@@ -70,6 +73,7 @@ describe('AuthService', () => {
       signRefresh: jest.fn().mockResolvedValue('refresh.jwt'),
       verifyAccess: jest.fn(),
       verifyRefresh: jest.fn(),
+      verifyInvite: jest.fn(),
       accessTtlSeconds: 900,
       refreshTtlSeconds: 604800,
     } as unknown as jest.Mocked<TokenService>;
@@ -179,6 +183,46 @@ describe('AuthService', () => {
       tokens.verifyRefresh.mockRejectedValue(new Error('bad signature'));
       await expect(service.refresh('nope')).rejects.toMatchObject({
         code: 'UNAUTHORIZED',
+      });
+    });
+  });
+
+  describe('acceptInvite', () => {
+    const inviteClaims = { sub: 'u9', org: 1, mid: 11, typ: 'invite' as const };
+
+    it('rejects an invalid/expired invite token with 401', async () => {
+      tokens.verifyInvite.mockRejectedValue(new Error('bad signature'));
+      await expect(service.acceptInvite('nope', 'pw')).rejects.toMatchObject({
+        code: 'UNAUTHORIZED',
+      });
+      expect(repo.activateInvite).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the membership is no longer Invited (already used)', async () => {
+      tokens.verifyInvite.mockResolvedValue(inviteClaims);
+      repo.findInvitedMembership.mockResolvedValue(null);
+      await expect(
+        service.acceptInvite('invite.jwt', 'pw'),
+      ).rejects.toBeInstanceOf(DomainException);
+      expect(repo.activateInvite).not.toHaveBeenCalled();
+    });
+
+    it('hashes the password and activates the member', async () => {
+      tokens.verifyInvite.mockResolvedValue(inviteClaims);
+      repo.findInvitedMembership.mockResolvedValue({
+        userId: 'u9',
+        organizationId: 1,
+        email: 'new@acme.test',
+      });
+      passwords.hash.mockResolvedValue('hashed-pw');
+
+      const result = await service.acceptInvite('invite.jwt', 'secret-pw');
+
+      expect(passwords.hash).toHaveBeenCalledWith('secret-pw');
+      expect(repo.activateInvite).toHaveBeenCalledWith('u9', 11, 'hashed-pw');
+      expect(result).toMatchObject({
+        email: 'new@acme.test',
+        status: 'Active',
       });
     });
   });

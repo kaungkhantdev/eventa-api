@@ -238,6 +238,94 @@ describe('Access / RBAC management (e2e)', () => {
       .set('Authorization', `Bearer ${jwt}`);
     expect(res.status).toBe(403);
   });
+
+  describe('invite flow', () => {
+    const INVITEE = 'invitee@access-e2e.test';
+    const INVITEE_PW = 'invitee-strong-password';
+    let inviteToken: string;
+
+    interface InviteData {
+      member: { status: string; role: string };
+      inviteToken: string;
+    }
+
+    const invite = (jwt: string, email: string) =>
+      request(server)
+        .post('/api/v1/members')
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({ name: 'Invitee', email, roleId: organizerRoleId });
+
+    it('invites a teammate (Invited) and returns an invite token', async () => {
+      const jwt = await token(ADMIN);
+      const res = await invite(jwt, INVITEE);
+      expect(res.status).toBe(201);
+      const data = (res.body as Success<InviteData>).data;
+      expect(data.member.status).toBe('Invited');
+      expect(data.member.role).toBe('Organizer');
+      expect(typeof data.inviteToken).toBe('string');
+      inviteToken = data.inviteToken;
+    });
+
+    it('rejects a duplicate invite with 409', async () => {
+      const jwt = await token(ADMIN);
+      expect((await invite(jwt, INVITEE)).status).toBe(409);
+    });
+
+    it('cannot log in before accepting', async () => {
+      const res = await request(server).post('/api/v1/auth/login').send({
+        email: INVITEE,
+        password: INVITEE_PW,
+        orgSlug: ORG.slug,
+        persona: 'admin',
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it('rejects accepting with a bad token (401)', async () => {
+      const res = await request(server)
+        .post('/api/v1/auth/accept-invite')
+        .send({ token: 'nonsense', password: INVITEE_PW });
+      expect(res.status).toBe(401);
+    });
+
+    it('accepts the invite; the teammate can then log in and use their role', async () => {
+      const accept = await request(server)
+        .post('/api/v1/auth/accept-invite')
+        .send({ token: inviteToken, password: INVITEE_PW });
+      expect(accept.status).toBe(200);
+      expect((accept.body as Success<{ status: string }>).data.status).toBe(
+        'Active',
+      );
+
+      const login = await request(server).post('/api/v1/auth/login').send({
+        email: INVITEE,
+        password: INVITEE_PW,
+        orgSlug: ORG.slug,
+        persona: 'admin',
+      });
+      expect(login.status).toBe(200);
+      const jwt = (login.body as Success<{ accessToken: string }>).data
+        .accessToken;
+
+      // Organizer role grants evCreate → the new teammate can create events.
+      await request(server)
+        .post('/api/v1/events')
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({
+          name: 'By Invitee',
+          type: 'Conference',
+          startAt: '2026-09-01T02:00:00Z',
+        })
+        .expect(201);
+    });
+
+    it('rejects reusing an already-accepted invite token (401)', async () => {
+      const res = await request(server)
+        .post('/api/v1/auth/accept-invite')
+        .send({ token: inviteToken, password: INVITEE_PW });
+      expect(res.status).toBe(401);
+    });
+  });
 });
 
 async function seedOrg(
@@ -294,7 +382,12 @@ async function seedOrg(
 }
 
 async function cleanup(pool: Pool): Promise<void> {
-  await pool.query(`DELETE FROM organizations WHERE slug = ANY($1)`, [
-    [ORG.slug, ORG2.slug],
-  ]);
+  const slugs = [ORG.slug, ORG2.slug];
+  // audit_events is ON DELETE RESTRICT (a failed login writes one), so clear it first.
+  await pool.query(
+    `DELETE FROM audit_events WHERE organization_id IN
+       (SELECT id FROM organizations WHERE slug = ANY($1))`,
+    [slugs],
+  );
+  await pool.query(`DELETE FROM organizations WHERE slug = ANY($1)`, [slugs]);
 }
