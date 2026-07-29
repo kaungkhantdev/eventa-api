@@ -17,6 +17,7 @@
  */
 import { hash } from '@node-rs/argon2';
 import { Pool } from 'pg';
+import { LANDING_TEMPLATES } from '../modules/events/landing-templates';
 
 const ORG = { name: 'Acme', slug: 'acme' } as const;
 const ADMIN = {
@@ -156,6 +157,21 @@ async function insertUser(
   );
 }
 
+// Global landing-template lookup (not tenant-scoped) — required before any event
+// can pick a template on publish (FK events.landing_template_id → this table).
+async function insertLandingTemplates(pool: Pool): Promise<void> {
+  for (const t of LANDING_TEMPLATES) {
+    await pool.query(
+      `INSERT INTO landing_templates (id, title, badge, description)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (id) DO UPDATE
+         SET title = EXCLUDED.title, badge = EXCLUDED.badge,
+             description = EXCLUDED.description`,
+      [t.id, t.title, t.badge, t.description],
+    );
+  }
+}
+
 async function insertCategories(pool: Pool, orgId: number): Promise<void> {
   console.log('[seed] categories (use one as `categoryId` on POST /events):');
   for (const c of CATEGORIES) {
@@ -191,6 +207,7 @@ async function seed(): Promise<void> {
     const roleIds = await insertRoles(pool, orgId);
     await insertUser(pool, orgId, ADMIN, roleIds.Admin, 'Admin');
     await insertUser(pool, orgId, STAFF, roleIds.Staff, 'Staff');
+    await insertLandingTemplates(pool);
     await insertCategories(pool, orgId);
     printCredentials();
   } finally {

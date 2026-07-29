@@ -1,9 +1,28 @@
+import { Clock } from '../../common/time/clock';
 import { DomainException } from '../../common/errors/domain.exception';
+import { OutboxPort } from '../platform/outbox.port';
 import { EventsRepository } from './events.repository';
 import { EventsService } from './events.service';
+import { TicketAvailabilityPort } from './ports/ticket-availability.port';
 import type { EventRow } from './events.types';
 
 const auth = { organizationId: 1, userId: 'u1' };
+const NOW = new Date('2026-07-29T00:00:00Z');
+
+/** Collaborators the publish/unpublish paths need, with sensible test defaults. */
+function makeDeps() {
+  return {
+    tickets: {
+      activeCount: jest.fn().mockResolvedValue(1),
+    } as unknown as jest.Mocked<TicketAvailabilityPort>,
+    outbox: {
+      enqueue: jest.fn().mockResolvedValue(undefined),
+    } as unknown as jest.Mocked<OutboxPort>,
+    clock: {
+      now: jest.fn().mockReturnValue(NOW),
+    } as unknown as jest.Mocked<Clock>,
+  };
+}
 
 function eventRow(overrides: Partial<EventRow> = {}): EventRow {
   return {
@@ -59,7 +78,8 @@ describe('EventsService.createDraft', () => {
         ),
       list: jest.fn(),
     } as unknown as jest.Mocked<EventsRepository>;
-    service = new EventsService(repo);
+    const deps = makeDeps();
+    service = new EventsService(repo, deps.tickets, deps.outbox, deps.clock);
   });
 
   it('slugifies the name and defaults status=draft, bucket=active, organizer from org', async () => {
@@ -167,7 +187,8 @@ describe('EventsService get/update', () => {
           Promise.resolve(eventRow({ ...existing, ...v, version: 2 })),
         ),
     } as unknown as jest.Mocked<EventsRepository>;
-    service = new EventsService(repo);
+    const deps = makeDeps();
+    service = new EventsService(repo, deps.tickets, deps.outbox, deps.clock);
   });
 
   describe('getEvent', () => {
@@ -239,6 +260,159 @@ describe('EventsService get/update', () => {
         .updateEvent(auth, 'e1', { name: 'X' })
         .catch((e: unknown) => e);
       expect((err as DomainException).getStatus()).toBe(409);
+    });
+  });
+});
+
+describe('EventsService publish/unpublish', () => {
+  let repo: jest.Mocked<EventsRepository>;
+  let deps: ReturnType<typeof makeDeps>;
+  let service: EventsService;
+
+  /** A draft that satisfies every publish requirement. */
+  const ready = eventRow({
+    id: 'e1',
+    name: 'Ready Event',
+    description: 'A great event',
+    status: 'draft',
+    visibility: 'private',
+    venueName: 'Hall A',
+    startAt: new Date('2026-09-01T02:00:00Z'), // future vs NOW (2026-07-29)
+    publishedAt: null,
+    version: 3,
+  });
+
+  function build(event: EventRow): void {
+    repo = {
+      findEvent: jest.fn().mockResolvedValue(event),
+      update: jest
+        .fn()
+        .mockImplementation((_o: number, _id: string, v: Partial<EventRow>) =>
+          Promise.resolve(
+            eventRow({ ...event, ...v, version: event.version + 1 }),
+          ),
+        ),
+    } as unknown as jest.Mocked<EventsRepository>;
+    deps = makeDeps();
+    service = new EventsService(repo, deps.tickets, deps.outbox, deps.clock);
+  }
+
+  describe('publishEvent', () => {
+    beforeEach(() => build(ready));
+
+    it('publishes a complete draft: upcoming, published_at, visibility, template, notice', async () => {
+      const res = await service.publishEvent(auth, 'e1', {
+        visibility: 'public',
+        landingTemplateId: 'aurora',
+      });
+
+      const [, , values] = repo.update.mock.calls[0];
+      expect(values).toMatchObject({
+        status: 'upcoming',
+        bucket: 'active',
+        visibility: 'public',
+        landingTemplateId: 'aurora',
+        publishedAt: NOW,
+      });
+      expect(deps.outbox.enqueue).toHaveBeenCalledTimes(1);
+      expect(deps.outbox.enqueue.mock.calls[0][0].routingKey).toBe(
+        'events.published',
+      );
+      expect(res.status).toBe('upcoming');
+    });
+
+    it('blocks publish and flags the missing items (422) — no write, no notice', async () => {
+      build(eventRow({ ...ready, description: null }));
+      deps.tickets.activeCount.mockResolvedValue(0);
+
+      const err = await service
+        .publishEvent(auth, 'e1', {})
+        .catch((e: unknown) => e);
+
+      expect((err as DomainException).getStatus()).toBe(422);
+      expect((err as DomainException).message).toMatch(/description/i);
+      expect((err as DomainException).message).toMatch(/ticket/i);
+      expect(repo.update).not.toHaveBeenCalled();
+      expect(deps.outbox.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('treats an online event with no venue as having a location', async () => {
+      build(eventRow({ ...ready, venueName: null, isOnline: true }));
+      await expect(service.publishEvent(auth, 'e1', {})).resolves.toBeDefined();
+    });
+
+    it('asks to confirm a past start date (422), then publishes when confirmed', async () => {
+      build(eventRow({ ...ready, startAt: new Date('2026-06-01T02:00:00Z') }));
+
+      const err = await service
+        .publishEvent(auth, 'e1', {})
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(422);
+      expect((err as DomainException).message).toMatch(/past/i);
+      expect(repo.update).not.toHaveBeenCalled();
+
+      await expect(
+        service.publishEvent(auth, 'e1', { confirmPastStart: true }),
+      ).resolves.toBeDefined();
+      expect(repo.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects publishing an event that is not a draft (409)', async () => {
+      build(eventRow({ ...ready, status: 'upcoming' }));
+      const err = await service
+        .publishEvent(auth, 'e1', {})
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(409);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a stale version (409) before doing any work', async () => {
+      const err = await service
+        .publishEvent(auth, 'e1', { version: 99 })
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(409);
+      expect(deps.tickets.activeCount).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('throws 404 when the event is not in the caller org', async () => {
+      repo.findEvent.mockResolvedValue(null);
+      const err = await service
+        .publishEvent(auth, 'missing', {})
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(404);
+    });
+  });
+
+  describe('unpublishEvent', () => {
+    it('reverts a published event to a private draft and clears published_at', async () => {
+      build(
+        eventRow({
+          ...ready,
+          status: 'upcoming',
+          visibility: 'public',
+          publishedAt: NOW,
+        }),
+      );
+
+      const res = await service.unpublishEvent(auth, 'e1', {});
+
+      const [, , values] = repo.update.mock.calls[0];
+      expect(values).toMatchObject({
+        status: 'draft',
+        visibility: 'private',
+        publishedAt: null,
+      });
+      expect(res.status).toBe('draft');
+    });
+
+    it('rejects unpublishing a draft (409 — not published)', async () => {
+      build(ready);
+      const err = await service
+        .unpublishEvent(auth, 'e1', {})
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(409);
+      expect(repo.update).not.toHaveBeenCalled();
     });
   });
 });

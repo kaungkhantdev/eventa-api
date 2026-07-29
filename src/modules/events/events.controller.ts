@@ -25,6 +25,8 @@ import { PermissionsGuard } from '../identity/guards/permissions.guard';
 import { CreateEventDto } from './dto/create-event.dto';
 import { EventResponseDto } from './dto/event-response.dto';
 import { ListEventsQueryDto } from './dto/list-events.query.dto';
+import { PublishEventDto } from './dto/publish-event.dto';
+import { UnpublishEventDto } from './dto/unpublish-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { EventsService } from './events.service';
 import { AdminGuard } from './guards/admin.guard';
@@ -110,6 +112,40 @@ export class EventsController {
           ? { endAt: endAt === null ? null : new Date(endAt) }
           : {}),
       },
+    );
+  }
+
+  @Post(':id/publish')
+  @RequirePermissions(Permission.evPublish)
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Event published.')
+  @ApiData(EventResponseDto)
+  publish(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id') id: string,
+    @Body() dto: PublishEventDto,
+  ): Promise<EventResponseDto> {
+    return this.events.publishEvent(
+      { organizationId: auth.organizationId, userId: auth.userId },
+      id,
+      dto,
+    );
+  }
+
+  @Post(':id/unpublish')
+  @RequirePermissions(Permission.evPublish)
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Event unpublished.')
+  @ApiData(EventResponseDto)
+  unpublish(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id') id: string,
+    @Body() dto: UnpublishEventDto,
+  ): Promise<EventResponseDto> {
+    return this.events.unpublishEvent(
+      { organizationId: auth.organizationId, userId: auth.userId },
+      id,
+      dto,
     );
   }
 }

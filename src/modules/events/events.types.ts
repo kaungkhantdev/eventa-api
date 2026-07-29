@@ -48,6 +48,24 @@ export interface CreateEventInput {
 }
 
 export type SeatingMode = EventRow['seatingMode'];
+export type Visibility = EventRow['visibility'];
+/** A landing-template id (non-null — a published event may pick one). */
+export type TemplateId = NonNullable<EventRow['landingTemplateId']>;
+
+/** Service input to publish an event (mapped from the DTO). */
+export interface PublishEventInput {
+  visibility?: Visibility;
+  landingTemplateId?: TemplateId;
+  /** Publish despite a start date already in the past. */
+  confirmPastStart?: boolean;
+  /** Optimistic-concurrency token; when set, must match the current row. */
+  version?: number;
+}
+
+/** Service input to unpublish an event. */
+export interface UnpublishEventInput {
+  version?: number;
+}
 
 /** Partial update to an event (Basics + Date/Location). Undefined = leave as-is. */
 export interface UpdateEventInput {

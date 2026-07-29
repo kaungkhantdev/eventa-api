@@ -29,6 +29,7 @@ export function toEventResponse(e: EventRow): EventResponseDto {
     accentColor: e.accentColor,
     contactEmail: e.contactEmail,
     organizerName: e.organizerName,
+    landingTemplateId: e.landingTemplateId,
     publishedAt: iso(e.publishedAt),
     createdAt: e.createdAt.toISOString(),
     version: e.version,

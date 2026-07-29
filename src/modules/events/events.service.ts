@@ -1,10 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, forwardRef } from '@nestjs/common';
+import { Clock } from '../../common/time/clock';
 import { DomainException } from '../../common/errors/domain.exception';
 import { Paginated } from '../../common/http/paginated';
 import { pickDefined } from '../../common/util/pick-defined';
+import { OutboxPort } from '../platform/outbox.port';
 import { EventResponseDto } from './dto/event-response.dto';
+import { eventPublishedEvent } from './events/event-published.event';
 import { toEventResponse } from './events.mapper';
 import { EventsRepository } from './events.repository';
+import { TicketAvailabilityPort } from './ports/ticket-availability.port';
 import type {
   CreateEventInput,
   EventActor,
@@ -14,12 +18,29 @@ import type {
   ListEventsOptions,
   ListEventsQuery,
   NewEventValues,
+  PublishEventInput,
+  UnpublishEventInput,
   UpdateEventInput,
+  Visibility,
 } from './events.types';
 import { slugify } from './slug';
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
+
+const DRAFT_STATUS: EventStatus = 'draft';
+const PUBLISHED_STATUS: EventStatus = 'upcoming';
+const PRIVATE_VISIBILITY: Visibility = 'private';
+
+/** Human phrase per publish requirement, listed back when one is missing. */
+const PUBLISH_REQUIREMENTS = {
+  title: 'a title',
+  description: 'a description',
+  schedule: 'a start date & time',
+  location: 'a venue or an online link',
+  tickets: 'at least one ticket type',
+} as const;
+type PublishRequirement = keyof typeof PUBLISH_REQUIREMENTS;
 
 /** Fields a PATCH may set on an event (Basics + Date/Location). */
 const UPDATABLE_KEYS: (keyof NewEventValues & keyof UpdateEventInput)[] = [
@@ -52,7 +73,13 @@ function bucketForStatus(status: EventStatus): EventBucket {
 /** Orchestrates event management rules (the Events bounded context). */
 @Injectable()
 export class EventsService {
-  constructor(private readonly repo: EventsRepository) {}
+  constructor(
+    private readonly repo: EventsRepository,
+    @Inject(forwardRef(() => TicketAvailabilityPort))
+    private readonly tickets: TicketAvailabilityPort,
+    private readonly outbox: OutboxPort,
+    private readonly clock: Clock,
+  ) {}
 
   /** Create an event in Draft; derives a unique per-org slug and defaults. */
   async createDraft(
@@ -126,6 +153,121 @@ export class EventsService {
     );
     if (!updated) throw this.staleEvent();
     return toEventResponse(updated);
+  }
+
+  /** Take a draft live: enforce the readiness gate, then publish + notify. */
+  async publishEvent(
+    actor: EventActor,
+    eventId: string,
+    input: PublishEventInput,
+  ): Promise<EventResponseDto> {
+    const event = await this.loadEvent(actor.organizationId, eventId);
+    if (event.status !== DRAFT_STATUS) {
+      throw DomainException.conflict('This event is already published.');
+    }
+    if (input.version !== undefined && input.version !== event.version) {
+      throw this.staleEvent();
+    }
+    const gaps = await this.readinessGaps(actor.organizationId, event);
+    if (gaps.length > 0) throw this.notReady(gaps);
+    if (this.startsInPast(event.startAt) && !input.confirmPastStart) {
+      throw DomainException.validation(
+        "This event's start date is already in the past. Confirm to publish it anyway.",
+      );
+    }
+    const published = await this.repo.update(
+      actor.organizationId,
+      eventId,
+      this.publishValues(input),
+      event.version,
+    );
+    if (!published) throw this.staleEvent();
+    await this.announcePublished(actor, published);
+    return toEventResponse(published);
+  }
+
+  /** Take a published event offline: back to a private draft, content preserved. */
+  async unpublishEvent(
+    actor: EventActor,
+    eventId: string,
+    input: UnpublishEventInput,
+  ): Promise<EventResponseDto> {
+    const event = await this.loadEvent(actor.organizationId, eventId);
+    if (event.status === DRAFT_STATUS) {
+      throw DomainException.conflict('This event is not published.');
+    }
+    if (input.version !== undefined && input.version !== event.version) {
+      throw this.staleEvent();
+    }
+    const values: Partial<NewEventValues> = {
+      status: DRAFT_STATUS,
+      bucket: bucketForStatus(DRAFT_STATUS),
+      visibility: PRIVATE_VISIBILITY,
+      publishedAt: null,
+    };
+    const updated = await this.repo.update(
+      actor.organizationId,
+      eventId,
+      values,
+      event.version,
+    );
+    if (!updated) throw this.staleEvent();
+    return toEventResponse(updated);
+  }
+
+  private publishValues(input: PublishEventInput): Partial<NewEventValues> {
+    return {
+      status: PUBLISHED_STATUS,
+      bucket: bucketForStatus(PUBLISHED_STATUS),
+      publishedAt: this.clock.now(),
+      ...(input.visibility ? { visibility: input.visibility } : {}),
+      ...(input.landingTemplateId
+        ? { landingTemplateId: input.landingTemplateId }
+        : {}),
+    };
+  }
+
+  /** Which required items an event is still missing before it can go public. */
+  private async readinessGaps(
+    organizationId: number,
+    e: EventRow,
+  ): Promise<PublishRequirement[]> {
+    const gaps: PublishRequirement[] = [];
+    if (!e.name.trim()) gaps.push('title');
+    if (!e.description?.trim()) gaps.push('description');
+    if (!e.venueName?.trim() && !e.isOnline) gaps.push('location');
+    if ((await this.tickets.activeCount(organizationId, e.id)) < 1) {
+      gaps.push('tickets');
+    }
+    return gaps;
+  }
+
+  private notReady(gaps: PublishRequirement[]): DomainException {
+    const items = gaps.map((g) => PUBLISH_REQUIREMENTS[g]).join(', ');
+    return DomainException.validation(
+      `Cannot publish yet — please add ${items}.`,
+      gaps,
+    );
+  }
+
+  private startsInPast(startAt: Date): boolean {
+    return startAt.getTime() < this.clock.now().getTime();
+  }
+
+  private async announcePublished(
+    actor: EventActor,
+    event: EventRow,
+  ): Promise<void> {
+    await this.outbox.enqueue(
+      eventPublishedEvent({
+        organizationId: actor.organizationId,
+        eventId: event.id,
+        slug: event.slug,
+        name: event.name,
+        publishedBy: actor.userId,
+        occurredAt: this.clock.now().toISOString(),
+      }),
+    );
   }
 
   private async loadEvent(

@@ -4,6 +4,7 @@ import {
   eventStatusEnum,
   eventTypeEnum,
   seatingModeEnum,
+  templateIdEnum,
   visibilityEnum,
 } from '../../../db/schema';
 
@@ -81,6 +82,14 @@ export class EventResponseDto {
 
   @ApiProperty()
   organizerName!: string;
+
+  @ApiProperty({
+    enum: templateIdEnum.enumValues,
+    nullable: true,
+    type: String,
+    description: 'Chosen public landing-page template (null until picked)',
+  })
+  landingTemplateId!: string | null;
 
   @ApiProperty({ format: 'date-time', nullable: true, type: String })
   publishedAt!: string | null;
