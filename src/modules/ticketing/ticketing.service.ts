@@ -109,7 +109,12 @@ export class TicketingService {
     eventId: string,
     ticketId: string,
   ): Promise<void> {
-    await this.load(actor.organizationId, eventId, ticketId);
+    const ticket = await this.load(actor.organizationId, eventId, ticketId);
+    if (ticket.sold > 0) {
+      throw DomainException.conflict(
+        "This ticket type has sales and can't be removed. Close it instead.",
+      );
+    }
     const remaining = await this.repo.countActive(
       actor.organizationId,
       eventId,

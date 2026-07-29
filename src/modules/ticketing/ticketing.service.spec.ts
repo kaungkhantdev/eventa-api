@@ -147,6 +147,17 @@ describe('TicketingService', () => {
   });
 
   describe('deleteTicket', () => {
+    it('refuses to remove a tier that has sales (409 — close it instead)', async () => {
+      repo.findTicket.mockResolvedValue(ticketRow({ sold: 3 }));
+      repo.countActive.mockResolvedValue(3);
+      const err = await service
+        .deleteTicket(actor, eventId, 't1')
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(409);
+      expect((err as DomainException).message).toMatch(/sales/i);
+      expect(repo.softDelete).not.toHaveBeenCalled();
+    });
+
     it('refuses to remove the last remaining tier (422)', async () => {
       repo.findTicket.mockResolvedValue(ticketRow());
       repo.countActive.mockResolvedValue(1);

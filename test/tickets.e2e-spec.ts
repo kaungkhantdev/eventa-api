@@ -161,6 +161,19 @@ describe('Ticket types (e2e — US-EVT-06)', () => {
     expect((await createTicket(jwt, { name: 'Nope' })).status).toBe(403);
   });
 
+  it('refuses to delete a tier that has sales (409)', async () => {
+    const jwt = await token(ADMIN, ORG.slug);
+    const created = await createTicket(jwt, { name: 'Sold Out', total: 100 });
+    const ticketId = (created.body as Success<Ticket>).data.id;
+    await pool.query(`UPDATE ticket_types SET sold = 4 WHERE id = $1`, [
+      ticketId,
+    ]);
+    await request(server)
+      .delete(`/api/v1/events/${eventId}/tickets/${ticketId}`)
+      .set('Authorization', `Bearer ${jwt}`)
+      .expect(409);
+  });
+
   it('refuses to delete the last remaining tier but allows others', async () => {
     const jwt = await token(ADMIN, ORG.slug);
     // Make a fresh event with a single tier.
