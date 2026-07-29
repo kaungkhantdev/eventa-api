@@ -15,7 +15,10 @@ import { ApiData, ApiPage } from '../../../common/http/api-data.decorator';
 import { Paginated } from '../../../common/http/paginated';
 import type { AuthContext } from '../auth.types';
 import { CurrentAuth } from '../decorators/current-auth.decorator';
-import { RequirePermissions } from '../decorators/require-permissions.decorator';
+import {
+  Permission,
+  RequirePermissions,
+} from '../decorators/require-permissions.decorator';
 import { PermissionsGuard } from '../guards/permissions.guard';
 import { AccessService } from './access.service';
 import { ListMembersQueryDto } from './dto/list-members.query.dto';
@@ -32,7 +35,7 @@ export class MembersController {
   constructor(private readonly access: AccessService) {}
 
   @Get()
-  @RequirePermissions('setUsers')
+  @RequirePermissions(Permission.setUsers)
   @ResponseMessage('Members retrieved.')
   @ApiPage(MemberResponseDto)
   list(
@@ -43,7 +46,7 @@ export class MembersController {
   }
 
   @Patch(':id')
-  @RequirePermissions('setUsers')
+  @RequirePermissions(Permission.setUsers)
   @ResponseMessage('Member role updated.')
   @ApiData(MemberResponseDto)
   changeRole(
