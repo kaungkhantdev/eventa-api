@@ -16,7 +16,13 @@ export function buildOpenApiDocument(app: INestApplication) {
     .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' })
     .build();
 
-  return SwaggerModule.createDocument(app, config);
+  // The global prefix (/api/v1) is carried by the server URL above, so keep it
+  // out of the path keys — otherwise Swagger "Try it out" doubles it
+  // (/api/v1/api/v1/...). Paths stay clean (/auth/login); web codegen prepends
+  // the server base.
+  return SwaggerModule.createDocument(app, config, {
+    ignoreGlobalPrefix: true,
+  });
 }
 
 /**
