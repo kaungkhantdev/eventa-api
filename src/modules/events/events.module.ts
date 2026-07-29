@@ -2,6 +2,9 @@ import { Module, forwardRef } from '@nestjs/common';
 import { IdentityModule } from '../identity/identity.module';
 import { PlatformModule } from '../platform/platform.module';
 import { TicketingModule } from '../ticketing/ticketing.module';
+import { CategoriesController } from './categories/categories.controller';
+import { CategoriesRepository } from './categories/categories.repository';
+import { CategoriesService } from './categories/categories.service';
 import { EventsController } from './events.controller';
 import { EventsRepository } from './events.repository';
 import { EventsService } from './events.service';
@@ -16,8 +19,14 @@ import { AdminGuard } from './guards/admin.guard';
  */
 @Module({
   imports: [IdentityModule, PlatformModule, forwardRef(() => TicketingModule)],
-  controllers: [EventsController],
-  providers: [EventsService, EventsRepository, AdminGuard],
+  controllers: [EventsController, CategoriesController],
+  providers: [
+    EventsService,
+    EventsRepository,
+    CategoriesService,
+    CategoriesRepository,
+    AdminGuard,
+  ],
   exports: [EventsService],
 })
 export class EventsModule {}
