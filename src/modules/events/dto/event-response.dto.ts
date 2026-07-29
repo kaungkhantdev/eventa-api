@@ -33,6 +33,13 @@ export class EventResponseDto {
   @ApiProperty({ enum: visibilityEnum.enumValues, example: 'private' })
   visibility!: string;
 
+  @ApiProperty({
+    nullable: true,
+    type: Number,
+    description: 'Workspace category id',
+  })
+  categoryId!: number | null;
+
   @ApiProperty({ format: 'date-time' })
   startAt!: string;
 
@@ -42,11 +49,35 @@ export class EventResponseDto {
   @ApiProperty({ example: 'Asia/Bangkok' })
   timezone!: string;
 
+  @ApiProperty({ nullable: true, type: String })
+  venueName!: string | null;
+
+  @ApiProperty({ nullable: true, type: String })
+  venueAddress!: string | null;
+
+  @ApiProperty({ nullable: true, type: String })
+  city!: string | null;
+
   @ApiProperty()
   isOnline!: boolean;
 
+  @ApiProperty({ nullable: true, type: String })
+  onlineNote!: string | null;
+
   @ApiProperty({ enum: seatingModeEnum.enumValues, example: 'ga' })
   seatingMode!: string;
+
+  @ApiProperty({ nullable: true, type: Number })
+  capacity!: number | null;
+
+  @ApiProperty({ nullable: true, type: String })
+  coverImage!: string | null;
+
+  @ApiProperty({ nullable: true, type: String })
+  accentColor!: string | null;
+
+  @ApiProperty({ nullable: true, type: String })
+  contactEmail!: string | null;
 
   @ApiProperty()
   organizerName!: string;
@@ -56,4 +87,7 @@ export class EventResponseDto {
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
+
+  @ApiProperty({ example: 1, description: 'Optimistic-concurrency token' })
+  version!: number;
 }

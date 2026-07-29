@@ -46,3 +46,28 @@ export interface CreateEventInput {
   categoryId?: number;
   organizerName?: string;
 }
+
+export type SeatingMode = EventRow['seatingMode'];
+
+/** Partial update to an event (Basics + Date/Location). Undefined = leave as-is. */
+export interface UpdateEventInput {
+  name?: string;
+  description?: string | null;
+  type?: EventType;
+  categoryId?: number | null;
+  startAt?: Date;
+  endAt?: Date | null;
+  timezone?: string;
+  venueName?: string | null;
+  venueAddress?: string | null;
+  city?: string | null;
+  isOnline?: boolean;
+  onlineNote?: string | null;
+  seatingMode?: SeatingMode;
+  capacity?: number | null;
+  coverImage?: string | null;
+  accentColor?: string | null;
+  contactEmail?: string | null;
+  /** Optimistic-concurrency token from the client (must match the current row). */
+  version?: number;
+}

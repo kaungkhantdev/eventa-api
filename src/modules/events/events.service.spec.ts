@@ -144,3 +144,101 @@ describe('EventsService.createDraft', () => {
     expect(repo.categoryExists).not.toHaveBeenCalled();
   });
 });
+
+describe('EventsService get/update', () => {
+  let repo: jest.Mocked<EventsRepository>;
+  let service: EventsService;
+
+  const existing = eventRow({
+    id: 'e1',
+    name: 'Original',
+    startAt: new Date('2026-09-01T02:00:00Z'),
+    endAt: null,
+    version: 1,
+  });
+
+  beforeEach(() => {
+    repo = {
+      findEvent: jest.fn().mockResolvedValue(existing),
+      categoryExists: jest.fn().mockResolvedValue(true),
+      update: jest
+        .fn()
+        .mockImplementation((_o: number, _id: string, v: Partial<EventRow>) =>
+          Promise.resolve(eventRow({ ...existing, ...v, version: 2 })),
+        ),
+    } as unknown as jest.Mocked<EventsRepository>;
+    service = new EventsService(repo);
+  });
+
+  describe('getEvent', () => {
+    it('returns the event when it is in the caller org', async () => {
+      const res = await service.getEvent(auth, 'e1');
+      expect(repo.findEvent).toHaveBeenCalledWith(1, 'e1');
+      expect(res).toMatchObject({ id: 'e1', name: 'Original' });
+    });
+
+    it('throws 404 when the event is not in the org', async () => {
+      repo.findEvent.mockResolvedValue(null);
+      const err = await service
+        .getEvent(auth, 'missing')
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(404);
+    });
+  });
+
+  describe('updateEvent', () => {
+    it('throws 404 when the event is not in the org', async () => {
+      repo.findEvent.mockResolvedValue(null);
+      const err = await service
+        .updateEvent(auth, 'missing', { name: 'X' })
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(404);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects an end time that is not after the start (422)', async () => {
+      const err = await service
+        .updateEvent(auth, 'e1', { endAt: new Date('2026-09-01T01:00:00Z') })
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(422);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a stale version with 409 (changed elsewhere)', async () => {
+      const err = await service
+        .updateEvent(auth, 'e1', { name: 'X', version: 99 })
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(409);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('validates a new categoryId belongs to the org (404)', async () => {
+      repo.categoryExists.mockResolvedValue(false);
+      const err = await service
+        .updateEvent(auth, 'e1', { categoryId: 999 })
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(404);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('applies changes and returns the updated event', async () => {
+      const res = await service.updateEvent(auth, 'e1', {
+        name: 'Renamed',
+        endAt: new Date('2026-09-01T05:00:00Z'),
+      });
+      const [org, id, values] = repo.update.mock.calls[0];
+      expect(org).toBe(1);
+      expect(id).toBe('e1');
+      expect(values).toMatchObject({ name: 'Renamed' });
+      expect(res).toMatchObject({ name: 'Renamed', version: 2 });
+    });
+
+    it('surfaces a lost update race (repo returns null) as 409', async () => {
+      repo.update.mockResolvedValue(null);
+      const err = await service
+        .updateEvent(auth, 'e1', { name: 'X' })
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(409);
+    });
+  });
+});

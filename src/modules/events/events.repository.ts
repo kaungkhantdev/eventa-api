@@ -85,6 +85,54 @@ export class EventsRepository {
     });
   }
 
+  /** A single live event scoped to the org (null if absent/soft-deleted). */
+  async findEvent(
+    organizationId: number,
+    eventId: string,
+  ): Promise<EventRow | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(events)
+        .where(
+          and(
+            eq(events.id, eventId),
+            eq(events.organizationId, organizationId),
+            isNull(events.deletedAt),
+          ),
+        )
+        .limit(1);
+      return row ?? null;
+    });
+  }
+
+  /**
+   * Optimistic update: only writes when `version` still matches, bumping it.
+   * Returns null when no row matched (concurrent change) — the caller 409s.
+   */
+  async update(
+    organizationId: number,
+    eventId: string,
+    values: Partial<NewEventValues>,
+    currentVersion: number,
+  ): Promise<EventRow | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .update(events)
+        .set({ ...values, version: currentVersion + 1, updatedAt: new Date() })
+        .where(
+          and(
+            eq(events.id, eventId),
+            eq(events.organizationId, organizationId),
+            eq(events.version, currentVersion),
+            isNull(events.deletedAt),
+          ),
+        )
+        .returning();
+      return row ?? null;
+    });
+  }
+
   /** A filtered, sorted page of this org's live events, plus the total count. */
   async list(
     organizationId: number,

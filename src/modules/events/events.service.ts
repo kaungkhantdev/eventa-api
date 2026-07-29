@@ -8,21 +8,56 @@ import type {
   CreateEventInput,
   EventActor,
   EventBucket,
+  EventRow,
   EventStatus,
   ListEventsOptions,
   ListEventsQuery,
   NewEventValues,
+  UpdateEventInput,
 } from './events.types';
 import { slugify } from './slug';
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 
+/** Fields a PATCH may set on an event (Basics + Date/Location). */
+const UPDATABLE_KEYS: (keyof NewEventValues & keyof UpdateEventInput)[] = [
+  'name',
+  'description',
+  'type',
+  'categoryId',
+  'startAt',
+  'endAt',
+  'timezone',
+  'venueName',
+  'venueAddress',
+  'city',
+  'isOnline',
+  'onlineNote',
+  'seatingMode',
+  'capacity',
+  'coverImage',
+  'accentColor',
+  'contactEmail',
+];
+
 /** event_bucket is derived from lifecycle status (entities.md): terminal → completed. */
 function bucketForStatus(status: EventStatus): EventBucket {
   return status === 'completed' || status === 'cancelled'
     ? 'completed'
     : 'active';
+}
+
+/** Copy only the keys present (not undefined) in `source` — PATCH semantics. */
+function pickDefined<T, K extends keyof T>(
+  source: T,
+  keys: readonly K[],
+): Partial<Pick<T, K>> {
+  const out: Partial<Pick<T, K>> = {};
+  for (const key of keys) {
+    if (source[key] !== undefined) out[key] = source[key];
+  }
+  return out;
 }
 
 /** Orchestrates event management rules (the Events bounded context). */
@@ -70,6 +105,63 @@ export class EventsService {
         `Category ${categoryId} not found in this workspace.`,
       );
     }
+  }
+
+  /** A single event owned by the caller's org (404 otherwise). */
+  async getEvent(
+    actor: EventActor,
+    eventId: string,
+  ): Promise<EventResponseDto> {
+    return toEventResponse(await this.loadEvent(actor.organizationId, eventId));
+  }
+
+  /** Update an event's Basics + Date/Location (optimistic-concurrency guarded). */
+  async updateEvent(
+    actor: EventActor,
+    eventId: string,
+    input: UpdateEventInput,
+  ): Promise<EventResponseDto> {
+    const event = await this.loadEvent(actor.organizationId, eventId);
+    if (input.version !== undefined && input.version !== event.version) {
+      throw this.staleEvent();
+    }
+    this.assertEndAfterStart(input, event);
+    if (input.categoryId != null) {
+      await this.assertCategoryInOrg(actor.organizationId, input.categoryId);
+    }
+    const updated = await this.repo.update(
+      actor.organizationId,
+      eventId,
+      pickDefined(input, UPDATABLE_KEYS),
+      event.version,
+    );
+    if (!updated) throw this.staleEvent();
+    return toEventResponse(updated);
+  }
+
+  private async loadEvent(
+    organizationId: number,
+    eventId: string,
+  ): Promise<EventRow> {
+    const event = await this.repo.findEvent(organizationId, eventId);
+    if (!event) throw DomainException.notFound(`Event ${eventId} not found.`);
+    return event;
+  }
+
+  private assertEndAfterStart(input: UpdateEventInput, event: EventRow): void {
+    const startAt = input.startAt ?? event.startAt;
+    const endAt = input.endAt !== undefined ? input.endAt : event.endAt;
+    if (endAt && endAt.getTime() <= startAt.getTime()) {
+      throw DomainException.validation(
+        'End time must be after the start time.',
+      );
+    }
+  }
+
+  private staleEvent(): DomainException {
+    return DomainException.conflict(
+      'This event changed elsewhere. Reload the latest version and try again.',
+    );
   }
 
   /** The organizer's events for this tenant, filtered/sorted, one page at a time. */

@@ -4,6 +4,8 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -23,6 +25,7 @@ import { PermissionsGuard } from '../identity/guards/permissions.guard';
 import { CreateEventDto } from './dto/create-event.dto';
 import { EventResponseDto } from './dto/event-response.dto';
 import { ListEventsQueryDto } from './dto/list-events.query.dto';
+import { UpdateEventDto } from './dto/update-event.dto';
 import { EventsService } from './events.service';
 import { AdminGuard } from './guards/admin.guard';
 
@@ -70,6 +73,43 @@ export class EventsController {
     return this.events.list(
       { organizationId: auth.organizationId, userId: auth.userId },
       query,
+    );
+  }
+
+  @Get(':id')
+  @RequirePermissions(Permission.evCreate)
+  @ResponseMessage('Event retrieved.')
+  @ApiData(EventResponseDto)
+  get(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id') id: string,
+  ): Promise<EventResponseDto> {
+    return this.events.getEvent(
+      { organizationId: auth.organizationId, userId: auth.userId },
+      id,
+    );
+  }
+
+  @Patch(':id')
+  @RequirePermissions(Permission.evCreate)
+  @ResponseMessage('Event updated.')
+  @ApiData(EventResponseDto)
+  update(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id') id: string,
+    @Body() dto: UpdateEventDto,
+  ): Promise<EventResponseDto> {
+    const { startAt, endAt, ...rest } = dto;
+    return this.events.updateEvent(
+      { organizationId: auth.organizationId, userId: auth.userId },
+      id,
+      {
+        ...rest,
+        ...(startAt !== undefined ? { startAt: new Date(startAt) } : {}),
+        ...(endAt !== undefined
+          ? { endAt: endAt === null ? null : new Date(endAt) }
+          : {}),
+      },
     );
   }
 }

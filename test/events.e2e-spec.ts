@@ -210,6 +210,82 @@ describe('Events (e2e — create draft + list)', () => {
       body.data.some((e) => e.slug === 'bangkok-tech-conference-2026'),
     ).toBe(false);
   });
+
+  describe('get + update (US-EVT-01/03/04)', () => {
+    interface FullEvent {
+      id: string;
+      name: string;
+      venueName: string | null;
+      endAt: string | null;
+      version: number;
+    }
+    let eventId: string;
+    let version: number;
+
+    const patch = (jwt: string, body: Record<string, unknown>) =>
+      request(server)
+        .patch(`/api/v1/events/${eventId}`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send(body);
+
+    it('creates an event to work with', async () => {
+      const jwt = await token(ADMIN_A, ORG_A.slug, 'admin');
+      const res = await createEvent(jwt, {
+        name: 'Editable Event',
+        type: 'Conference',
+        startAt: '2026-09-01T02:00:00Z',
+      });
+      expect(res.status).toBe(201);
+      const data = (res.body as SuccessBody<FullEvent>).data;
+      eventId = data.id;
+      version = data.version;
+      expect(version).toBe(1);
+    });
+
+    it('GET /events/:id returns the event', async () => {
+      const jwt = await token(ADMIN_A, ORG_A.slug, 'admin');
+      const res = await request(server)
+        .get(`/api/v1/events/${eventId}`)
+        .set('Authorization', `Bearer ${jwt}`);
+      expect(res.status).toBe(200);
+      expect((res.body as SuccessBody<FullEvent>).data.id).toBe(eventId);
+    });
+
+    it("404 for another tenant's event", async () => {
+      const jwtB = await token(ADMIN_B, ORG_B.slug, 'admin');
+      const res = await request(server)
+        .get(`/api/v1/events/${eventId}`)
+        .set('Authorization', `Bearer ${jwtB}`);
+      expect(res.status).toBe(404);
+    });
+
+    it('updates fields and bumps the version', async () => {
+      const jwt = await token(ADMIN_A, ORG_A.slug, 'admin');
+      const res = await patch(jwt, {
+        name: 'Renamed Event',
+        venueName: 'Hall A',
+        endAt: '2026-09-01T05:00:00Z',
+      });
+      expect(res.status).toBe(200);
+      const data = (res.body as SuccessBody<FullEvent>).data;
+      expect(data.name).toBe('Renamed Event');
+      expect(data.venueName).toBe('Hall A');
+      expect(data.version).toBe(version + 1);
+      version = data.version;
+    });
+
+    it('rejects an end time before the start (422)', async () => {
+      const jwt = await token(ADMIN_A, ORG_A.slug, 'admin');
+      expect((await patch(jwt, { endAt: '2026-08-01T00:00:00Z' })).status).toBe(
+        422,
+      );
+    });
+
+    it('rejects a stale version with 409', async () => {
+      const jwt = await token(ADMIN_A, ORG_A.slug, 'admin');
+      expect((await patch(jwt, { name: 'Nope', version: 1 })).status).toBe(409);
+    });
+  });
 });
 
 interface SeedPerson {
