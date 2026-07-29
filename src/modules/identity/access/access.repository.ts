@@ -1,14 +1,32 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../../db/drizzle.constants';
-import { permissions, rolePermissions, roles } from '../../../db/schema';
+import {
+  memberships,
+  permissions,
+  rolePermissions,
+  roles,
+  users,
+} from '../../../db/schema';
 import { withTenant } from '../../../db/tenant';
 import type { Tx } from '../../../db/tenant';
 import type { PermissionKey } from '../decorators/require-permissions.decorator';
 import type {
+  ListMembersOptions,
+  MemberRow,
   PermissionCatalogItem,
   RoleWithPermissions,
 } from './access.types';
+
+const MEMBER_COLUMNS = {
+  id: memberships.id,
+  userId: memberships.userId,
+  name: users.name,
+  email: users.email,
+  roleId: memberships.roleId,
+  role: roles.name,
+  status: memberships.status,
+};
 
 /** Data access for RBAC management (roles ⇄ permissions). Roles are tenant-scoped. */
 @Injectable()
@@ -74,6 +92,101 @@ export class AccessRepository {
             keys.map((key) => ({ roleId, permissionKey: key, granted: true })),
           );
       }
+    });
+  }
+
+  /** A page of this org's members (membership ⋈ user ⋈ role), plus the total. */
+  async listMembers(
+    organizationId: number,
+    opts: ListMembersOptions,
+  ): Promise<{ items: MemberRow[]; total: number }> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const where = and(
+        eq(memberships.organizationId, organizationId),
+        isNull(memberships.deletedAt),
+      );
+      const [{ count }] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(memberships)
+        .where(where);
+      const items = await tx
+        .select(MEMBER_COLUMNS)
+        .from(memberships)
+        .innerJoin(users, eq(users.id, memberships.userId))
+        .innerJoin(roles, eq(roles.id, memberships.roleId))
+        .where(where)
+        .orderBy(asc(memberships.id))
+        .limit(opts.limit)
+        .offset(opts.offset);
+      return { items, total: count };
+    });
+  }
+
+  async memberExists(
+    organizationId: number,
+    membershipId: number,
+  ): Promise<boolean> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({ id: memberships.id })
+        .from(memberships)
+        .where(
+          and(
+            eq(memberships.id, membershipId),
+            eq(memberships.organizationId, organizationId),
+            isNull(memberships.deletedAt),
+          ),
+        )
+        .limit(1);
+      return row !== undefined;
+    });
+  }
+
+  async getMember(
+    organizationId: number,
+    membershipId: number,
+  ): Promise<MemberRow> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select(MEMBER_COLUMNS)
+        .from(memberships)
+        .innerJoin(users, eq(users.id, memberships.userId))
+        .innerJoin(roles, eq(roles.id, memberships.roleId))
+        .where(
+          and(
+            eq(memberships.id, membershipId),
+            eq(memberships.organizationId, organizationId),
+          ),
+        )
+        .limit(1);
+      return row;
+    });
+  }
+
+  /** Re-assign a membership to another role (also updates the denormalized name). */
+  async updateMemberRole(
+    organizationId: number,
+    membershipId: number,
+    roleId: number,
+  ): Promise<void> {
+    await withTenant(this.db, organizationId, async (tx) => {
+      const [role] = await tx
+        .select({ name: roles.name })
+        .from(roles)
+        .where(
+          and(eq(roles.id, roleId), eq(roles.organizationId, organizationId)),
+        )
+        .limit(1);
+      if (!role) return;
+      await tx
+        .update(memberships)
+        .set({ roleId, role: role.name, updatedAt: new Date() })
+        .where(
+          and(
+            eq(memberships.id, membershipId),
+            eq(memberships.organizationId, organizationId),
+          ),
+        );
     });
   }
 

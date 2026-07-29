@@ -38,6 +38,7 @@ describe('Access / RBAC management (e2e)', () => {
   let server: Server;
   let pool: Pool;
   let staffRoleId: number;
+  let organizerRoleId: number;
   let foreignRoleId: number;
 
   beforeAll(async () => {
@@ -48,6 +49,7 @@ describe('Access / RBAC management (e2e)', () => {
       ORG,
       [
         { name: 'Admin', grants: ['setUsers', 'evCreate', 'regView'] },
+        { name: 'Organizer', grants: ['evCreate'] },
         { name: 'Staff', grants: ['regView'] },
       ],
       [
@@ -56,6 +58,7 @@ describe('Access / RBAC management (e2e)', () => {
       ],
     );
     staffRoleId = seeded.roleIdByName.Staff;
+    organizerRoleId = seeded.roleIdByName.Organizer;
     const other = await seedOrg(
       pool,
       ORG2,
@@ -181,6 +184,59 @@ describe('Access / RBAC management (e2e)', () => {
       .set('Authorization', `Bearer ${jwt}`)
       .send({ permissions: ['evCreate'] });
     expect(res.status).toBe(404);
+  });
+
+  const membersOf = async (jwt: string) =>
+    (
+      await request(server)
+        .get('/api/v1/members')
+        .set('Authorization', `Bearer ${jwt}`)
+    ).body as Success<{ id: number; email: string; role: string }[]>;
+
+  it('lists members with their role (paginated)', async () => {
+    const jwt = await token(ADMIN);
+    const res = await request(server)
+      .get('/api/v1/members')
+      .set('Authorization', `Bearer ${jwt}`);
+    expect(res.status).toBe(200);
+    expect((res.body as { meta?: unknown }).meta).toBeDefined();
+    const staff = (
+      res.body as Success<{ email: string; role: string }[]>
+    ).data.find((m) => m.email === STAFF);
+    expect(staff?.role).toBe('Staff');
+  });
+
+  it('assigns a member to another role', async () => {
+    const jwt = await token(ADMIN);
+    const members = await membersOf(jwt);
+    const staff = members.data.find((m) => m.email === STAFF);
+
+    const res = await request(server)
+      .patch(`/api/v1/members/${staff?.id}`)
+      .set('Authorization', `Bearer ${jwt}`)
+      .send({ roleId: organizerRoleId });
+    expect(res.status).toBe(200);
+    expect((res.body as Success<{ role: string }>).data.role).toBe('Organizer');
+  });
+
+  it('refuses to assign a role from another tenant (404)', async () => {
+    const jwt = await token(ADMIN);
+    const members = await membersOf(jwt);
+    const staff = members.data.find((m) => m.email === STAFF);
+
+    const res = await request(server)
+      .patch(`/api/v1/members/${staff?.id}`)
+      .set('Authorization', `Bearer ${jwt}`)
+      .send({ roleId: foreignRoleId });
+    expect(res.status).toBe(404);
+  });
+
+  it('forbids the members endpoints without setUsers (403)', async () => {
+    const jwt = await token(STAFF);
+    const res = await request(server)
+      .get('/api/v1/members')
+      .set('Authorization', `Bearer ${jwt}`);
+    expect(res.status).toBe(403);
   });
 });
 

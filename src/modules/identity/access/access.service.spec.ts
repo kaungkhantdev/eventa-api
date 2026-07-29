@@ -15,6 +15,10 @@ describe('AccessService', () => {
       roleExists: jest.fn(),
       setRolePermissions: jest.fn().mockResolvedValue(undefined),
       getRole: jest.fn(),
+      listMembers: jest.fn(),
+      memberExists: jest.fn(),
+      updateMemberRole: jest.fn().mockResolvedValue(undefined),
+      getMember: jest.fn(),
     } as unknown as jest.Mocked<AccessRepository>;
     service = new AccessService(repo);
   });
@@ -101,6 +105,81 @@ describe('AccessService', () => {
       const catalog = await service.listPermissions();
 
       expect(catalog[0]).toMatchObject({ key: 'evCreate', group: 'Events' });
+    });
+  });
+
+  describe('changeMemberRole', () => {
+    const member = {
+      id: 10,
+      userId: 'u2',
+      name: 'Sam',
+      email: 's@acme.test',
+      roleId: 7,
+      role: 'Organizer',
+      status: 'Active',
+    };
+
+    it('rejects a membership not in the caller org with 404', async () => {
+      repo.memberExists.mockResolvedValue(false);
+
+      const err = await service
+        .changeMemberRole(orgId, 999, 7)
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(DomainException);
+      expect((err as DomainException).getStatus()).toBe(404);
+      expect(repo.updateMemberRole).not.toHaveBeenCalled();
+    });
+
+    it('rejects a target role not in the caller org with 404', async () => {
+      repo.memberExists.mockResolvedValue(true);
+      repo.roleExists.mockResolvedValue(false);
+
+      const err = await service
+        .changeMemberRole(orgId, 10, 999)
+        .catch((e: unknown) => e);
+
+      expect((err as DomainException).getStatus()).toBe(404);
+      expect(repo.updateMemberRole).not.toHaveBeenCalled();
+    });
+
+    it('updates the member role and returns the updated member', async () => {
+      repo.memberExists.mockResolvedValue(true);
+      repo.roleExists.mockResolvedValue(true);
+      repo.getMember.mockResolvedValue(member);
+
+      const result = await service.changeMemberRole(orgId, 10, 7);
+
+      expect(repo.updateMemberRole).toHaveBeenCalledWith(orgId, 10, 7);
+      expect(result).toMatchObject({ id: 10, roleId: 7, role: 'Organizer' });
+    });
+  });
+
+  describe('listMembers', () => {
+    it('returns a mapped Paginated with default paging', async () => {
+      repo.listMembers.mockResolvedValue({
+        items: [
+          {
+            id: 10,
+            userId: 'u2',
+            name: 'Sam',
+            email: 's@acme.test',
+            roleId: 7,
+            role: 'Organizer',
+            status: 'Active',
+          },
+        ],
+        total: 1,
+      });
+
+      const page = await service.listMembers(orgId, {});
+
+      expect(repo.listMembers).toHaveBeenCalledWith(orgId, {
+        limit: 20,
+        offset: 0,
+      });
+      expect(page.meta).toMatchObject({ page: 1, limit: 20, total: 1 });
+      expect(page.items[0]).toMatchObject({ id: 10, role: 'Organizer' });
     });
   });
 });

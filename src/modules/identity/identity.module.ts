@@ -8,6 +8,7 @@ import { PlatformModule } from '../platform/platform.module';
 import { AccessController } from './access/access.controller';
 import { AccessRepository } from './access/access.repository';
 import { AccessService } from './access/access.service';
+import { MembersController } from './access/members.controller';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -35,7 +36,7 @@ import { TokenService } from './token.service';
       }),
     }),
   ],
-  controllers: [AuthController, AccessController],
+  controllers: [AuthController, AccessController, MembersController],
   providers: [
     AccessService,
     AccessRepository,
