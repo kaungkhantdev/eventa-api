@@ -24,6 +24,11 @@ const ADMIN = {
   email: 'admin@acme.test',
   password: 'correct horse battery staple',
 } as const;
+const STAFF = {
+  name: 'Acme Staff',
+  email: 'staff@acme.test',
+  password: 'correct horse battery staple',
+} as const;
 // The full permission catalog (permission_key enum). The seeded Admin role is
 // granted all of them, so the admin account can create/publish events, etc.
 const PERMISSIONS = [
@@ -40,6 +45,31 @@ const PERMISSIONS = [
   { key: 'setSettings', group: 'Settings', label: 'Manage settings' },
   { key: 'setIntegrations', group: 'Settings', label: 'Manage integrations' },
 ] as const;
+const ALL_KEYS = PERMISSIONS.map((p) => p.key);
+// Default role → permission matrix. These are just starting points — edit them at
+// runtime via PUT /roles/:id/permissions.
+const ROLES: { name: string; description: string; grants: string[] }[] = [
+  { name: 'Admin', description: 'Full access', grants: ALL_KEYS },
+  {
+    name: 'Organizer',
+    description: 'Events, program & registrations',
+    grants: [
+      'evCreate',
+      'evPublish',
+      'evSpeakers',
+      'regView',
+      'regCheckin',
+      'regExport',
+      'finView',
+      'finDiscount',
+    ],
+  },
+  {
+    name: 'Staff',
+    description: 'Check-in & registration view',
+    grants: ['regView', 'regCheckin'],
+  },
+];
 // A few workspace categories so the event `categoryId` path is testable.
 // (color values are the `category_color` enum; icon is a Hugeicons slug.)
 const CATEGORIES = [
@@ -56,6 +86,13 @@ function databaseUrl(): string {
 }
 
 async function resetTenant(pool: Pool): Promise<void> {
+  // audit_events is ON DELETE RESTRICT (audit records never cascade), so clear
+  // them before dropping the org.
+  await pool.query(
+    `DELETE FROM audit_events WHERE organization_id IN
+       (SELECT id FROM organizations WHERE slug = $1)`,
+    [ORG.slug],
+  );
   await pool.query(`DELETE FROM organizations WHERE slug = $1`, [ORG.slug]);
 }
 
@@ -77,37 +114,45 @@ async function insertPermissions(pool: Pool): Promise<void> {
   }
 }
 
-async function insertAdminRole(pool: Pool, orgId: number): Promise<number> {
-  const res = await pool.query<{ id: string }>(
-    `INSERT INTO roles (organization_id, name, description)
-     VALUES ($1, 'Admin', 'Full access') RETURNING id`,
-    [orgId],
-  );
-  const roleId = Number(res.rows[0].id);
-  for (const p of PERMISSIONS) {
-    await pool.query(
-      `INSERT INTO role_permissions (role_id, permission_key, granted) VALUES ($1, $2, true)`,
-      [roleId, p.key],
-    );
-  }
-  return roleId;
-}
-
-async function insertAdminUser(
+async function insertRoles(
   pool: Pool,
   orgId: number,
+): Promise<Record<string, number>> {
+  const idByName: Record<string, number> = {};
+  for (const role of ROLES) {
+    const res = await pool.query<{ id: string }>(
+      `INSERT INTO roles (organization_id, name, description) VALUES ($1, $2, $3) RETURNING id`,
+      [orgId, role.name, role.description],
+    );
+    const roleId = Number(res.rows[0].id);
+    idByName[role.name] = roleId;
+    for (const key of role.grants) {
+      await pool.query(
+        `INSERT INTO role_permissions (role_id, permission_key, granted) VALUES ($1, $2, true)`,
+        [roleId, key],
+      );
+    }
+  }
+  return idByName;
+}
+
+async function insertUser(
+  pool: Pool,
+  orgId: number,
+  person: { name: string; email: string; password: string },
   roleId: number,
+  roleName: string,
 ): Promise<void> {
-  const passwordHash = await hash(ADMIN.password);
+  const passwordHash = await hash(person.password);
   const res = await pool.query<{ id: string }>(
     `INSERT INTO users (organization_id, name, email, persona, status, password_hash)
      VALUES ($1, $2, $3, 'admin', 'Active', $4) RETURNING id`,
-    [orgId, ADMIN.name, ADMIN.email, passwordHash],
+    [orgId, person.name, person.email, passwordHash],
   );
   await pool.query(
     `INSERT INTO memberships (organization_id, user_id, role_id, role, status)
-     VALUES ($1, $2, $3, 'Admin', 'Active')`,
-    [orgId, res.rows[0].id, roleId],
+     VALUES ($1, $2, $3, $4, 'Active')`,
+    [orgId, res.rows[0].id, roleId, roleName],
   );
 }
 
@@ -124,10 +169,17 @@ async function insertCategories(pool: Pool, orgId: number): Promise<void> {
 }
 
 function printCredentials(): void {
-  console.log('[seed] ready — sign in at /api/docs → POST /auth/login:');
-  console.log(`  orgSlug   ${ORG.slug}`);
-  console.log(`  email     ${ADMIN.email}`);
-  console.log(`  password  ${ADMIN.password}`);
+  console.log(
+    '[seed] ready — sign in at /api/docs → POST /auth/login (orgSlug: ' +
+      ORG.slug +
+      '):',
+  );
+  console.log(`  Admin  ${ADMIN.email}  (all permissions)`);
+  console.log(`  Staff  ${STAFF.email}  (regView, regCheckin only)`);
+  console.log(`  password (both): ${ADMIN.password}`);
+  console.log(
+    '[seed] roles seeded: Admin, Organizer, Staff — edit via PUT /roles/:id/permissions',
+  );
 }
 
 async function seed(): Promise<void> {
@@ -136,8 +188,9 @@ async function seed(): Promise<void> {
     await resetTenant(pool);
     const orgId = await insertOrg(pool);
     await insertPermissions(pool);
-    const roleId = await insertAdminRole(pool, orgId);
-    await insertAdminUser(pool, orgId, roleId);
+    const roleIds = await insertRoles(pool, orgId);
+    await insertUser(pool, orgId, ADMIN, roleIds.Admin, 'Admin');
+    await insertUser(pool, orgId, STAFF, roleIds.Staff, 'Staff');
     await insertCategories(pool, orgId);
     printCredentials();
   } finally {
