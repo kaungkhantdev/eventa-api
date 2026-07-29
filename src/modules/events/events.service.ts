@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { DomainException } from '../../common/errors/domain.exception';
 import { Paginated } from '../../common/http/paginated';
+import { pickDefined } from '../../common/util/pick-defined';
 import { EventResponseDto } from './dto/event-response.dto';
 import { toEventResponse } from './events.mapper';
 import { EventsRepository } from './events.repository';
@@ -46,18 +47,6 @@ function bucketForStatus(status: EventStatus): EventBucket {
   return status === 'completed' || status === 'cancelled'
     ? 'completed'
     : 'active';
-}
-
-/** Copy only the keys present (not undefined) in `source` — PATCH semantics. */
-function pickDefined<T, K extends keyof T>(
-  source: T,
-  keys: readonly K[],
-): Partial<Pick<T, K>> {
-  const out: Partial<Pick<T, K>> = {};
-  for (const key of keys) {
-    if (source[key] !== undefined) out[key] = source[key];
-  }
-  return out;
 }
 
 /** Orchestrates event management rules (the Events bounded context). */

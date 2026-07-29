@@ -10,3 +10,4 @@ export * from './identity'; // users, roles, permissions, role_permissions, memb
 export * from './settings'; // api_keys, notification_preferences
 export * from './platform'; // audit_events, outbox_events, webhook_events
 export * from './events'; // categories, landing_templates, events
+export * from './ticketing'; // ticket_types

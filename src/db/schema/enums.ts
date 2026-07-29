@@ -123,3 +123,17 @@ export const templateIdEnum = pgEnum('template_id', [
   'minimal',
   'atlas',
 ]);
+
+// ── Ticketing ────────────────────────────────────────────────────────────────
+
+export const ticketStatusEnum = pgEnum('ticket_status', [
+  'onsale',
+  'scheduled',
+  'paused',
+  'soldout',
+]);
+
+export const admissionTypeEnum = pgEnum('admission_type', [
+  'general_admission',
+  'reserved_seat',
+]);

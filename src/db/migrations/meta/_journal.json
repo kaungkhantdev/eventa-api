@@ -36,6 +36,20 @@
       "when": 1785248331345,
       "tag": "0004_rls_events",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785332288376,
+      "tag": "0005_ticketing",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785332288776,
+      "tag": "0006_rls_ticketing",
+      "breakpoints": true
     }
   ]
 }
