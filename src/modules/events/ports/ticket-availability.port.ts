@@ -17,4 +17,7 @@ export abstract class TicketAvailabilityPort {
     organizationId: number,
     eventId: string,
   ): Promise<number>;
+
+  /** Tickets already sold across an event's tiers (a proxy for registrations). */
+  abstract soldCount(organizationId: number, eventId: string): Promise<number>;
 }

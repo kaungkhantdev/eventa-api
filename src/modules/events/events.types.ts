@@ -67,6 +67,17 @@ export interface UnpublishEventInput {
   version?: number;
 }
 
+/** Service input to delete an event. */
+export interface DeleteEventInput {
+  version?: number;
+}
+
+/** Service input to cancel an event (reason required). */
+export interface CancelEventInput {
+  reason: string;
+  version?: number;
+}
+
 /** Partial update to an event (Basics + Date/Location). Undefined = leave as-is. */
 export interface UpdateEventInput {
   name?: string;

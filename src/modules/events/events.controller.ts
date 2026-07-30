@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -22,7 +23,9 @@ import {
   RequirePermissions,
 } from '../identity/decorators/require-permissions.decorator';
 import { PermissionsGuard } from '../identity/guards/permissions.guard';
+import { CancelEventDto } from './dto/cancel-event.dto';
 import { CreateEventDto } from './dto/create-event.dto';
+import { DeleteEventDto } from './dto/delete-event.dto';
 import { EventResponseDto } from './dto/event-response.dto';
 import { ListEventsQueryDto } from './dto/list-events.query.dto';
 import { PublishEventDto } from './dto/publish-event.dto';
@@ -143,6 +146,40 @@ export class EventsController {
     @Body() dto: UnpublishEventDto,
   ): Promise<EventResponseDto> {
     return this.events.unpublishEvent(
+      { organizationId: auth.organizationId, userId: auth.userId },
+      id,
+      dto,
+    );
+  }
+
+  @Post(':id/cancel')
+  @RequirePermissions(Permission.evPublish)
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage(
+    'Event cancelled. Refunds and attendee notices are being processed.',
+  )
+  @ApiData(EventResponseDto)
+  cancel(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id') id: string,
+    @Body() dto: CancelEventDto,
+  ): Promise<EventResponseDto> {
+    return this.events.cancelEvent(
+      { organizationId: auth.organizationId, userId: auth.userId },
+      id,
+      dto,
+    );
+  }
+
+  @Delete(':id')
+  @RequirePermissions(Permission.evPublish)
+  @ResponseMessage('Event deleted.')
+  remove(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id') id: string,
+    @Body() dto: DeleteEventDto,
+  ): Promise<void> {
+    return this.events.deleteEvent(
       { organizationId: auth.organizationId, userId: auth.userId },
       id,
       dto,

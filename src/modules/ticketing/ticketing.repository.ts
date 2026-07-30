@@ -165,6 +165,25 @@ export class TicketingRepository {
     });
   }
 
+  /** Tickets sold across the event's live tiers (proxy for "has registrations"). */
+  async sumSold(organizationId: number, eventId: string): Promise<number> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({
+          sold: sql<number>`coalesce(sum(${ticketTypes.sold}), 0)::int`,
+        })
+        .from(ticketTypes)
+        .where(
+          and(
+            eq(ticketTypes.organizationId, organizationId),
+            eq(ticketTypes.eventId, eventId),
+            isNull(ticketTypes.deletedAt),
+          ),
+        );
+      return row.sold;
+    });
+  }
+
   /** The org's VAT rate (numeric string → number); default 7% if unset. */
   async orgVatRate(organizationId: number): Promise<number> {
     return withTenant(this.db, organizationId, async (tx) => {

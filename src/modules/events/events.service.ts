@@ -5,12 +5,15 @@ import { Paginated } from '../../common/http/paginated';
 import { pickDefined } from '../../common/util/pick-defined';
 import { OutboxPort } from '../platform/outbox.port';
 import { EventResponseDto } from './dto/event-response.dto';
+import { eventCancelledEvent } from './events/event-cancelled.event';
 import { eventPublishedEvent } from './events/event-published.event';
 import { toEventResponse } from './events.mapper';
 import { EventsRepository } from './events.repository';
 import { TicketAvailabilityPort } from './ports/ticket-availability.port';
 import type {
+  CancelEventInput,
   CreateEventInput,
+  DeleteEventInput,
   EventActor,
   EventBucket,
   EventRow,
@@ -30,6 +33,8 @@ const MAX_LIMIT = 100;
 
 const DRAFT_STATUS: EventStatus = 'draft';
 const PUBLISHED_STATUS: EventStatus = 'upcoming';
+const CANCELLED_STATUS: EventStatus = 'cancelled';
+const COMPLETED_STATUS: EventStatus = 'completed';
 const PRIVATE_VISIBILITY: Visibility = 'private';
 
 /** Human phrase per publish requirement, listed back when one is missing. */
@@ -213,6 +218,90 @@ export class EventsService {
     );
     if (!updated) throw this.staleEvent();
     return toEventResponse(updated);
+  }
+
+  /**
+   * Permanently delete an event — only a draft with no registrations. A published
+   * event, or one with sales, is never hard-deleted (409, routed to Cancel).
+   */
+  async deleteEvent(
+    actor: EventActor,
+    eventId: string,
+    input: DeleteEventInput,
+  ): Promise<void> {
+    const event = await this.loadEvent(actor.organizationId, eventId);
+    if (input.version !== undefined && input.version !== event.version) {
+      throw this.staleEvent();
+    }
+    if (event.status !== DRAFT_STATUS) {
+      throw DomainException.conflict(
+        'A published event cannot be deleted. Cancel it instead to refund and notify attendees.',
+      );
+    }
+    const sold = await this.tickets.soldCount(actor.organizationId, eventId);
+    if (sold > 0) {
+      throw DomainException.conflict(
+        "This event has registrations and can't be deleted. Cancel it instead to refund and notify attendees.",
+      );
+    }
+    await this.repo.hardDelete(actor.organizationId, eventId);
+  }
+
+  /**
+   * Cancel an event: it stops accepting registrations and moves out of the Active
+   * bucket (retained for reporting). The refund/waitlist/notify side effects are
+   * emitted to the outbox for the worker; the request itself always succeeds.
+   */
+  async cancelEvent(
+    actor: EventActor,
+    eventId: string,
+    input: CancelEventInput,
+  ): Promise<EventResponseDto> {
+    const event = await this.loadEvent(actor.organizationId, eventId);
+    if (input.version !== undefined && input.version !== event.version) {
+      throw this.staleEvent();
+    }
+    const reason = input.reason.trim();
+    if (!reason) {
+      throw DomainException.validation('A cancellation reason is required.');
+    }
+    if (
+      event.status === CANCELLED_STATUS ||
+      event.status === COMPLETED_STATUS
+    ) {
+      throw DomainException.conflict('This event can no longer be cancelled.');
+    }
+    const cancelled = await this.repo.update(
+      actor.organizationId,
+      eventId,
+      {
+        status: CANCELLED_STATUS,
+        bucket: bucketForStatus(CANCELLED_STATUS),
+        cancelledAt: this.clock.now(),
+      },
+      event.version,
+    );
+    if (!cancelled) throw this.staleEvent();
+    await this.announceCancelled(actor, cancelled, reason);
+    return toEventResponse(cancelled);
+  }
+
+  private async announceCancelled(
+    actor: EventActor,
+    event: EventRow,
+    reason: string,
+  ): Promise<void> {
+    await this.outbox.enqueue(
+      eventCancelledEvent({
+        organizationId: actor.organizationId,
+        eventId: event.id,
+        slug: event.slug,
+        name: event.name,
+        reason,
+        cancelledBy: actor.userId,
+        occurredAt: this.clock.now().toISOString(),
+      }),
+    );
   }
 
   private publishValues(input: PublishEventInput): Partial<NewEventValues> {

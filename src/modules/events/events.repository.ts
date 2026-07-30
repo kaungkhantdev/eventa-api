@@ -133,6 +133,20 @@ export class EventsRepository {
     });
   }
 
+  /** Permanently remove an event (cascades to its tickets/sessions/seats/…). */
+  async hardDelete(organizationId: number, eventId: string): Promise<void> {
+    await withTenant(this.db, organizationId, async (tx) => {
+      await tx
+        .delete(events)
+        .where(
+          and(
+            eq(events.id, eventId),
+            eq(events.organizationId, organizationId),
+          ),
+        );
+    });
+  }
+
   /** A filtered, sorted page of this org's live events, plus the total count. */
   async list(
     organizationId: number,

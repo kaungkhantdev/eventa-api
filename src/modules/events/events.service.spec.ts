@@ -14,6 +14,8 @@ function makeDeps() {
   return {
     tickets: {
       activeCount: jest.fn().mockResolvedValue(1),
+      totalQuantity: jest.fn().mockResolvedValue(0),
+      soldCount: jest.fn().mockResolvedValue(0),
     } as unknown as jest.Mocked<TicketAvailabilityPort>,
     outbox: {
       enqueue: jest.fn().mockResolvedValue(undefined),
@@ -413,6 +415,122 @@ describe('EventsService publish/unpublish', () => {
         .catch((e: unknown) => e);
       expect((err as DomainException).getStatus()).toBe(409);
       expect(repo.update).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('EventsService delete/cancel', () => {
+  let repo: jest.Mocked<EventsRepository>;
+  let deps: ReturnType<typeof makeDeps>;
+  let service: EventsService;
+
+  function build(event: EventRow): void {
+    repo = {
+      findEvent: jest.fn().mockResolvedValue(event),
+      hardDelete: jest.fn().mockResolvedValue(undefined),
+      update: jest
+        .fn()
+        .mockImplementation((_o: number, _id: string, v: Partial<EventRow>) =>
+          Promise.resolve(
+            eventRow({ ...event, ...v, version: event.version + 1 }),
+          ),
+        ),
+    } as unknown as jest.Mocked<EventsRepository>;
+    deps = makeDeps();
+    service = new EventsService(repo, deps.tickets, deps.outbox, deps.clock);
+  }
+
+  describe('deleteEvent', () => {
+    it('permanently removes a draft with no sales', async () => {
+      build(eventRow({ status: 'draft' }));
+      deps.tickets.soldCount.mockResolvedValue(0);
+      await service.deleteEvent(auth, 'e1', {});
+      expect(repo.hardDelete).toHaveBeenCalledWith(1, 'e1');
+    });
+
+    it('blocks deleting a published event and routes to cancel (409)', async () => {
+      build(eventRow({ status: 'upcoming' }));
+      const err = await service
+        .deleteEvent(auth, 'e1', {})
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(409);
+      expect(repo.hardDelete).not.toHaveBeenCalled();
+    });
+
+    it('blocks deleting a draft that has registrations (409)', async () => {
+      build(eventRow({ status: 'draft' }));
+      deps.tickets.soldCount.mockResolvedValue(5);
+      const err = await service
+        .deleteEvent(auth, 'e1', {})
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(409);
+      expect((err as DomainException).message).toMatch(/cancel/i);
+      expect(repo.hardDelete).not.toHaveBeenCalled();
+    });
+
+    it('throws 404 when the event is not in the org', async () => {
+      build(eventRow());
+      repo.findEvent.mockResolvedValue(null);
+      const err = await service
+        .deleteEvent(auth, 'missing', {})
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(404);
+    });
+
+    it('rejects a stale version (409)', async () => {
+      build(eventRow({ status: 'draft', version: 3 }));
+      const err = await service
+        .deleteEvent(auth, 'e1', { version: 99 })
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(409);
+      expect(repo.hardDelete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('cancelEvent', () => {
+    it('cancels: moves out of Active, stamps cancelledAt, and notifies', async () => {
+      build(eventRow({ status: 'upcoming', version: 2 }));
+      const res = await service.cancelEvent(auth, 'e1', {
+        reason: 'Venue flooded',
+      });
+      const [, , values] = repo.update.mock.calls[0];
+      expect(values).toMatchObject({
+        status: 'cancelled',
+        bucket: 'completed',
+      });
+      expect(values.cancelledAt).toBeInstanceOf(Date);
+      expect(deps.outbox.enqueue).toHaveBeenCalledTimes(1);
+      expect(deps.outbox.enqueue.mock.calls[0][0].routingKey).toBe(
+        'events.cancelled',
+      );
+      expect(res.status).toBe('cancelled');
+    });
+
+    it('requires a non-blank reason (422)', async () => {
+      build(eventRow({ status: 'upcoming' }));
+      const err = await service
+        .cancelEvent(auth, 'e1', { reason: '   ' })
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(422);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects cancelling an already-cancelled event (409)', async () => {
+      build(eventRow({ status: 'cancelled' }));
+      const err = await service
+        .cancelEvent(auth, 'e1', { reason: 'x' })
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(409);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('throws 404 when the event is not in the org', async () => {
+      build(eventRow());
+      repo.findEvent.mockResolvedValue(null);
+      const err = await service
+        .cancelEvent(auth, 'missing', { reason: 'x' })
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(404);
     });
   });
 });
