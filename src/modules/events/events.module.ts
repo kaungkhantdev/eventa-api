@@ -9,6 +9,8 @@ import { EventsController } from './events.controller';
 import { EventsRepository } from './events.repository';
 import { EventsService } from './events.service';
 import { AdminGuard } from './guards/admin.guard';
+import { SharingController } from './sharing/sharing.controller';
+import { SharingService } from './sharing/sharing.service';
 
 /**
  * Events & Program bounded context: create/manage events, categories, tickets,
@@ -19,12 +21,13 @@ import { AdminGuard } from './guards/admin.guard';
  */
 @Module({
   imports: [IdentityModule, PlatformModule, forwardRef(() => TicketingModule)],
-  controllers: [EventsController, CategoriesController],
+  controllers: [EventsController, CategoriesController, SharingController],
   providers: [
     EventsService,
     EventsRepository,
     CategoriesService,
     CategoriesRepository,
+    SharingService,
     AdminGuard,
   ],
   exports: [EventsService],

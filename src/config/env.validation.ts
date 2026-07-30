@@ -28,6 +28,13 @@ export const envSchema = z.object({
   // HTTP
   CORS_ORIGINS: z.string().default('*'),
 
+  // Public web app base URL — used to build shareable/public event links.
+  PUBLIC_WEB_URL: z
+    .string()
+    .url()
+    .default('http://localhost:5173')
+    .transform((v) => v.replace(/\/+$/, '')),
+
   // Observability
   LOG_LEVEL: z
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
