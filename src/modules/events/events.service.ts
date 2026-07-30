@@ -4,7 +4,9 @@ import { DomainException } from '../../common/errors/domain.exception';
 import { Paginated } from '../../common/http/paginated';
 import { pickDefined } from '../../common/util/pick-defined';
 import { OutboxPort } from '../platform/outbox.port';
+import { CalendarResponseDto } from './dto/calendar-response.dto';
 import { EventResponseDto } from './dto/event-response.dto';
+import { UpcomingEventDto } from './dto/upcoming-event.dto';
 import { eventCancelledEvent } from './events/event-cancelled.event';
 import { eventPublishedEvent } from './events/event-published.event';
 import { toEventResponse } from './events.mapper';
@@ -30,6 +32,12 @@ import { slugify } from './slug';
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
+const DEFAULT_UPCOMING_LIMIT = 20;
+const MAX_UPCOMING_LIMIT = 100;
+
+/** Asia/Bangkok is a fixed UTC+7 (no DST) — used for calendar month & days-left. */
+const BANGKOK_OFFSET_MS = 7 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const DRAFT_STATUS: EventStatus = 'draft';
 const PUBLISHED_STATUS: EventStatus = 'upcoming';
@@ -175,6 +183,71 @@ export class EventsService {
       createdBy: actor.userId,
     };
     return toEventResponse(await this.repo.insert(values));
+  }
+
+  /** The month's events for the calendar (Bangkok-time month; count in the header). */
+  async calendar(
+    actor: EventActor,
+    month?: string,
+  ): Promise<CalendarResponseDto> {
+    const target = month ?? this.currentBangkokMonth();
+    const { start, end } = monthRangeUtc(target);
+    const rows = await this.repo.listInRange(actor.organizationId, start, end);
+    return {
+      month: target,
+      count: rows.length,
+      events: rows.map(toEventResponse),
+    };
+  }
+
+  /** Future events soonest-first, each with days-left (Bangkok) and a fill %. */
+  async upcoming(
+    actor: EventActor,
+    limit?: number,
+  ): Promise<UpcomingEventDto[]> {
+    const capped = Math.min(
+      MAX_UPCOMING_LIMIT,
+      Math.max(1, limit ?? DEFAULT_UPCOMING_LIMIT),
+    );
+    const now = this.clock.now();
+    const rows = await this.repo.listUpcoming(
+      actor.organizationId,
+      now,
+      capped,
+    );
+    const sales = await this.tickets.salesByEvent(
+      actor.organizationId,
+      rows.map((r) => r.id),
+    );
+    const nowDay = bangkokDay(now);
+    return rows.map((e) => this.toUpcoming(e, sales.get(e.id), nowDay));
+  }
+
+  private toUpcoming(
+    e: EventRow,
+    sale: { sold: number; quantity: number } | undefined,
+    nowDay: number,
+  ): UpcomingEventDto {
+    const sold = sale?.sold ?? 0;
+    const capacity = e.capacity ?? sale?.quantity ?? 0;
+    return {
+      id: e.id,
+      name: e.name,
+      slug: e.slug,
+      type: e.type,
+      status: e.status,
+      startAt: e.startAt.toISOString(),
+      daysLeft: Math.max(0, bangkokDay(e.startAt) - nowDay),
+      sold,
+      capacity,
+      fillPercent: capacity > 0 ? Math.round((sold / capacity) * 100) : 0,
+    };
+  }
+
+  private currentBangkokMonth(): string {
+    const bangkok = new Date(this.clock.now().getTime() + BANGKOK_OFFSET_MS);
+    const month = String(bangkok.getUTCMonth() + 1).padStart(2, '0');
+    return `${bangkok.getUTCFullYear()}-${month}`;
   }
 
   /** Update an event's Basics + Date/Location (optimistic-concurrency guarded). */
@@ -463,4 +536,18 @@ export class EventsService {
       if (!taken.has(candidate)) return candidate;
     }
   }
+}
+
+/** UTC bounds `[start, end)` of a `YYYY-MM` month interpreted in Asia/Bangkok. */
+function monthRangeUtc(month: string): { start: Date; end: Date } {
+  const [year, monthNumber] = month.split('-').map(Number);
+  return {
+    start: new Date(Date.UTC(year, monthNumber - 1, 1) - BANGKOK_OFFSET_MS),
+    end: new Date(Date.UTC(year, monthNumber, 1) - BANGKOK_OFFSET_MS),
+  };
+}
+
+/** The Bangkok calendar-day number for a UTC instant (days since epoch, +7h). */
+function bangkokDay(instant: Date): number {
+  return Math.floor((instant.getTime() + BANGKOK_OFFSET_MS) / DAY_MS);
 }

@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, isNull, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { organizations, ticketTypes } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
@@ -181,6 +181,34 @@ export class TicketingRepository {
           ),
         );
       return row.sold;
+    });
+  }
+
+  /** Sold + quantity totals grouped by event id (batched — for "how full" lists). */
+  async salesByEvent(
+    organizationId: number,
+    eventIds: string[],
+  ): Promise<Map<string, { sold: number; quantity: number }>> {
+    if (eventIds.length === 0) return new Map();
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({
+          eventId: ticketTypes.eventId,
+          sold: sql<number>`coalesce(sum(${ticketTypes.sold}), 0)::int`,
+          quantity: sql<number>`coalesce(sum(${ticketTypes.total}), 0)::int`,
+        })
+        .from(ticketTypes)
+        .where(
+          and(
+            eq(ticketTypes.organizationId, organizationId),
+            inArray(ticketTypes.eventId, eventIds),
+            isNull(ticketTypes.deletedAt),
+          ),
+        )
+        .groupBy(ticketTypes.eventId);
+      return new Map(
+        rows.map((r) => [r.eventId, { sold: r.sold, quantity: r.quantity }]),
+      );
     });
   }
 

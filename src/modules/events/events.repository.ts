@@ -4,9 +4,12 @@ import {
   asc,
   desc,
   eq,
+  gte,
   ilike,
   isNull,
   like,
+  lt,
+  ne,
   sql,
   type SQL,
 } from 'drizzle-orm';
@@ -130,6 +133,51 @@ export class EventsRepository {
         )
         .returning();
       return row ?? null;
+    });
+  }
+
+  /** Live events whose start falls in `[startUtc, endUtc)`, earliest first (calendar). */
+  async listInRange(
+    organizationId: number,
+    startUtc: Date,
+    endUtc: Date,
+  ): Promise<EventRow[]> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      return tx
+        .select()
+        .from(events)
+        .where(
+          and(
+            eq(events.organizationId, organizationId),
+            isNull(events.deletedAt),
+            gte(events.startAt, startUtc),
+            lt(events.startAt, endUtc),
+          ),
+        )
+        .orderBy(asc(events.startAt), asc(events.id));
+    });
+  }
+
+  /** Live, non-cancelled events starting at/after `nowUtc`, soonest first (upcoming). */
+  async listUpcoming(
+    organizationId: number,
+    nowUtc: Date,
+    limit: number,
+  ): Promise<EventRow[]> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      return tx
+        .select()
+        .from(events)
+        .where(
+          and(
+            eq(events.organizationId, organizationId),
+            isNull(events.deletedAt),
+            gte(events.startAt, nowUtc),
+            ne(events.status, 'cancelled'),
+          ),
+        )
+        .orderBy(asc(events.startAt), asc(events.id))
+        .limit(limit);
     });
   }
 

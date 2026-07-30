@@ -20,4 +20,10 @@ export abstract class TicketAvailabilityPort {
 
   /** Tickets already sold across an event's tiers (a proxy for registrations). */
   abstract soldCount(organizationId: number, eventId: string): Promise<number>;
+
+  /** Sold + quantity per event id, in one query — for list "how full" fills. */
+  abstract salesByEvent(
+    organizationId: number,
+    eventIds: string[],
+  ): Promise<Map<string, { sold: number; quantity: number }>>;
 }

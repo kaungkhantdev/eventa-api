@@ -13,7 +13,11 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiForbiddenResponse, ApiTags } from '@nestjs/swagger';
 import { ApiErrorDto } from '../../common/errors/error-envelope';
-import { ApiData, ApiPage } from '../../common/http/api-data.decorator';
+import {
+  ApiData,
+  ApiList,
+  ApiPage,
+} from '../../common/http/api-data.decorator';
 import { Paginated } from '../../common/http/paginated';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 import type { AuthContext } from '../identity/auth.types';
@@ -23,11 +27,15 @@ import {
   RequirePermissions,
 } from '../identity/decorators/require-permissions.decorator';
 import { PermissionsGuard } from '../identity/guards/permissions.guard';
+import { CalendarQueryDto } from './dto/calendar.query.dto';
+import { CalendarResponseDto } from './dto/calendar-response.dto';
 import { CancelEventDto } from './dto/cancel-event.dto';
 import { CreateEventDto } from './dto/create-event.dto';
 import { DeleteEventDto } from './dto/delete-event.dto';
 import { EventResponseDto } from './dto/event-response.dto';
 import { ListEventsQueryDto } from './dto/list-events.query.dto';
+import { UpcomingEventDto } from './dto/upcoming-event.dto';
+import { UpcomingQueryDto } from './dto/upcoming.query.dto';
 import { PublishEventDto } from './dto/publish-event.dto';
 import { UnpublishEventDto } from './dto/unpublish-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
@@ -78,6 +86,34 @@ export class EventsController {
     return this.events.list(
       { organizationId: auth.organizationId, userId: auth.userId },
       query,
+    );
+  }
+
+  @Get('calendar')
+  @RequirePermissions(Permission.evCreate)
+  @ResponseMessage('Calendar retrieved.')
+  @ApiData(CalendarResponseDto)
+  calendar(
+    @CurrentAuth() auth: AuthContext,
+    @Query() query: CalendarQueryDto,
+  ): Promise<CalendarResponseDto> {
+    return this.events.calendar(
+      { organizationId: auth.organizationId, userId: auth.userId },
+      query.month,
+    );
+  }
+
+  @Get('upcoming')
+  @RequirePermissions(Permission.evCreate)
+  @ResponseMessage('Upcoming events retrieved.')
+  @ApiList(UpcomingEventDto)
+  upcoming(
+    @CurrentAuth() auth: AuthContext,
+    @Query() query: UpcomingQueryDto,
+  ): Promise<UpcomingEventDto[]> {
+    return this.events.upcoming(
+      { organizationId: auth.organizationId, userId: auth.userId },
+      query.limit,
     );
   }
 
