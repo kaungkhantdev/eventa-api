@@ -11,4 +11,10 @@ export abstract class TicketAvailabilityPort {
     organizationId: number,
     eventId: string,
   ): Promise<number>;
+
+  /** Sum of the allocations (quantities) across an event's live ticket tiers. */
+  abstract totalQuantity(
+    organizationId: number,
+    eventId: string,
+  ): Promise<number>;
 }

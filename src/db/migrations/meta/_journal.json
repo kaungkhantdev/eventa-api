@@ -64,6 +64,20 @@
       "when": 1785406347299,
       "tag": "0008_rls_program",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785414271401,
+      "tag": "0009_seating",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785414324119,
+      "tag": "0010_rls_seating",
+      "breakpoints": true
     }
   ]
 }

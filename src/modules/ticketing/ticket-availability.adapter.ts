@@ -12,4 +12,8 @@ export class TicketAvailabilityAdapter extends TicketAvailabilityPort {
   activeCount(organizationId: number, eventId: string): Promise<number> {
     return this.repo.countActive(organizationId, eventId);
   }
+
+  totalQuantity(organizationId: number, eventId: string): Promise<number> {
+    return this.repo.sumQuantities(organizationId, eventId);
+  }
 }

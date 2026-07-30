@@ -12,3 +12,4 @@ export * from './platform'; // audit_events, outbox_events, webhook_events
 export * from './events'; // categories, landing_templates, events
 export * from './ticketing'; // ticket_types
 export * from './program'; // speakers, sessions, session_speakers
+export * from './seating'; // seat_maps, seats

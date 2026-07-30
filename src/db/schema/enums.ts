@@ -149,6 +149,14 @@ export const speakerToneEnum = pgEnum('speaker_tone', [
   'pink',
 ]);
 
+export const seatStatusEnum = pgEnum('seat_status', [
+  'available',
+  'held',
+  'reserved',
+  'sold',
+  'blocked',
+]);
+
 // ── Ticketing ────────────────────────────────────────────────────────────────
 
 export const ticketStatusEnum = pgEnum('ticket_status', [
