@@ -170,3 +170,53 @@ export const admissionTypeEnum = pgEnum('admission_type', [
   'general_admission',
   'reserved_seat',
 ]);
+
+// ── Registration, Orders & Payments ──────────────────────────────────────────
+
+export const attendeeTagEnum = pgEnum('attendee_tag', [
+  'VIP',
+  'Speaker',
+  'Sponsor',
+  'Student',
+]);
+
+export const orderStatusEnum = pgEnum('order_status', [
+  'confirmed',
+  'pending',
+  'waitlisted',
+  'cancelled',
+]);
+
+export const paymentStatusEnum = pgEnum('payment_status', [
+  'paid',
+  'pending',
+  'refunded',
+  'failed',
+]);
+
+export const issuedTicketStatusEnum = pgEnum('issued_ticket_status', [
+  'issued',
+  'checked_in',
+  'void',
+  'refunded',
+  'transferred',
+]);
+
+export const paymentMethodEnum = pgEnum('payment_method', [
+  'Card',
+  'PromptPay',
+  'Bank transfer',
+]);
+
+export const refundStatusEnum = pgEnum('refund_status', [
+  'pending',
+  'succeeded',
+  'failed',
+]);
+
+export const holdStatusEnum = pgEnum('hold_status', [
+  'active',
+  'converted',
+  'expired',
+  'released',
+]);
