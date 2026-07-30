@@ -124,6 +124,31 @@ export const templateIdEnum = pgEnum('template_id', [
   'atlas',
 ]);
 
+// ── Program (agenda & speakers) ──────────────────────────────────────────────
+
+export const sessionTypeEnum = pgEnum('session_type', [
+  'Keynote',
+  'Talk',
+  'Workshop',
+  'Panel',
+  'Break',
+]);
+
+export const sessionColorEnum = pgEnum('session_color', [
+  'green',
+  'amber',
+  'rose',
+]);
+
+export const speakerToneEnum = pgEnum('speaker_tone', [
+  'green',
+  'blue',
+  'purple',
+  'amber',
+  'red',
+  'pink',
+]);
+
 // ── Ticketing ────────────────────────────────────────────────────────────────
 
 export const ticketStatusEnum = pgEnum('ticket_status', [

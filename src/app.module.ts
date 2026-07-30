@@ -13,6 +13,7 @@ import { buildLoggerOptions } from './config/logger.config';
 import { DatabaseModule } from './db/database.module';
 import { HealthModule } from './health/health.module';
 import { EventsModule } from './modules/events/events.module';
+import { ProgramModule } from './modules/events/program/program.module';
 import { IdentityModule } from './modules/identity/identity.module';
 import { TicketingModule } from './modules/ticketing/ticketing.module';
 
@@ -30,6 +31,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     IdentityModule,
     EventsModule,
     TicketingModule,
+    ProgramModule,
   ],
 })
 export class AppModule implements NestModule {
