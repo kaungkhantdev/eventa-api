@@ -94,6 +94,33 @@ export class SpeakersService {
     await this.repo.softDelete(actor.organizationId, speakerId);
   }
 
+  /** Copy the source event's speakers onto a new event; returns old→new id map. */
+  async cloneForEvent(
+    actor: EventActor,
+    srcEventId: string,
+    destEventId: string,
+  ): Promise<Map<string, string>> {
+    const rows = await this.repo.listByEvent(actor.organizationId, srcEventId);
+    const idMap = new Map<string, string>();
+    for (const s of rows) {
+      const values: NewSpeakerValues = {
+        organizationId: actor.organizationId,
+        eventId: destEventId,
+        name: s.name,
+        role: s.role,
+        email: s.email,
+        phone: s.phone,
+        talkTitle: s.talkTitle,
+        tag: s.tag,
+        initials: s.initials,
+        tone: s.tone,
+      };
+      const copy = await this.repo.insert(values);
+      idMap.set(s.id, copy.id);
+    }
+    return idMap;
+  }
+
   private requireName(name: string): string {
     const trimmed = name.trim();
     if (!trimmed) throw DomainException.validation('A speaker needs a name.');

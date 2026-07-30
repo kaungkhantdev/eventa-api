@@ -96,6 +96,23 @@ export class SeatingService {
     return this.respond(actor.organizationId, event, map);
   }
 
+  /** Copy the source event's seat map onto a new event (fresh, all-available seats). */
+  async cloneForEvent(
+    actor: EventActor,
+    srcEventId: string,
+    destEventId: string,
+  ): Promise<void> {
+    const map = await this.repo.findMap(actor.organizationId, srcEventId);
+    if (!map?.layout) return;
+    const { rows, seatsPerRow } = map.layout;
+    await this.repo.applyReserved(
+      actor.organizationId,
+      { eventId: destEventId, name: map.name, rows, seatsPerRow },
+      generatePositions(rows, seatsPerRow),
+      false,
+    );
+  }
+
   /** A published event must never lose seats that are already sold. */
   private assertNoSoldSeats(
     event: EventResponseDto,

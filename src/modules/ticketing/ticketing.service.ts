@@ -127,6 +127,34 @@ export class TicketingService {
     await this.repo.softDelete(actor.organizationId, ticketId);
   }
 
+  /** Copy the source event's tiers onto a new event: 0 sold, sales window cleared. */
+  async cloneForEvent(
+    actor: EventActor,
+    srcEventId: string,
+    destEventId: string,
+  ): Promise<void> {
+    const rows = await this.repo.listByEvent(actor.organizationId, srcEventId);
+    for (const t of rows) {
+      const values: NewTicketValues = {
+        organizationId: actor.organizationId,
+        eventId: destEventId,
+        name: t.name,
+        isFree: t.isFree,
+        priceSatang: t.priceSatang,
+        currency: t.currency,
+        status: t.status,
+        admissionType: t.admissionType,
+        total: t.total,
+        salesStartAt: null,
+        salesEndAt: null,
+        minPerOrder: t.minPerOrder,
+        maxPerOrder: t.maxPerOrder,
+        iconClass: t.iconClass,
+      };
+      await this.repo.insert(values);
+    }
+  }
+
   private buildValues(input: UpdateTicketInput): Partial<NewTicketValues> {
     const values = pickDefined(input, UPDATABLE_KEYS);
     if (values.name !== undefined) values.name = values.name.trim();

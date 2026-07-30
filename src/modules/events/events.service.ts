@@ -136,6 +136,47 @@ export class EventsService {
     return toEventResponse(await this.loadEvent(actor.organizationId, eventId));
   }
 
+  /**
+   * Copy an event's details into a fresh "… (Copy)" draft (US-EVT-13). Everything
+   * lifecycle/sales-related resets: a new slug, status=draft, no published/cancelled
+   * stamps. Ticket/agenda/seating copies are layered on by the caller.
+   */
+  async duplicateBasics(
+    actor: EventActor,
+    srcEventId: string,
+  ): Promise<EventResponseDto> {
+    const src = await this.loadEvent(actor.organizationId, srcEventId);
+    const name = `${src.name} (Copy)`;
+    const values: NewEventValues = {
+      organizationId: actor.organizationId,
+      slug: await this.uniqueSlug(actor.organizationId, name),
+      name,
+      type: src.type,
+      status: DRAFT_STATUS,
+      bucket: bucketForStatus(DRAFT_STATUS),
+      visibility: src.visibility,
+      categoryId: src.categoryId,
+      startAt: src.startAt,
+      endAt: src.endAt,
+      timezone: src.timezone,
+      venueName: src.venueName,
+      venueAddress: src.venueAddress,
+      city: src.city,
+      isOnline: src.isOnline,
+      onlineNote: src.onlineNote,
+      seatingMode: src.seatingMode,
+      capacity: src.capacity,
+      coverImage: src.coverImage,
+      accentColor: src.accentColor,
+      organizerName: src.organizerName,
+      contactEmail: src.contactEmail,
+      landingTemplateId: src.landingTemplateId,
+      description: src.description,
+      createdBy: actor.userId,
+    };
+    return toEventResponse(await this.repo.insert(values));
+  }
+
   /** Update an event's Basics + Date/Location (optimistic-concurrency guarded). */
   async updateEvent(
     actor: EventActor,

@@ -23,5 +23,6 @@ import { SpeakersService } from './speakers.service';
     SessionsService,
     SessionsRepository,
   ],
+  exports: [SpeakersService, SessionsService],
 })
 export class ProgramModule {}

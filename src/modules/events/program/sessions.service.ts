@@ -179,6 +179,38 @@ export class SessionsService {
     return unique;
   }
 
+  /** Copy the source event's agenda onto a new event, re-linking speakers by map. */
+  async cloneForEvent(
+    actor: EventActor,
+    srcEventId: string,
+    destEventId: string,
+    speakerIdMap: Map<string, string>,
+  ): Promise<void> {
+    const rows = await this.repo.listByEvent(actor.organizationId, srcEventId);
+    const refs = await this.repo.speakersFor(
+      actor.organizationId,
+      rows.map((r) => r.id),
+    );
+    for (const s of rows) {
+      const speakerIds = (refs.get(s.id) ?? [])
+        .map((r) => speakerIdMap.get(r.id))
+        .filter((id): id is string => id !== undefined);
+      const values: NewSessionValues = {
+        organizationId: actor.organizationId,
+        eventId: destEventId,
+        day: s.day,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        title: s.title,
+        type: s.type,
+        room: s.room,
+        color: s.color,
+        sortOrder: s.sortOrder,
+      };
+      await this.repo.createWithSpeakers(values, speakerIds);
+    }
+  }
+
   private requireTitle(title: string): string {
     const trimmed = title.trim();
     if (!trimmed) throw DomainException.validation('A session needs a title.');

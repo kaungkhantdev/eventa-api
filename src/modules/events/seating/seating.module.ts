@@ -16,5 +16,6 @@ import { SeatingService } from './seating.service';
   imports: [EventsModule, TicketingModule, IdentityModule],
   controllers: [SeatingController],
   providers: [SeatingService, SeatingRepository],
+  exports: [SeatingService],
 })
 export class SeatingModule {}
