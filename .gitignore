@@ -3,6 +3,12 @@
 /node_modules
 /build
 
+# generated OpenAPI contract (emitted on boot; regenerated in CI)
+/openapi.json
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
 # Logs
 logs
 *.log
