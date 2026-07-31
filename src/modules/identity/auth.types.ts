@@ -41,3 +41,10 @@ export interface InviteTokenClaims {
   mid: number; // membership id
   typ: 'invite';
 }
+
+/** Claims of an email-confirmation token (opened to activate a new account). */
+export interface EmailVerificationClaims {
+  sub: string; // userId
+  org: number; // organizationId
+  typ: 'verify_email';
+}

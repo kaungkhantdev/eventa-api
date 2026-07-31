@@ -16,6 +16,8 @@ import { PermissionsGuard } from './guards/permissions.guard';
 import { IdentityRepository } from './identity.repository';
 import { PasswordService } from './password.service';
 import { PermissionsService } from './permissions.service';
+import { SignupRepository } from './signup.repository';
+import { SignupService } from './signup.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { TokenService } from './token.service';
 
@@ -45,6 +47,8 @@ import { TokenService } from './token.service';
     PasswordService,
     PermissionsService,
     PermissionsGuard,
+    SignupService,
+    SignupRepository,
     TokenService,
     JwtStrategy,
     { provide: APP_GUARD, useClass: JwtAuthGuard },

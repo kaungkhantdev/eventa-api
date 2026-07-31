@@ -1,19 +1,6 @@
-const MIN_LENGTH = 3;
-const MAX_LENGTH = 80;
-const FALLBACK = 'event';
+import { slugify as baseSlugify } from '../../common/util/slugify';
 
-/**
- * Turn a display name into a URL slug: lowercase, `a–z0–9` separated by single
- * hyphens (entities.md: `^[a-z0-9-]+$`, 3–80). Names that carry no latin
- * alphanumerics (e.g. Thai-only titles) fall back to a stable base.
- */
+/** Slugify an event name (entities.md: `^[a-z0-9-]+$`, 3–80; Thai-only → `event`). */
 export function slugify(name: string): string {
-  const slug = name
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, MAX_LENGTH)
-    .replace(/-+$/, ''); // truncation may land on a hyphen
-  return slug.length >= MIN_LENGTH ? slug : FALLBACK;
+  return baseSlugify(name, 'event');
 }

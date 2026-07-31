@@ -27,15 +27,46 @@ import {
 } from './dto/accept-invite.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
+import { RegisterDto } from './dto/register.dto';
+import { RegisterResponseDto } from './dto/register-response.dto';
 import { LoginResponseDto, RefreshResponseDto } from './dto/token-response.dto';
 import { MeResponseDto } from './dto/user-response.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
+import { VerifyEmailResponseDto } from './dto/verify-email-response.dto';
+import { SignupService } from './signup.service';
 
 const BEARER = 'Bearer';
 
 @ApiTags('auth')
 @Controller()
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly signup: SignupService,
+  ) {}
+
+  @Public()
+  @Post('auth/register')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ResponseMessage('Check your inbox to confirm your email.')
+  @ApiData(RegisterResponseDto, HttpStatus.ACCEPTED)
+  register(@Body() dto: RegisterDto): Promise<RegisterResponseDto> {
+    return this.signup.register({
+      name: dto.name,
+      email: dto.email,
+      password: dto.password,
+      organizationName: dto.organizationName,
+    });
+  }
+
+  @Public()
+  @Post('auth/verify-email')
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Email confirmed.')
+  @ApiData(VerifyEmailResponseDto)
+  verifyEmail(@Body() dto: VerifyEmailDto): Promise<VerifyEmailResponseDto> {
+    return this.signup.verifyEmail(dto.token);
+  }
 
   @Public()
   @Post('auth/login')

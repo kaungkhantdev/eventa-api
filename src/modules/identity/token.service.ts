@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import type { Env } from '../../config/env.validation';
 import type {
   AccessTokenClaims,
+  EmailVerificationClaims,
   InviteTokenClaims,
   Persona,
   RefreshTokenClaims,
@@ -11,6 +12,8 @@ import type {
 
 /** Workspace invites are valid for 7 days. */
 const INVITE_TTL_SECONDS = 7 * 24 * 60 * 60;
+/** An email-confirmation link is valid for 24 hours. */
+const EMAIL_VERIFICATION_TTL_SECONDS = 24 * 60 * 60;
 
 export interface TokenSubject {
   userId: string;
@@ -23,6 +26,11 @@ export interface InviteSubject {
   userId: string;
   organizationId: number;
   membershipId: number;
+}
+
+export interface EmailVerificationSubject {
+  userId: string;
+  organizationId: number;
 }
 
 /**
@@ -87,5 +95,20 @@ export class TokenService {
 
   verifyInvite(token: string): Promise<InviteTokenClaims> {
     return this.jwt.verifyAsync<InviteTokenClaims>(token);
+  }
+
+  signEmailVerification(s: EmailVerificationSubject): Promise<string> {
+    const claims: EmailVerificationClaims = {
+      sub: s.userId,
+      org: s.organizationId,
+      typ: 'verify_email',
+    };
+    return this.jwt.signAsync(claims, {
+      expiresIn: EMAIL_VERIFICATION_TTL_SECONDS,
+    });
+  }
+
+  verifyEmailVerification(token: string): Promise<EmailVerificationClaims> {
+    return this.jwt.verifyAsync<EmailVerificationClaims>(token);
   }
 }
