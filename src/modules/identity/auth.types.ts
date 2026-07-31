@@ -48,3 +48,15 @@ export interface EmailVerificationClaims {
   org: number; // organizationId
   typ: 'verify_email';
 }
+
+/**
+ * Claims of a password-reset token. `pv` is a fingerprint of the current password
+ * hash — once the password changes (a successful reset, or any other change) the
+ * fingerprint no longer matches, so the link is single-use and self-invalidating.
+ */
+export interface PasswordResetClaims {
+  sub: string; // userId
+  org: number; // organizationId
+  pv: string; // password fingerprint
+  typ: 'reset_password';
+}

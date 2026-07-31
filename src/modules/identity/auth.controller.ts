@@ -25,14 +25,18 @@ import {
   AcceptInviteDto,
   AcceptInviteResponseDto,
 } from './dto/accept-invite.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
+import { MessageResponseDto } from './dto/message-response.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { RegisterDto } from './dto/register.dto';
 import { RegisterResponseDto } from './dto/register-response.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { LoginResponseDto, RefreshResponseDto } from './dto/token-response.dto';
 import { MeResponseDto } from './dto/user-response.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { VerifyEmailResponseDto } from './dto/verify-email-response.dto';
+import { PasswordResetService } from './password-reset.service';
 import { SignupService } from './signup.service';
 
 const BEARER = 'Bearer';
@@ -43,7 +47,26 @@ export class AuthController {
   constructor(
     private readonly auth: AuthService,
     private readonly signup: SignupService,
+    private readonly passwordReset: PasswordResetService,
   ) {}
+
+  @Public()
+  @Post('auth/forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('If an account matches, a reset link is on its way.')
+  @ApiData(MessageResponseDto)
+  forgotPassword(@Body() dto: ForgotPasswordDto): Promise<MessageResponseDto> {
+    return this.passwordReset.forgot(dto.email, dto.persona);
+  }
+
+  @Public()
+  @Post('auth/reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Password reset.')
+  @ApiData(MessageResponseDto)
+  resetPassword(@Body() dto: ResetPasswordDto): Promise<MessageResponseDto> {
+    return this.passwordReset.reset(dto.token, dto.newPassword);
+  }
 
   @Public()
   @Post('auth/register')

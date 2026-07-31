@@ -6,6 +6,7 @@ import type {
   AccessTokenClaims,
   EmailVerificationClaims,
   InviteTokenClaims,
+  PasswordResetClaims,
   Persona,
   RefreshTokenClaims,
 } from './auth.types';
@@ -14,6 +15,8 @@ import type {
 const INVITE_TTL_SECONDS = 7 * 24 * 60 * 60;
 /** An email-confirmation link is valid for 24 hours. */
 const EMAIL_VERIFICATION_TTL_SECONDS = 24 * 60 * 60;
+/** A password-reset link is valid for 1 hour. */
+const PASSWORD_RESET_TTL_SECONDS = 60 * 60;
 
 export interface TokenSubject {
   userId: string;
@@ -31,6 +34,12 @@ export interface InviteSubject {
 export interface EmailVerificationSubject {
   userId: string;
   organizationId: number;
+}
+
+export interface PasswordResetSubject {
+  userId: string;
+  organizationId: number;
+  passwordFingerprint: string;
 }
 
 /**
@@ -110,5 +119,21 @@ export class TokenService {
 
   verifyEmailVerification(token: string): Promise<EmailVerificationClaims> {
     return this.jwt.verifyAsync<EmailVerificationClaims>(token);
+  }
+
+  signPasswordReset(s: PasswordResetSubject): Promise<string> {
+    const claims: PasswordResetClaims = {
+      sub: s.userId,
+      org: s.organizationId,
+      pv: s.passwordFingerprint,
+      typ: 'reset_password',
+    };
+    return this.jwt.signAsync(claims, {
+      expiresIn: PASSWORD_RESET_TTL_SECONDS,
+    });
+  }
+
+  verifyPasswordReset(token: string): Promise<PasswordResetClaims> {
+    return this.jwt.verifyAsync<PasswordResetClaims>(token);
   }
 }
