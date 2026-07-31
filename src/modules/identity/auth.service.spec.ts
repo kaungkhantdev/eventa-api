@@ -8,6 +8,7 @@ import type {
 } from './auth.types';
 import { OutboxPort } from '../platform/outbox.port';
 import { IdentityRepository } from './identity.repository';
+import type { LoginThrottleService } from './login-throttle.service';
 import { PasswordService } from './password.service';
 import { TokenService } from './token.service';
 
@@ -80,7 +81,12 @@ describe('AuthService', () => {
     outbox = {
       enqueue: jest.fn().mockResolvedValue(undefined),
     };
-    service = new AuthService(repo, passwords, tokens, clock, outbox);
+    const throttle = {
+      assertNotLocked: jest.fn().mockResolvedValue(undefined),
+      recordFailure: jest.fn().mockResolvedValue(undefined),
+      recordSuccess: jest.fn().mockResolvedValue(undefined),
+    } as unknown as LoginThrottleService;
+    service = new AuthService(repo, passwords, tokens, clock, outbox, throttle);
   });
 
   describe('login', () => {

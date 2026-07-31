@@ -14,6 +14,7 @@ import type {
 } from './auth.types';
 import { MeResponseDto, toMeResponse } from './dto/user-response.dto';
 import { IdentityRepository } from './identity.repository';
+import { LoginThrottleService } from './login-throttle.service';
 import { PasswordService } from './password.service';
 import { TokenService } from './token.service';
 
@@ -41,6 +42,11 @@ export interface AcceptInviteResult {
 
 type LoginUser = { user: UserRow; org: OrganizationRow };
 
+/** Brute-force throttle key for a sign-in attempt: org + audience + email. */
+function throttleIdentity(input: LoginInput): string {
+  return `${input.orgSlug}|${input.persona ?? 'admin'}|${input.email.toLowerCase()}`;
+}
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -49,10 +55,13 @@ export class AuthService {
     private readonly tokens: TokenService,
     private readonly clock: Clock,
     private readonly outbox: OutboxPort,
+    private readonly throttle: LoginThrottleService,
   ) {}
 
   async login(input: LoginInput): Promise<LoginResult> {
-    const found = await this.authenticate(input);
+    const throttleId = throttleIdentity(input);
+    await this.throttle.assertNotLocked(throttleId);
+    const found = await this.authenticateThrottled(input, throttleId);
     const sessionId = await this.openSession(found, input);
     await this.recordSignIn(found, input);
     const { accessToken, refreshToken } = await this.issueTokens(
@@ -69,6 +78,31 @@ export class AuthService {
       expiresIn: this.tokens.accessTtlSeconds,
       user: toMeResponse(found.user, found.org, permissions),
     };
+  }
+
+  /**
+   * Authenticate, feeding the brute-force throttle: a wrong-credentials failure
+   * (401) counts toward the lockout; an inactive-account refusal (403) does not
+   * (that isn't password guessing); a success clears the counter.
+   */
+  private async authenticateThrottled(
+    input: LoginInput,
+    throttleId: string,
+  ): Promise<LoginUser> {
+    let found: LoginUser;
+    try {
+      found = await this.authenticate(input);
+    } catch (err) {
+      if (
+        err instanceof DomainException &&
+        err.code === ErrorCode.UNAUTHORIZED
+      ) {
+        await this.throttle.recordFailure(throttleId);
+      }
+      throw err;
+    }
+    await this.throttle.recordSuccess(throttleId);
+    return found;
   }
 
   async refresh(

@@ -32,6 +32,11 @@ export const envSchema = z.object({
   // inventory (seconds). The attendee must complete checkout within this window.
   HOLD_TTL_SECONDS: z.coerce.number().int().positive().default(600), // 10m
 
+  // Sign-in brute-force protection: after this many consecutive failures the
+  // account is locked out for LOGIN_LOCK_SECONDS (a cool-off).
+  LOGIN_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  LOGIN_LOCK_SECONDS: z.coerce.number().int().positive().default(900), // 15m
+
   // Public web app base URL — used to build shareable/public event links.
   PUBLIC_WEB_URL: z
     .string()

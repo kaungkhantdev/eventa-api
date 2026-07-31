@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 import { CommonModule } from './common/common.module';
 import { CorrelationIdMiddleware } from './common/context/correlation-id.middleware';
+import { RedisModule } from './common/redis/redis.module';
 import { AppConfigModule } from './config/config.module';
 import type { Env } from './config/env.validation';
 import { buildLoggerOptions } from './config/logger.config';
@@ -30,6 +31,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     }),
     DatabaseModule,
     CommonModule,
+    RedisModule,
     HealthModule,
     IdentityModule,
     EventsModule,
