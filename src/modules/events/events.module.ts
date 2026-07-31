@@ -10,6 +10,7 @@ import { EventsController } from './events.controller';
 import { EventsRepository } from './events.repository';
 import { EventsService } from './events.service';
 import { AdminGuard } from './guards/admin.guard';
+import { AttendeeBroadcastService } from './monitoring/attendee-broadcast.service';
 import { MonitorController } from './monitoring/monitor.controller';
 import { MonitorService } from './monitoring/monitor.service';
 import { SharingController } from './sharing/sharing.controller';
@@ -42,6 +43,7 @@ import { SharingService } from './sharing/sharing.service';
     CategoriesRepository,
     SharingService,
     MonitorService,
+    AttendeeBroadcastService,
     AdminGuard,
   ],
   exports: [EventsService],

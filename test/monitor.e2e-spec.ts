@@ -159,6 +159,65 @@ describe('Event Monitor — Overview / Registrations / Attendees (US-EVT-14, e2e
     });
   });
 
+  describe('Email all (broadcast request)', () => {
+    const emailAll = (jwt: string, body: Record<string, unknown>) =>
+      request(server)
+        .post(`/api/v1/events/${eventId}/attendees/email`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send(body);
+
+    it('queues a broadcast and writes one outbox event with no recipient PII', async () => {
+      const jwt = await token(FULL);
+      const res = await emailAll(jwt, {
+        subject: 'Doors open at 6pm',
+        message: 'See you tonight!',
+        confirm: true,
+      });
+      expect(res.status).toBe(201);
+      expect(
+        (res.body as Success<{ recipients: number; queued: boolean }>).data,
+      ).toMatchObject({ recipients: 2, queued: true });
+
+      const { rows } = await pool.query<{ payload: unknown }>(
+        `SELECT payload FROM outbox_events
+         WHERE organization_id = $1 AND routing_key = 'events.attendees_email_requested'`,
+        [orgId],
+      );
+      expect(rows.length).toBe(1);
+      expect(JSON.stringify(rows[0].payload)).not.toMatch(/@/); // no emails on the bus
+    });
+
+    it('rejects a send without explicit confirmation (400)', async () => {
+      const jwt = await token(FULL);
+      const res = await emailAll(jwt, {
+        subject: 'No confirm',
+        message: 'body',
+        confirm: false,
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects an empty subject (400)', async () => {
+      const jwt = await token(FULL);
+      const res = await emailAll(jwt, {
+        subject: '',
+        message: 'body',
+        confirm: true,
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it('forbids a caller without regView (403)', async () => {
+      const jwt = await token(NOREG);
+      const res = await emailAll(jwt, {
+        subject: 'Hi',
+        message: 'body',
+        confirm: true,
+      });
+      expect(res.status).toBe(403);
+    });
+  });
+
   // ---- seeding -------------------------------------------------------------
 
   async function seed(): Promise<void> {

@@ -1,4 +1,12 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiForbiddenResponse, ApiTags } from '@nestjs/swagger';
 import { ApiErrorDto } from '../../../common/errors/error-envelope';
 import { ApiData, ApiPage } from '../../../common/http/api-data.decorator';
@@ -12,8 +20,11 @@ import {
 } from '../../identity/decorators/require-permissions.decorator';
 import { PermissionsGuard } from '../../identity/guards/permissions.guard';
 import { AdminGuard } from '../guards/admin.guard';
+import { AttendeeBroadcastService } from './attendee-broadcast.service';
 import { AttendeeRowDto } from './dto/attendee-row.dto';
 import { AttendeesQueryDto } from './dto/attendees.query.dto';
+import { BroadcastResultDto } from './dto/broadcast-result.dto';
+import { EmailAttendeesDto } from './dto/email-attendees.dto';
 import { OverviewResponseDto } from './dto/overview-response.dto';
 import { RegistrationsPageDto } from './dto/registrations-page.dto';
 import { RegistrationsQueryDto } from './dto/registrations.query.dto';
@@ -33,7 +44,10 @@ import { MonitorService } from './monitor.service';
 @UseGuards(AdminGuard, PermissionsGuard)
 @Controller('events')
 export class MonitorController {
-  constructor(private readonly monitor: MonitorService) {}
+  constructor(
+    private readonly monitor: MonitorService,
+    private readonly broadcast: AttendeeBroadcastService,
+  ) {}
 
   @Get(':id/overview')
   @RequirePermissions(Permission.evCreate)
@@ -78,6 +92,22 @@ export class MonitorController {
       { organizationId: auth.organizationId, userId: auth.userId },
       id,
       query,
+    );
+  }
+
+  @Post(':id/attendees/email')
+  @RequirePermissions(Permission.regView)
+  @ResponseMessage('Broadcast queued.')
+  @ApiData(BroadcastResultDto)
+  emailAttendees(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id') id: string,
+    @Body() body: EmailAttendeesDto,
+  ): Promise<BroadcastResultDto> {
+    return this.broadcast.emailAll(
+      { organizationId: auth.organizationId, userId: auth.userId },
+      id,
+      body,
     );
   }
 }

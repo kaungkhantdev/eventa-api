@@ -38,4 +38,8 @@ export class EventStatsAdapter extends EventStatsPort {
   ): Promise<AttendeesResult> {
     return this.repo.attendees(organizationId, eventId, page);
   }
+
+  attendeeCount(organizationId: number, eventId: string): Promise<number> {
+    return this.repo.attendeeCount(organizationId, eventId);
+  }
 }

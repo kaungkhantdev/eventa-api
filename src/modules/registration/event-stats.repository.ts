@@ -124,18 +124,29 @@ export class EventStatsRepository {
     });
   }
 
+  /** Distinct confirmed attendees for the event (broadcast recipient count). */
+  async attendeeCount(
+    organizationId: number,
+    eventId: string,
+  ): Promise<number> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [{ total }] = await tx
+        .select({
+          total: sql<number>`count(distinct ${orders.buyerEmail})::int`,
+        })
+        .from(orders)
+        .where(this.confirmedAttendeesWhere(organizationId, eventId));
+      return total;
+    });
+  }
+
   async attendees(
     organizationId: number,
     eventId: string,
     page: StatsPage,
   ): Promise<AttendeesResult> {
     return withTenant(this.db, organizationId, async (tx) => {
-      const base = and(
-        eq(orders.organizationId, organizationId),
-        eq(orders.eventId, eventId),
-        eq(orders.status, CONFIRMED),
-        isNull(orders.deletedAt),
-      );
+      const base = this.confirmedAttendeesWhere(organizationId, eventId);
       const [{ total }] = await tx
         .select({
           total: sql<number>`count(distinct ${orders.buyerEmail})::int`,
@@ -167,6 +178,16 @@ export class EventStatsRepository {
         total,
       };
     });
+  }
+
+  /** Confirmed, live orders for an event — the confirmed-attendee population. */
+  private confirmedAttendeesWhere(organizationId: number, eventId: string) {
+    return and(
+      eq(orders.organizationId, organizationId),
+      eq(orders.eventId, eventId),
+      eq(orders.status, CONFIRMED),
+      isNull(orders.deletedAt),
+    );
   }
 
   /** Ticket quantity per order id (batched — avoids an N+1 over the page). */

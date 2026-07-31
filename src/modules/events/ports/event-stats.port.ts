@@ -85,4 +85,10 @@ export abstract class EventStatsPort {
     eventId: string,
     page: StatsPage,
   ): Promise<AttendeesResult>;
+
+  /** How many confirmed attendees the event has (broadcast recipient count). */
+  abstract attendeeCount(
+    organizationId: number,
+    eventId: string,
+  ): Promise<number>;
 }
