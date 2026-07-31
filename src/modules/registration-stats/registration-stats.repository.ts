@@ -18,7 +18,7 @@ const LIVE_TICKET_STATUSES = ['issued', 'checked_in'] as const;
 
 /** Read-model queries for the event-workspace Monitor (US-EVT-14). Tenant-scoped. */
 @Injectable()
-export class EventStatsRepository {
+export class RegistrationStatsRepository {
   constructor(@Inject(DRIZZLE) private readonly db: Database) {}
 
   async overview(

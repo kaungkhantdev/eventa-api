@@ -7,12 +7,12 @@ import {
   type RegistrationsResult,
   type StatsPage,
 } from '../events/ports/event-stats.port';
-import { EventStatsRepository } from './event-stats.repository';
+import { RegistrationStatsRepository } from './registration-stats.repository';
 
 /** Registration's implementation of the Events-owned Monitor read port (US-EVT-14). */
 @Injectable()
-export class EventStatsAdapter extends EventStatsPort {
-  constructor(private readonly repo: EventStatsRepository) {
+export class RegistrationStatsAdapter extends EventStatsPort {
+  constructor(private readonly repo: RegistrationStatsRepository) {
     super();
   }
 

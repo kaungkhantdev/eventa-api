@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { EventsModule } from '../events/events.module';
 import { AccessModule } from '../access/access.module';
 import { PlatformModule } from '../platform/platform.module';
-import { RegistrationModule } from '../registration/registration.module';
+import { RegistrationStatsModule } from '../registration-stats/registration-stats.module';
 import { AttendeeBroadcastService } from './attendee-broadcast.service';
 import { EventMonitoringController } from './event-monitoring.controller';
 import { EventMonitoringService } from './event-monitoring.service';
@@ -14,7 +14,12 @@ import { EventMonitoringService } from './event-monitoring.service';
  * the outbox (PlatformModule) — never another module's tables.
  */
 @Module({
-  imports: [EventsModule, AccessModule, PlatformModule, RegistrationModule],
+  imports: [
+    EventsModule,
+    AccessModule,
+    PlatformModule,
+    RegistrationStatsModule,
+  ],
   controllers: [EventMonitoringController],
   providers: [EventMonitoringService, AttendeeBroadcastService],
 })

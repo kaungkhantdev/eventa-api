@@ -167,6 +167,53 @@ TypeORM/entities.)
   `events` (and, as it grows: `validators/`, `policies/`, `mappers/`, `listeners/`, `interfaces/`,
   `use-cases/`). **Never** top-level `controllers/`·`services/` layer folders. DB schema is centralized in
   `src/db/schema` (Drizzle; the api owns it).
+
+### Creating a module (follow this exactly)
+
+**1. Name it after the one thing it does.** If you need "and" to describe it, it's two modules. Modules are
+**flat siblings** under `src/modules/` — never a sub-feature folder nested inside another module. Related
+modules share a **prefix** so they sort together and their kinship is obvious:
+`auth`, `auth-signup`, `auth-password` · `events`, `event-categories`, `event-program`, `event-seating`,
+`event-sharing`, `event-monitoring`, `event-duplication`.
+
+**2. Lay it out like this** — file names mirror the module name, and class names mirror the file names
+(`event-categories.service.ts` → `EventCategoriesService`; never `service.ts` or `index.ts` barrels):
+
+```
+src/modules/<name>/
+├── <name>.module.ts          # wiring only: imports, controllers, providers, exports
+├── <name>.controller.ts      # thin HTTP: validate · authorize · call service · return
+├── <name>.service.ts         # the rules (orchestration; no SQL, no HTTP, no email)
+├── <name>.repository.ts      # all DB access (Drizzle), descriptive method names
+├── <name>.mapper.ts          # row → response DTO (`toXResponse`), when non-trivial
+├── <name>.types.ts           # internal domain types (never exported as API shapes)
+├── dto/                      # class-validator request DTOs + response DTOs
+├── events/                   # outbox event contracts this module produces (versioned)
+└── ports/                    # abstract classes this module CONSUMES (see 4)
+```
+A module may hold **extra, descriptively-named** services when they're facets of the same concern
+(`event-program/` has `sessions.service.ts` + `speakers.service.ts`; `events/` has `events.service.ts` for
+writes and `events-query.service.ts` for reads). That's SRP at the class level inside one boundary — the
+alternative (a sibling module) would have to reach into this module's repository, which is forbidden.
+
+**3. Keep it a black box.** A module may depend on another module's **exported service — never on its
+repository, its tables, or its internals.** Export the service (and ports) from `<name>.module.ts`; export
+the repository only if another module genuinely owns no other route to that data. If a service needs
+another module's rows, call that module's service (`EventsService.getEvent(actor, id)`), don't inject its
+repository. *(This is not theoretical: `EventMonitoringService` injected `EventsRepository` while nested
+inside `events/`, and it became a runtime DI failure the moment it moved out.)*
+
+**4. Invert cross-context reads with a consumer-owned port.** The **consumer** declares an abstract class in
+its own `ports/` folder; the **owner** implements it as an adapter and binds it
+(`{ provide: EventStatsPort, useClass: RegistrationStatsAdapter }`). So Events reads registration numbers
+without importing Registration's tables. Use `forwardRef` **only** for a genuine bidirectional dependency
+(auth↔access, auth↔auth-signup, auth↔auth-password, events↔ticketing) — not to paper over a bad boundary.
+
+**5. Register it in `app.module.ts`** and write the module docstring: what it owns, what it depends on, and
+why any `forwardRef` exists.
+
+**6. Ship it with tests (TDD).** `*.spec.ts` beside the code for the rules; `test/*.e2e-spec.ts` for the
+flow. **The e2e suite is what proves the DI graph resolves — a green `tsc` does not.**
 - **Thin controllers** — validate · authenticate · authorize · call service · return. **No business logic.**
 - **Services orchestrate** — no SQL, HTTP calls, email, or storage code inside a service; delegate to
   repositories / provider services.

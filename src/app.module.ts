@@ -26,6 +26,7 @@ import { AuthPasswordModule } from './modules/auth-password/auth-password.module
 import { AuthSignupModule } from './modules/auth-signup/auth-signup.module';
 import { UsersModule } from './modules/users/users.module';
 import { RegistrationModule } from './modules/registration/registration.module';
+import { RegistrationStatsModule } from './modules/registration-stats/registration-stats.module';
 import { TicketingModule } from './modules/ticketing/ticketing.module';
 
 @Module({
@@ -54,6 +55,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     EventSharingModule,
     EventMonitoringModule,
     RegistrationModule,
+    RegistrationStatsModule,
   ],
 })
 export class AppModule implements NestModule {

@@ -32,7 +32,7 @@ import type { CreateTicketInput, UpdateTicketInput } from './ticketing.types';
 @ApiForbiddenResponse({ description: 'Requires evCreate', type: ApiErrorDto })
 @UseGuards(PermissionsGuard)
 @Controller('events/:eventId/tickets')
-export class TicketsController {
+export class TicketingController {
   constructor(private readonly tickets: TicketingService) {}
 
   @Post()

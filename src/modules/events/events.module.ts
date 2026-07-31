@@ -5,6 +5,7 @@ import { PlatformModule } from '../platform/platform.module';
 import { TicketingModule } from '../ticketing/ticketing.module';
 import { EventsController } from './events.controller';
 import { EventsRepository } from './events.repository';
+import { EventsQueryService } from './events-query.service';
 import { EventsService } from './events.service';
 
 /**
@@ -21,7 +22,7 @@ import { EventsService } from './events.service';
 @Module({
   imports: [AccessModule, PlatformModule, forwardRef(() => TicketingModule)],
   controllers: [EventsController],
-  providers: [EventsService, EventsRepository, AdminGuard],
-  exports: [EventsService],
+  providers: [EventsService, EventsQueryService, EventsRepository, AdminGuard],
+  exports: [EventsService, EventsQueryService],
 })
 export class EventsModule {}

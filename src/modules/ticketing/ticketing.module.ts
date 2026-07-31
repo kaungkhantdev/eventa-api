@@ -5,7 +5,7 @@ import { AccessModule } from '../access/access.module';
 import { TicketAvailabilityAdapter } from './ticket-availability.adapter';
 import { TicketingRepository } from './ticketing.repository';
 import { TicketingService } from './ticketing.service';
-import { TicketsController } from './tickets.controller';
+import { TicketingController } from './ticketing.controller';
 
 /**
  * Ticketing bounded context: sellable ticket tiers per event. Depends on the
@@ -16,7 +16,7 @@ import { TicketsController } from './tickets.controller';
  */
 @Module({
   imports: [forwardRef(() => EventsModule), AccessModule],
-  controllers: [TicketsController],
+  controllers: [TicketingController],
   providers: [
     TicketingService,
     TicketingRepository,
