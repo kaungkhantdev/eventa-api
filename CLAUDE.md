@@ -163,10 +163,18 @@ TypeORM/entities.)
   when you can extend it.
 
 **Structure & layering**
-- **Feature-first** — `src/modules/<feature>/` owns its `controller` · `service` · `repository` · `dto` ·
-  `events` (and, as it grows: `validators/`, `policies/`, `mappers/`, `listeners/`, `interfaces/`,
-  `use-cases/`). **Never** top-level `controllers/`·`services/` layer folders. DB schema is centralized in
-  `src/db/schema` (Drizzle; the api owns it).
+- **Feature-first, never layer-first** — organize by feature under `src/modules/<name>/`; **never**
+  top-level `controllers/`·`services/` folders. One module = one responsibility, flat siblings, prefix-grouped
+  — the full layout and rules are in **Creating a module** below; follow it whenever you add one. DB schema
+  is centralized in `src/db/schema` (Drizzle; the api owns it).
+
+- **Thin controllers** — validate · authenticate · authorize · call service · return. **No business logic.**
+- **Services orchestrate** — no SQL, HTTP calls, email, or storage code inside a service; delegate to
+  repositories / provider services.
+- **Repository pattern** — all DB access lives in repositories with **descriptive** methods
+  (`findValidSession`, `getPermissions`), never Drizzle queries in a service.
+- **DTOs at the edge** — never return raw Drizzle row/schema types; map request → domain → response DTO
+  (`toMeResponse`). Validate every input with **class-validator** DTOs (never trust the client).
 
 ### Creating a module (follow this exactly)
 
@@ -214,13 +222,6 @@ why any `forwardRef` exists.
 
 **6. Ship it with tests (TDD).** `*.spec.ts` beside the code for the rules; `test/*.e2e-spec.ts` for the
 flow. **The e2e suite is what proves the DI graph resolves — a green `tsc` does not.**
-- **Thin controllers** — validate · authenticate · authorize · call service · return. **No business logic.**
-- **Services orchestrate** — no SQL, HTTP calls, email, or storage code inside a service; delegate to
-  repositories / provider services.
-- **Repository pattern** — all DB access lives in repositories with **descriptive** methods
-  (`findValidSession`, `getPermissions`), never Drizzle queries in a service.
-- **DTOs at the edge** — never return raw Drizzle row/schema types; map request → domain → response DTO
-  (`toMeResponse`). Validate every input with **class-validator** DTOs (never trust the client).
 
 **Domain & correctness**
 - **Business rules live in a policy / domain service / validator** — never scattered in controllers or inlined.
