@@ -25,6 +25,7 @@ import {
   AcceptInviteDto,
   AcceptInviteResponseDto,
 } from './dto/accept-invite.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { MessageResponseDto } from './dto/message-response.dto';
@@ -36,6 +37,7 @@ import { LoginResponseDto, RefreshResponseDto } from './dto/token-response.dto';
 import { MeResponseDto } from './dto/user-response.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { VerifyEmailResponseDto } from './dto/verify-email-response.dto';
+import { PasswordChangeService } from './password-change.service';
 import { PasswordResetService } from './password-reset.service';
 import { SignupService } from './signup.service';
 
@@ -48,6 +50,7 @@ export class AuthController {
     private readonly auth: AuthService,
     private readonly signup: SignupService,
     private readonly passwordReset: PasswordResetService,
+    private readonly passwordChange: PasswordChangeService,
   ) {}
 
   @Public()
@@ -151,6 +154,22 @@ export class AuthController {
   })
   acceptInvite(@Body() dto: AcceptInviteDto): Promise<AcceptInviteResponseDto> {
     return this.auth.acceptInvite(dto.token, dto.password);
+  }
+
+  @Post('auth/change-password')
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Password changed.')
+  @ApiBearerAuth()
+  @ApiData(MessageResponseDto)
+  changePassword(
+    @CurrentAuth() auth: AuthContext,
+    @Body() dto: ChangePasswordDto,
+  ): Promise<MessageResponseDto> {
+    return this.passwordChange.change(
+      auth,
+      dto.currentPassword,
+      dto.newPassword,
+    );
   }
 
   @Get('auth/me')

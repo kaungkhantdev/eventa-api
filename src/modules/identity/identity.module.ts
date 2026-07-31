@@ -14,6 +14,7 @@ import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { PermissionsGuard } from './guards/permissions.guard';
 import { IdentityRepository } from './identity.repository';
+import { PasswordChangeService } from './password-change.service';
 import { PasswordRepository } from './password.repository';
 import { PasswordResetService } from './password-reset.service';
 import { PasswordService } from './password.service';
@@ -49,6 +50,7 @@ import { TokenService } from './token.service';
     PasswordService,
     PermissionsService,
     PermissionsGuard,
+    PasswordChangeService,
     PasswordResetService,
     PasswordRepository,
     SignupService,
