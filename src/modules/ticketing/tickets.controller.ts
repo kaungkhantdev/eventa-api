@@ -14,13 +14,13 @@ import { ApiBearerAuth, ApiForbiddenResponse, ApiTags } from '@nestjs/swagger';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 import { ApiErrorDto } from '../../common/errors/error-envelope';
 import { ApiData, ApiList } from '../../common/http/api-data.decorator';
-import type { AuthContext } from '../identity/auth.types';
-import { CurrentAuth } from '../identity/decorators/current-auth.decorator';
+import type { AuthContext } from '../auth/auth.types';
+import { CurrentAuth } from '../../common/decorators/current-auth.decorator';
 import {
   Permission,
   RequirePermissions,
-} from '../identity/decorators/require-permissions.decorator';
-import { PermissionsGuard } from '../identity/guards/permissions.guard';
+} from '../../common/decorators/require-permissions.decorator';
+import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { TicketResponseDto } from './dto/ticket-response.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';

@@ -20,13 +20,13 @@ import {
 } from '../../common/http/api-data.decorator';
 import { Paginated } from '../../common/http/paginated';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
-import type { AuthContext } from '../identity/auth.types';
-import { CurrentAuth } from '../identity/decorators/current-auth.decorator';
+import type { AuthContext } from '../auth/auth.types';
+import { CurrentAuth } from '../../common/decorators/current-auth.decorator';
 import {
   Permission,
   RequirePermissions,
-} from '../identity/decorators/require-permissions.decorator';
-import { PermissionsGuard } from '../identity/guards/permissions.guard';
+} from '../../common/decorators/require-permissions.decorator';
+import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { CalendarQueryDto } from './dto/calendar.query.dto';
 import { CalendarResponseDto } from './dto/calendar-response.dto';
 import { CancelEventDto } from './dto/cancel-event.dto';
@@ -42,7 +42,7 @@ import { PublishEventDto } from './dto/publish-event.dto';
 import { UnpublishEventDto } from './dto/unpublish-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { EventsService } from './events.service';
-import { AdminGuard } from './guards/admin.guard';
+import { AdminGuard } from '../../common/guards/admin.guard';
 
 @ApiTags('events')
 @ApiBearerAuth()

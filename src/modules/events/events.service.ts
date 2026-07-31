@@ -32,10 +32,12 @@ import type {
   UpdateEventInput,
   Visibility,
 } from './events.types';
-import { slugify } from './slug';
+import { slugify } from '../../common/util/slugify';
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
+/** Slug used when a name carries no latin alphanumerics (e.g. a Thai-only name). */
+const EVENT_SLUG_FALLBACK = 'event';
 const DEFAULT_UPCOMING_LIMIT = 20;
 const MAX_UPCOMING_LIMIT = 100;
 
@@ -574,7 +576,7 @@ export class EventsService {
     organizationId: number,
     name: string,
   ): Promise<string> {
-    const base = slugify(name);
+    const base = slugify(name, EVENT_SLUG_FALLBACK);
     const taken = new Set(await this.repo.existingSlugs(organizationId, base));
     if (!taken.has(base)) return base;
     for (let i = 2; ; i += 1) {

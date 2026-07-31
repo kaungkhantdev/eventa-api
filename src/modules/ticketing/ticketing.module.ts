@@ -1,7 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { EventsModule } from '../events/events.module';
 import { TicketAvailabilityPort } from '../events/ports/ticket-availability.port';
-import { IdentityModule } from '../identity/identity.module';
+import { AccessModule } from '../access/access.module';
 import { TicketAvailabilityAdapter } from './ticket-availability.adapter';
 import { TicketingRepository } from './ticketing.repository';
 import { TicketingService } from './ticketing.service';
@@ -9,13 +9,13 @@ import { TicketsController } from './tickets.controller';
 
 /**
  * Ticketing bounded context: sellable ticket tiers per event. Depends on the
- * Events service (to verify the event is in the caller's tenant) and IdentityModule
+ * Events service (to verify the event is in the caller's tenant) and AccessModule
  * (the RBAC PermissionsGuard) — never on the events tables directly. Provides
  * TicketAvailabilityPort back to Events for the publish gate; the two contexts
  * reference each other (`forwardRef`) — an event has tickets, a ticket an event.
  */
 @Module({
-  imports: [forwardRef(() => EventsModule), IdentityModule],
+  imports: [forwardRef(() => EventsModule), AccessModule],
   controllers: [TicketsController],
   providers: [
     TicketingService,

@@ -101,13 +101,26 @@ foundation already wires the error envelope, `/api/v1` prefix, tenant/correlatio
 Drizzle client; **the module/tenancy/consistency rules below apply as you build each domain module.** Follow
 the development guide when implementing:
 
-- **Modular monolith: one NestJS module = one bounded context** (`identity`, `organization`, `events`,
-  `ticketing`, `registration`, `attendance`, `payments`, `engagement`, `meetings`, plus `platform` for
-  outbox/idempotency/audit/jobs). A module may depend on another module's **service interface — never on
-  another module's tables**. Per module: `*.controller.ts` (thin HTTP) · `*.service.ts` (rules) ·
-  repository (data access) · `dto/` (validated request/response) · `events/` (event contracts). Target
-  tree: `src/db/`, `src/modules/<domain>/`, `src/common/` (guards/interceptors/filters/tenancy), plus
-  `src/relay.ts` (the outbox publisher) and a generated `openapi.json`.
+- **Modular monolith: one NestJS module = one responsibility (SRP at the folder level).** Modules are
+  **flat siblings** under `src/modules/` — never nested sub-features inside another module's folder — and
+  each owns exactly one concern. A module may depend on another module's **service interface — never on
+  another module's tables or repository**. Per module: `<name>.module.ts` · `<name>.controller.ts` (thin
+  HTTP) · `<name>.service.ts` (rules) · `<name>.repository.ts` (data access) · `dto/` (validated
+  request/response) · `events/` (event contracts). **File names mirror class names**
+  (`event-categories.service.ts` → `EventCategoriesService`). Related modules share a **name prefix** so
+  they sort together: `auth`, `auth-signup`, `auth-password` · `events`, `event-categories`,
+  `event-program`, `event-seating`, `event-sharing`, `event-monitoring`, `event-duplication`.
+  Current modules: `auth` (sign-in, tokens, sessions) · `users` (the user record) · `auth-signup` ·
+  `auth-password` · `access` (members, roles, RBAC) · `events` + the six `event-*` sub-domains ·
+  `ticketing` · `registration` · `platform` (outbox/idempotency/audit/jobs). Tree: `src/db/`,
+  `src/modules/<name>/`, `src/common/` (`guards/`, `decorators/`, `interceptors/`, `filters/`, `http/`,
+  `util/`, tenancy), plus `src/relay.ts` (the outbox publisher) and a generated `openapi.json`.
+- **Cross-cutting code lives in `src/common/`, never in a domain module.** A guard, decorator, pipe or
+  helper used by more than one module belongs in `common/guards/`, `common/decorators/`, `common/util/`
+  etc. — so a controller never imports from an unrelated domain module just to annotate a route
+  (`JwtAuthGuard`, `PermissionsGuard`, `AdminGuard`, `@CurrentAuth`, `@RequirePermissions`, `slugify`).
+  A module-local default belongs to the module (e.g. an event's slug fallback is a `const` in
+  `events.service.ts`, not a wrapper file that shadows the shared util).
 - **Multi-tenancy: scope every query by `organization_id`** *and* Postgres **RLS**
   (`SET LOCAL app.current_org` per transaction) — defence in depth.
 - **The consistency split is the core design decision.** Money/inventory (checkout, seat holds, ticket
