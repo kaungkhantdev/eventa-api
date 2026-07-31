@@ -1,5 +1,6 @@
 import { Inject, Injectable, forwardRef } from '@nestjs/common';
 import { Clock } from '../../common/time/clock';
+import { BANGKOK_OFFSET_MS, bangkokDay } from '../../common/time/bangkok';
 import { DomainException } from '../../common/errors/domain.exception';
 import { Paginated } from '../../common/http/paginated';
 import { pickDefined } from '../../common/util/pick-defined';
@@ -37,10 +38,6 @@ const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 const DEFAULT_UPCOMING_LIMIT = 20;
 const MAX_UPCOMING_LIMIT = 100;
-
-/** Asia/Bangkok is a fixed UTC+7 (no DST) — used for calendar month & days-left. */
-const BANGKOK_OFFSET_MS = 7 * 60 * 60 * 1000;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 const DRAFT_STATUS: EventStatus = 'draft';
 const PUBLISHED_STATUS: EventStatus = 'upcoming';
@@ -617,9 +614,4 @@ function monthRangeUtc(month: string): { start: Date; end: Date } {
     start: new Date(Date.UTC(year, monthNumber - 1, 1) - BANGKOK_OFFSET_MS),
     end: new Date(Date.UTC(year, monthNumber, 1) - BANGKOK_OFFSET_MS),
   };
-}
-
-/** The Bangkok calendar-day number for a UTC instant (days since epoch, +7h). */
-function bangkokDay(instant: Date): number {
-  return Math.floor((instant.getTime() + BANGKOK_OFFSET_MS) / DAY_MS);
 }
