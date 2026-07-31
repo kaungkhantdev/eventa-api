@@ -62,6 +62,11 @@ export class TokenService {
     return this.config.get('JWT_REFRESH_TTL', { infer: true });
   }
 
+  /** Session-length refresh window used when "remember me" is off (US-ACC-08). */
+  get refreshTtlShortSeconds(): number {
+    return this.config.get('JWT_REFRESH_TTL_SHORT', { infer: true });
+  }
+
   signAccess(s: TokenSubject): Promise<string> {
     const claims: AccessTokenClaims = {
       sub: s.userId,
@@ -73,7 +78,10 @@ export class TokenService {
     return this.jwt.signAsync(claims, { expiresIn: this.accessTtlSeconds });
   }
 
-  signRefresh(s: TokenSubject): Promise<string> {
+  signRefresh(
+    s: TokenSubject,
+    ttlSeconds = this.refreshTtlSeconds,
+  ): Promise<string> {
     const claims: RefreshTokenClaims = {
       sub: s.userId,
       org: s.organizationId,
@@ -81,7 +89,7 @@ export class TokenService {
       persona: s.persona,
       typ: 'refresh',
     };
-    return this.jwt.signAsync(claims, { expiresIn: this.refreshTtlSeconds });
+    return this.jwt.signAsync(claims, { expiresIn: ttlSeconds });
   }
 
   signInvite(s: InviteSubject): Promise<string> {

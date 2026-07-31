@@ -113,6 +113,7 @@ export class AuthController {
       password: dto.password,
       orgSlug: dto.orgSlug,
       persona: dto.persona,
+      rememberMe: dto.rememberMe,
       device,
       ip: req.ip ?? null,
     });

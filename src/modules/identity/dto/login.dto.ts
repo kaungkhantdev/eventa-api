@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  IsBoolean,
   IsEmail,
   IsIn,
   IsOptional,
@@ -30,4 +31,12 @@ export class LoginDto {
   @IsOptional()
   @IsIn(['admin', 'attendee'])
   persona?: 'admin' | 'attendee';
+
+  @ApiPropertyOptional({
+    description: 'Stay signed in on this device for longer (US-ACC-08).',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  rememberMe?: boolean;
 }

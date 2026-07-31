@@ -16,6 +16,7 @@ import { MeResponseDto, toMeResponse } from './dto/user-response.dto';
 import { IdentityRepository } from './identity.repository';
 import { LoginThrottleService } from './login-throttle.service';
 import { PasswordService } from './password.service';
+import { SignupService } from './signup.service';
 import { TokenService } from './token.service';
 
 export interface LoginInput {
@@ -25,6 +26,7 @@ export interface LoginInput {
   persona?: Persona;
   device: string;
   ip: string | null;
+  rememberMe?: boolean;
 }
 
 export interface LoginResult {
@@ -56,17 +58,23 @@ export class AuthService {
     private readonly clock: Clock,
     private readonly outbox: OutboxPort,
     private readonly throttle: LoginThrottleService,
+    private readonly signup: SignupService,
   ) {}
 
   async login(input: LoginInput): Promise<LoginResult> {
     const throttleId = throttleIdentity(input);
     await this.throttle.assertNotLocked(throttleId);
     const found = await this.authenticateThrottled(input, throttleId);
-    const sessionId = await this.openSession(found, input);
+    await this.assertEligible(found);
+    const refreshTtl = input.rememberMe
+      ? this.tokens.refreshTtlSeconds
+      : this.tokens.refreshTtlShortSeconds;
+    const sessionId = await this.openSession(found, input, refreshTtl);
     await this.recordSignIn(found, input);
     const { accessToken, refreshToken } = await this.issueTokens(
       found,
       sessionId,
+      refreshTtl,
     );
     const permissions = await this.repo.getPermissions(
       found.org.id,
@@ -166,13 +174,44 @@ export class AuthService {
       input.password,
     );
     if (!ok) return this.rejectInvalid(found, input);
-    this.assertActive(found.user);
     return found;
   }
 
-  private openSession(found: LoginUser, input: LoginInput): Promise<string> {
+  /**
+   * Post-authentication eligibility (US-ACC-02): a confirmed, active account signs
+   * in; an unconfirmed one is refused and re-sent a fresh confirmation email; a
+   * suspended one is refused. These are not credential failures, so they don't count
+   * toward the brute-force lockout.
+   */
+  private async assertEligible(found: LoginUser): Promise<void> {
+    if (found.user.status === 'Active') return;
+    if (found.user.status === 'Invited') {
+      await this.signup.resendVerification({
+        organizationId: found.org.id,
+        userId: found.user.id,
+        name: found.user.name,
+        email: found.user.email,
+      });
+      throw new DomainException(
+        ErrorCode.EMAIL_NOT_CONFIRMED,
+        'Please confirm your email — we’ve sent you a fresh link.',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    throw new DomainException(
+      ErrorCode.ACCOUNT_SUSPENDED,
+      'Your access has been suspended.',
+      HttpStatus.FORBIDDEN,
+    );
+  }
+
+  private openSession(
+    found: LoginUser,
+    input: LoginInput,
+    refreshTtlSeconds: number,
+  ): Promise<string> {
     const expiresAt = new Date(
-      this.clock.now().getTime() + this.tokens.refreshTtlSeconds * 1000,
+      this.clock.now().getTime() + refreshTtlSeconds * 1000,
     );
     return this.repo.createSession({
       organizationId: found.org.id,
@@ -202,6 +241,7 @@ export class AuthService {
   private async issueTokens(
     found: LoginUser,
     sessionId: string,
+    refreshTtlSeconds: number,
   ): Promise<{ accessToken: string; refreshToken: string }> {
     const subject = {
       userId: found.user.id,
@@ -211,7 +251,7 @@ export class AuthService {
     };
     const [accessToken, refreshToken] = await Promise.all([
       this.tokens.signAccess(subject),
-      this.tokens.signRefresh(subject),
+      this.tokens.signRefresh(subject, refreshTtlSeconds),
     ]);
     return { accessToken, refreshToken };
   }
@@ -271,16 +311,6 @@ export class AuthService {
   ): Promise<never> {
     if (found) await this.auditFail(found, input);
     throw this.invalidCredentials();
-  }
-
-  private assertActive(user: UserRow): void {
-    if (user.status !== 'Active') {
-      throw new DomainException(
-        ErrorCode.FORBIDDEN,
-        'Account is not active',
-        HttpStatus.FORBIDDEN,
-      );
-    }
   }
 
   private auditFail(found: LoginUser, input: LoginInput): Promise<void> {

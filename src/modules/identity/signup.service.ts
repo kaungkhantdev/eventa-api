@@ -62,7 +62,12 @@ export class SignupService {
       email: input.email,
       passwordHash,
     });
-    await this.sendVerification(organizationId, userId, input);
+    await this.resendVerification({
+      organizationId,
+      userId,
+      name: input.name,
+      email: input.email,
+    });
     return { message: CHECK_INBOX_MESSAGE };
   }
 
@@ -74,21 +79,23 @@ export class SignupService {
     return { verified: true, orgSlug: activated.orgSlug };
   }
 
-  private async sendVerification(
-    organizationId: number,
-    userId: string,
-    input: RegisterInput,
-  ): Promise<void> {
+  /** Sign a fresh verify token and enqueue the confirmation email (sign-up + resend). */
+  async resendVerification(params: {
+    organizationId: number;
+    userId: string;
+    name: string;
+    email: string;
+  }): Promise<void> {
     const token = await this.tokens.signEmailVerification({
-      userId,
-      organizationId,
+      userId: params.userId,
+      organizationId: params.organizationId,
     });
     await this.outbox.enqueue(
       emailVerificationRequestedEvent({
-        organizationId,
-        userId,
-        name: input.name,
-        email: input.email,
+        organizationId: params.organizationId,
+        userId: params.userId,
+        name: params.name,
+        email: params.email,
         verifyUrl: `${this.publicWebUrl}/verify-email?token=${token}`,
         occurredAt: this.clock.now().toISOString(),
       }),

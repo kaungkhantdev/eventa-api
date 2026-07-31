@@ -24,6 +24,8 @@ export const envSchema = z.object({
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
   JWT_ACCESS_TTL: z.coerce.number().int().positive().default(900), // seconds (15m)
   JWT_REFRESH_TTL: z.coerce.number().int().positive().default(604800), // seconds (7d)
+  // "Remember me" off → a shorter, session-length refresh window (US-ACC-08).
+  JWT_REFRESH_TTL_SHORT: z.coerce.number().int().positive().default(86400), // 1d
 
   // HTTP
   CORS_ORIGINS: z.string().default('*'),

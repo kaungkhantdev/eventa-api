@@ -9,6 +9,7 @@ import type {
 import { OutboxPort } from '../platform/outbox.port';
 import { IdentityRepository } from './identity.repository';
 import type { LoginThrottleService } from './login-throttle.service';
+import type { SignupService } from './signup.service';
 import { PasswordService } from './password.service';
 import { TokenService } from './token.service';
 
@@ -50,6 +51,7 @@ describe('AuthService', () => {
   let passwords: jest.Mocked<PasswordService>;
   let tokens: jest.Mocked<TokenService>;
   let outbox: jest.Mocked<OutboxPort>;
+  let signup: jest.Mocked<SignupService>;
   let service: AuthService;
 
   beforeEach(() => {
@@ -86,7 +88,18 @@ describe('AuthService', () => {
       recordFailure: jest.fn().mockResolvedValue(undefined),
       recordSuccess: jest.fn().mockResolvedValue(undefined),
     } as unknown as LoginThrottleService;
-    service = new AuthService(repo, passwords, tokens, clock, outbox, throttle);
+    signup = {
+      resendVerification: jest.fn().mockResolvedValue(undefined),
+    } as unknown as jest.Mocked<SignupService>;
+    service = new AuthService(
+      repo,
+      passwords,
+      tokens,
+      clock,
+      outbox,
+      throttle,
+      signup,
+    );
   });
 
   describe('login', () => {
@@ -109,15 +122,28 @@ describe('AuthService', () => {
       );
     });
 
-    it('rejects a non-active account with 403', async () => {
+    it('rejects a suspended account with ACCOUNT_SUSPENDED (403)', async () => {
       repo.findLoginUser.mockResolvedValue({
         user: userRow({ status: 'Suspended' }),
         org,
       });
       passwords.verify.mockResolvedValue(true);
       await expect(service.login(input)).rejects.toMatchObject({
-        code: 'FORBIDDEN',
+        code: 'ACCOUNT_SUSPENDED',
       });
+      expect(repo.createSession).not.toHaveBeenCalled();
+    });
+
+    it('refuses an unconfirmed account and re-sends a fresh confirmation email', async () => {
+      repo.findLoginUser.mockResolvedValue({
+        user: userRow({ status: 'Invited' }),
+        org,
+      });
+      passwords.verify.mockResolvedValue(true);
+      await expect(service.login(input)).rejects.toMatchObject({
+        code: 'EMAIL_NOT_CONFIRMED',
+      });
+      expect(signup.resendVerification).toHaveBeenCalledTimes(1);
       expect(repo.createSession).not.toHaveBeenCalled();
     });
 
