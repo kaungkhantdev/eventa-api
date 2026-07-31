@@ -8,8 +8,31 @@ export type NewEventValues = typeof events.$inferInsert;
 export type EventType = EventRow['type'];
 export type EventStatus = EventRow['status'];
 export type EventBucket = EventRow['bucket'];
-/** `recent` = newest first (default); `name` A–Z; `date` by start time. */
-export type EventSort = 'recent' | 'name' | 'date';
+/**
+ * `recent` = newest first (default); `name` A–Z; `date` by start time;
+ * `registrations` = fullest first. `registrations` is derived from the Ticketing
+ * context (Σ sold), so it is sorted in-app over the org's events rather than in SQL.
+ */
+export type EventSort = 'recent' | 'name' | 'date' | 'registrations';
+
+/** Non-paging list filters shared by the page query, the count and the in-app sort. */
+export interface ListEventsFilters {
+  q?: string;
+  type?: EventType;
+  bucket?: EventBucket;
+}
+
+/** Sold + total-allocation for one event, from the Ticketing context. */
+export interface EventSales {
+  sold: number;
+  quantity: number;
+}
+
+/** Live-event counts split by bucket — the Active/Completed tab badges (US-EVT-01). */
+export interface EventBucketCounts {
+  active: number;
+  completed: number;
+}
 
 /** Query for the organizer's event list (mapped from the query DTO). */
 export interface ListEventsQuery {

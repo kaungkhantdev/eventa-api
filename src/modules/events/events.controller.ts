@@ -32,7 +32,9 @@ import { CalendarResponseDto } from './dto/calendar-response.dto';
 import { CancelEventDto } from './dto/cancel-event.dto';
 import { CreateEventDto } from './dto/create-event.dto';
 import { DeleteEventDto } from './dto/delete-event.dto';
+import { EventListItemDto } from './dto/event-list-item.dto';
 import { EventResponseDto } from './dto/event-response.dto';
+import { EventsSummaryDto } from './dto/events-summary.dto';
 import { ListEventsQueryDto } from './dto/list-events.query.dto';
 import { UpcomingEventDto } from './dto/upcoming-event.dto';
 import { UpcomingQueryDto } from './dto/upcoming.query.dto';
@@ -78,15 +80,26 @@ export class EventsController {
   @Get()
   @RequirePermissions(Permission.evCreate)
   @ResponseMessage('Events retrieved.')
-  @ApiPage(EventResponseDto)
+  @ApiPage(EventListItemDto)
   list(
     @CurrentAuth() auth: AuthContext,
     @Query() query: ListEventsQueryDto,
-  ): Promise<Paginated<EventResponseDto>> {
+  ): Promise<Paginated<EventListItemDto>> {
     return this.events.list(
       { organizationId: auth.organizationId, userId: auth.userId },
       query,
     );
+  }
+
+  @Get('summary')
+  @RequirePermissions(Permission.evCreate)
+  @ResponseMessage('Event summary retrieved.')
+  @ApiData(EventsSummaryDto)
+  summary(@CurrentAuth() auth: AuthContext): Promise<EventsSummaryDto> {
+    return this.events.summary({
+      organizationId: auth.organizationId,
+      userId: auth.userId,
+    });
   }
 
   @Get('calendar')

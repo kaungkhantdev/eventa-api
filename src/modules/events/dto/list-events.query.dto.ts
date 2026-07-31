@@ -13,7 +13,7 @@ import type { EventBucket, EventSort, EventType } from '../events.types';
 import { EVENT_TYPES } from './create-event.dto';
 
 const BUCKETS: readonly EventBucket[] = ['active', 'completed'];
-const SORTS: readonly EventSort[] = ['recent', 'name', 'date'];
+const SORTS: readonly EventSort[] = ['recent', 'name', 'date', 'registrations'];
 
 export class ListEventsQueryDto {
   @ApiPropertyOptional({ minimum: 1, default: 1 })

@@ -1,5 +1,6 @@
+import { EventListItemDto } from './dto/event-list-item.dto';
 import { EventResponseDto } from './dto/event-response.dto';
-import type { EventRow } from './events.types';
+import type { EventRow, EventSales } from './events.types';
 
 const iso = (d: Date | null): string | null => (d ? d.toISOString() : null);
 
@@ -34,4 +35,20 @@ export function toEventResponse(e: EventRow): EventResponseDto {
     createdAt: e.createdAt.toISOString(),
     version: e.version,
   };
+}
+
+/**
+ * Map an event row to its list item, folding in the registrations-vs-capacity fill.
+ * Effective capacity is the event's own capacity, falling back to the summed ticket
+ * allocation; fill is 0 when neither yields a positive cap.
+ */
+export function toEventListItem(
+  e: EventRow,
+  sale: EventSales | undefined,
+): EventListItemDto {
+  const registrations = sale?.sold ?? 0;
+  const capacity = e.capacity ?? sale?.quantity ?? 0;
+  const fillPercent =
+    capacity > 0 ? Math.round((registrations / capacity) * 100) : 0;
+  return { ...toEventResponse(e), registrations, fillPercent };
 }

@@ -17,8 +17,10 @@ import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { categories, events, organizations } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
 import type {
+  EventBucketCounts,
   EventRow,
   EventSort,
+  ListEventsFilters,
   ListEventsOptions,
   NewEventValues,
 } from './events.types';
@@ -200,7 +202,7 @@ export class EventsRepository {
     organizationId: number,
     opts: ListEventsOptions,
   ): Promise<{ items: EventRow[]; total: number }> {
-    const where = this.listWhere(organizationId, opts);
+    const where = this.matchWhere(organizationId, opts);
     return withTenant(this.db, organizationId, async (tx) => {
       const [{ count }] = await tx
         .select({ count: sql<number>`count(*)::int` })
@@ -217,15 +219,53 @@ export class EventsRepository {
     });
   }
 
-  private listWhere(organizationId: number, opts: ListEventsOptions): SQL {
-    const filters: (SQL | undefined)[] = [
+  /**
+   * Every matching live event (no pagination), newest first. Used to sort by a
+   * cross-context metric (registrations) in-app — the set is one org's own events,
+   * so it is small and bounded, unlike orders/tickets.
+   */
+  async listAll(
+    organizationId: number,
+    filters: ListEventsFilters,
+  ): Promise<EventRow[]> {
+    const where = this.matchWhere(organizationId, filters);
+    return withTenant(this.db, organizationId, async (tx) =>
+      tx
+        .select()
+        .from(events)
+        .where(where)
+        .orderBy(desc(events.createdAt), asc(events.id)),
+    );
+  }
+
+  /** Live-event counts split by bucket (Active/Completed tab badges). */
+  async bucketCounts(organizationId: number): Promise<EventBucketCounts> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({ bucket: events.bucket, count: sql<number>`count(*)::int` })
+        .from(events)
+        .where(
+          and(
+            eq(events.organizationId, organizationId),
+            isNull(events.deletedAt),
+          ),
+        )
+        .groupBy(events.bucket);
+      const counts: EventBucketCounts = { active: 0, completed: 0 };
+      for (const r of rows) counts[r.bucket] = r.count;
+      return counts;
+    });
+  }
+
+  private matchWhere(organizationId: number, filters: ListEventsFilters): SQL {
+    const clauses: (SQL | undefined)[] = [
       eq(events.organizationId, organizationId),
       isNull(events.deletedAt),
-      opts.bucket ? eq(events.bucket, opts.bucket) : undefined,
-      opts.type ? eq(events.type, opts.type) : undefined,
-      opts.q ? ilike(events.name, `%${likeEscape(opts.q)}%`) : undefined,
+      filters.bucket ? eq(events.bucket, filters.bucket) : undefined,
+      filters.type ? eq(events.type, filters.type) : undefined,
+      filters.q ? ilike(events.name, `%${likeEscape(filters.q)}%`) : undefined,
     ];
-    return and(...filters) as SQL;
+    return and(...clauses) as SQL;
   }
 }
 

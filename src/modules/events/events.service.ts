@@ -5,11 +5,13 @@ import { Paginated } from '../../common/http/paginated';
 import { pickDefined } from '../../common/util/pick-defined';
 import { OutboxPort } from '../platform/outbox.port';
 import { CalendarResponseDto } from './dto/calendar-response.dto';
+import { EventListItemDto } from './dto/event-list-item.dto';
 import { EventResponseDto } from './dto/event-response.dto';
+import { EventsSummaryDto } from './dto/events-summary.dto';
 import { UpcomingEventDto } from './dto/upcoming-event.dto';
 import { eventCancelledEvent } from './events/event-cancelled.event';
 import { eventPublishedEvent } from './events/event-published.event';
-import { toEventResponse } from './events.mapper';
+import { toEventListItem, toEventResponse } from './events.mapper';
 import { EventsRepository } from './events.repository';
 import { TicketAvailabilityPort } from './ports/ticket-availability.port';
 import type {
@@ -19,11 +21,12 @@ import type {
   EventActor,
   EventBucket,
   EventRow,
+  EventSales,
   EventStatus,
-  ListEventsOptions,
+  ListEventsFilters,
   ListEventsQuery,
-  NewEventValues,
   PublishEventInput,
+  NewEventValues,
   UnpublishEventInput,
   UpdateEventInput,
   Visibility,
@@ -502,25 +505,71 @@ export class EventsService {
   async list(
     actor: EventActor,
     query: ListEventsQuery,
-  ): Promise<Paginated<EventResponseDto>> {
+  ): Promise<Paginated<EventListItemDto>> {
     const page = Math.max(1, query.page ?? 1);
     const limit = Math.min(
       MAX_LIMIT,
       Math.max(1, query.limit ?? DEFAULT_LIMIT),
     );
-    const options: ListEventsOptions = {
+    const sort = query.sort ?? 'recent';
+    const filters = listFilters(query);
+    if (sort === 'registrations') {
+      return this.listByRegistrations(
+        actor.organizationId,
+        filters,
+        page,
+        limit,
+      );
+    }
+    const { items, total } = await this.repo.list(actor.organizationId, {
       limit,
       offset: (page - 1) * limit,
-      sort: query.sort ?? 'recent',
-      ...(query.q ? { q: query.q } : {}),
-      ...(query.type ? { type: query.type } : {}),
-      ...(query.bucket ? { bucket: query.bucket } : {}),
-    };
-    const { items, total } = await this.repo.list(
-      actor.organizationId,
-      options,
+      sort,
+      ...filters,
+    });
+    const rows = await this.withFill(actor.organizationId, items);
+    return Paginated.of(rows, total, page, limit);
+  }
+
+  /** Active/Completed live-event counts (the tab badges). */
+  async summary(actor: EventActor): Promise<EventsSummaryDto> {
+    return this.repo.bucketCounts(actor.organizationId);
+  }
+
+  /**
+   * Sort by registrations — a Ticketing-derived metric, so it can't be an SQL
+   * ORDER BY on the events table. Load the org's matching events (a small, bounded
+   * set), fold in each one's sold count, sort fullest-first, then page in memory.
+   */
+  private async listByRegistrations(
+    organizationId: number,
+    filters: ListEventsFilters,
+    page: number,
+    limit: number,
+  ): Promise<Paginated<EventListItemDto>> {
+    const rows = await this.repo.listAll(organizationId, filters);
+    const sales = await this.tickets.salesByEvent(
+      organizationId,
+      rows.map((r) => r.id),
     );
-    return Paginated.of(items.map(toEventResponse), total, page, limit);
+    const ordered = [...rows].sort((a, b) => byRegistrations(a, b, sales));
+    const start = (page - 1) * limit;
+    const items = ordered
+      .slice(start, start + limit)
+      .map((r) => toEventListItem(r, sales.get(r.id)));
+    return Paginated.of(items, ordered.length, page, limit);
+  }
+
+  /** Fold each row's registrations-vs-capacity fill (one batched ticket query). */
+  private async withFill(
+    organizationId: number,
+    rows: EventRow[],
+  ): Promise<EventListItemDto[]> {
+    const sales = await this.tickets.salesByEvent(
+      organizationId,
+      rows.map((r) => r.id),
+    );
+    return rows.map((r) => toEventListItem(r, sales.get(r.id)));
   }
 
   /** First slug of `slugify(name)`, `-2`, `-3`… not already taken in this org. */
@@ -536,6 +585,29 @@ export class EventsService {
       if (!taken.has(candidate)) return candidate;
     }
   }
+}
+
+/** The defined-only search/type/bucket filters carried by a list query. */
+function listFilters(query: ListEventsQuery): ListEventsFilters {
+  return {
+    ...(query.q ? { q: query.q } : {}),
+    ...(query.type ? { type: query.type } : {}),
+    ...(query.bucket ? { bucket: query.bucket } : {}),
+  };
+}
+
+/** Order events fullest-first, tie-breaking by most-recent then id (stable paging). */
+function byRegistrations(
+  a: EventRow,
+  b: EventRow,
+  sales: Map<string, EventSales>,
+): number {
+  const soldA = sales.get(a.id)?.sold ?? 0;
+  const soldB = sales.get(b.id)?.sold ?? 0;
+  if (soldA !== soldB) return soldB - soldA;
+  const createdDelta = b.createdAt.getTime() - a.createdAt.getTime();
+  if (createdDelta !== 0) return createdDelta;
+  return a.id.localeCompare(b.id);
 }
 
 /** UTC bounds `[start, end)` of a `YYYY-MM` month interpreted in Asia/Bangkok. */
