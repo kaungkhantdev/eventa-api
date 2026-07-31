@@ -28,6 +28,10 @@ export const envSchema = z.object({
   // HTTP
   CORS_ORIGINS: z.string().default('*'),
 
+  // Checkout: how long a seat/GA hold survives before it expires and releases
+  // inventory (seconds). The attendee must complete checkout within this window.
+  HOLD_TTL_SECONDS: z.coerce.number().int().positive().default(600), // 10m
+
   // Public web app base URL — used to build shareable/public event links.
   PUBLIC_WEB_URL: z
     .string()

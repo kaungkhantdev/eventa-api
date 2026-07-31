@@ -72,9 +72,12 @@ describe('Events list — registrations fill, sort & summary (US-EVT-01, e2e)', 
   });
 
   const login = async (): Promise<string> => {
-    const res = await request(server)
-      .post('/api/v1/auth/login')
-      .send({ email: ADMIN, password: PASSWORD, orgSlug: ORG.slug, persona: 'admin' });
+    const res = await request(server).post('/api/v1/auth/login').send({
+      email: ADMIN,
+      password: PASSWORD,
+      orgSlug: ORG.slug,
+      persona: 'admin',
+    });
     return (res.body as SuccessBody<{ accessToken: string }>).data.accessToken;
   };
 
@@ -129,7 +132,12 @@ describe('Events list — registrations fill, sort & summary (US-EVT-01, e2e)', 
     const body = res.body as SuccessBody<ListItem[]>;
     expect(body.data).toHaveLength(1);
     expect(body.data[0].id).toBe(ids.full);
-    expect(body.meta).toMatchObject({ page: 1, limit: 1, total: 3, totalPages: 3 });
+    expect(body.meta).toMatchObject({
+      page: 1,
+      limit: 1,
+      total: 3,
+      totalPages: 3,
+    });
   });
 
   it('exposes Active/Completed bucket counts via /events/summary', async () => {

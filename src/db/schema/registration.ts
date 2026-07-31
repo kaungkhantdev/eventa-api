@@ -237,5 +237,7 @@ export const seatHolds = pgTable(
       .on(t.expiresAt)
       .where(sql`${t.status} = 'active'`),
     index('ix_seat_holds_order').on(t.orderId),
+    // Money-path backstop (mirrors order_items/orders): a hold reserves ≥ 1 unit.
+    check('ck_seat_holds_qty', sql`${t.quantity} >= 1`),
   ],
 );

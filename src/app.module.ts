@@ -17,6 +17,7 @@ import { EventsModule } from './modules/events/events.module';
 import { ProgramModule } from './modules/events/program/program.module';
 import { SeatingModule } from './modules/events/seating/seating.module';
 import { IdentityModule } from './modules/identity/identity.module';
+import { RegistrationModule } from './modules/registration/registration.module';
 import { TicketingModule } from './modules/ticketing/ticketing.module';
 
 @Module({
@@ -36,6 +37,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     ProgramModule,
     SeatingModule,
     DuplicationModule,
+    RegistrationModule,
   ],
 })
 export class AppModule implements NestModule {
