@@ -5,6 +5,7 @@ import {
   check,
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -40,6 +41,11 @@ export const ticketTypes = pgTable(
     minPerOrder: integer().notNull().default(1),
     maxPerOrder: integer().notNull().default(8),
     iconClass: text(),
+    /** "What's included" bullets shown on the public page (US-PAGE-05). */
+    includes: jsonb().$type<string[]>(),
+    /** The tier the page highlights, with its badge text (US-PAGE-05). */
+    isRecommended: boolean().notNull().default(false),
+    badge: text(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     deletedAt: deletedAt(),

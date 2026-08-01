@@ -86,6 +86,10 @@ export const events = pgTable(
     accentColor: text(),
     organizerName: text().notNull(),
     contactEmail: citext(),
+    /** Custom heading for the agenda section; falls back to a default (US-PAGE-04). */
+    agendaTitle: text(),
+    /** Custom heading for the speakers section (US-PAGE-04). */
+    speakersTitle: text(),
     landingTemplateId: templateIdEnum().references(() => landingTemplates.id, {
       onDelete: 'set null',
     }),
@@ -104,4 +108,48 @@ export const events = pgTable(
     index('ix_events_type').on(t.type),
     index('ix_events_category').on(t.categoryId),
   ],
+);
+
+/**
+ * A bullet the organizer arranges on the public page (US-PAGE-04). Ordered by
+ * `position`; an event with none simply renders no Highlights section.
+ */
+export const eventHighlights = pgTable(
+  'event_highlights',
+  {
+    id: idPk(),
+    organizationId: bigint({ mode: 'number' })
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    eventId: uuid()
+      .notNull()
+      .references(() => events.id, { onDelete: 'cascade' }),
+    text: text().notNull(),
+    /** Optional icon key the template renders beside the bullet. */
+    icon: text(),
+    position: integer().notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('ix_event_highlights_event').on(t.eventId, t.position)],
+);
+
+/** A question/answer pair shown on the public page (US-PAGE-06). */
+export const eventFaqs = pgTable(
+  'event_faqs',
+  {
+    id: idPk(),
+    organizationId: bigint({ mode: 'number' })
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    eventId: uuid()
+      .notNull()
+      .references(() => events.id, { onDelete: 'cascade' }),
+    question: text().notNull(),
+    answer: text().notNull(),
+    position: integer().notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('ix_event_faqs_event').on(t.eventId, t.position)],
 );
