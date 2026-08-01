@@ -51,4 +51,13 @@ export class DomainException extends HttpException {
       details,
     );
   }
+
+  static tooManyRequests(message = 'Too many requests', details?: unknown) {
+    return new DomainException(
+      ErrorCode.RATE_LIMITED,
+      message,
+      HttpStatus.TOO_MANY_REQUESTS,
+      details,
+    );
+  }
 }

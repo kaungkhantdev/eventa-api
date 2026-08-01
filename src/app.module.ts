@@ -7,17 +7,26 @@ import { ConfigService } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 import { CommonModule } from './common/common.module';
 import { CorrelationIdMiddleware } from './common/context/correlation-id.middleware';
+import { RedisModule } from './common/redis/redis.module';
 import { AppConfigModule } from './config/config.module';
 import type { Env } from './config/env.validation';
 import { buildLoggerOptions } from './config/logger.config';
 import { DatabaseModule } from './db/database.module';
 import { HealthModule } from './health/health.module';
-import { DuplicationModule } from './modules/events/duplication/duplication.module';
+import { EventCategoriesModule } from './modules/event-categories/event-categories.module';
+import { EventDuplicationModule } from './modules/event-duplication/event-duplication.module';
+import { EventMonitoringModule } from './modules/event-monitoring/event-monitoring.module';
 import { EventsModule } from './modules/events/events.module';
-import { ProgramModule } from './modules/events/program/program.module';
-import { SeatingModule } from './modules/events/seating/seating.module';
-import { IdentityModule } from './modules/identity/identity.module';
+import { EventProgramModule } from './modules/event-program/event-program.module';
+import { EventSeatingModule } from './modules/event-seating/event-seating.module';
+import { EventSharingModule } from './modules/event-sharing/event-sharing.module';
+import { AccessModule } from './modules/access/access.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { AuthPasswordModule } from './modules/auth-password/auth-password.module';
+import { AuthSignupModule } from './modules/auth-signup/auth-signup.module';
+import { UsersModule } from './modules/users/users.module';
 import { RegistrationModule } from './modules/registration/registration.module';
+import { RegistrationStatsModule } from './modules/registration-stats/registration-stats.module';
 import { TicketingModule } from './modules/ticketing/ticketing.module';
 
 @Module({
@@ -30,14 +39,23 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     }),
     DatabaseModule,
     CommonModule,
+    RedisModule,
     HealthModule,
-    IdentityModule,
+    AuthModule,
+    UsersModule,
+    AuthSignupModule,
+    AuthPasswordModule,
+    AccessModule,
     EventsModule,
     TicketingModule,
-    ProgramModule,
-    SeatingModule,
-    DuplicationModule,
+    EventCategoriesModule,
+    EventProgramModule,
+    EventSeatingModule,
+    EventDuplicationModule,
+    EventSharingModule,
+    EventMonitoringModule,
     RegistrationModule,
+    RegistrationStatsModule,
   ],
 })
 export class AppModule implements NestModule {

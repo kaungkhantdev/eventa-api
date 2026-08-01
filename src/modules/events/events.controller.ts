@@ -20,13 +20,13 @@ import {
 } from '../../common/http/api-data.decorator';
 import { Paginated } from '../../common/http/paginated';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
-import type { AuthContext } from '../identity/auth.types';
-import { CurrentAuth } from '../identity/decorators/current-auth.decorator';
+import type { AuthContext } from '../auth/auth.types';
+import { CurrentAuth } from '../../common/decorators/current-auth.decorator';
 import {
   Permission,
   RequirePermissions,
-} from '../identity/decorators/require-permissions.decorator';
-import { PermissionsGuard } from '../identity/guards/permissions.guard';
+} from '../../common/decorators/require-permissions.decorator';
+import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { CalendarQueryDto } from './dto/calendar.query.dto';
 import { CalendarResponseDto } from './dto/calendar-response.dto';
 import { CancelEventDto } from './dto/cancel-event.dto';
@@ -41,8 +41,9 @@ import { UpcomingQueryDto } from './dto/upcoming.query.dto';
 import { PublishEventDto } from './dto/publish-event.dto';
 import { UnpublishEventDto } from './dto/unpublish-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
+import { EventsQueryService } from './events-query.service';
 import { EventsService } from './events.service';
-import { AdminGuard } from './guards/admin.guard';
+import { AdminGuard } from '../../common/guards/admin.guard';
 
 @ApiTags('events')
 @ApiBearerAuth()
@@ -53,7 +54,10 @@ import { AdminGuard } from './guards/admin.guard';
 @UseGuards(AdminGuard, PermissionsGuard)
 @Controller('events')
 export class EventsController {
-  constructor(private readonly events: EventsService) {}
+  constructor(
+    private readonly events: EventsService,
+    private readonly query: EventsQueryService,
+  ) {}
 
   @Post()
   @RequirePermissions(Permission.evCreate)
@@ -85,7 +89,7 @@ export class EventsController {
     @CurrentAuth() auth: AuthContext,
     @Query() query: ListEventsQueryDto,
   ): Promise<Paginated<EventListItemDto>> {
-    return this.events.list(
+    return this.query.list(
       { organizationId: auth.organizationId, userId: auth.userId },
       query,
     );
@@ -96,7 +100,7 @@ export class EventsController {
   @ResponseMessage('Event summary retrieved.')
   @ApiData(EventsSummaryDto)
   summary(@CurrentAuth() auth: AuthContext): Promise<EventsSummaryDto> {
-    return this.events.summary({
+    return this.query.summary({
       organizationId: auth.organizationId,
       userId: auth.userId,
     });
@@ -110,7 +114,7 @@ export class EventsController {
     @CurrentAuth() auth: AuthContext,
     @Query() query: CalendarQueryDto,
   ): Promise<CalendarResponseDto> {
-    return this.events.calendar(
+    return this.query.calendar(
       { organizationId: auth.organizationId, userId: auth.userId },
       query.month,
     );
@@ -124,7 +128,7 @@ export class EventsController {
     @CurrentAuth() auth: AuthContext,
     @Query() query: UpcomingQueryDto,
   ): Promise<UpcomingEventDto[]> {
-    return this.events.upcoming(
+    return this.query.upcoming(
       { organizationId: auth.organizationId, userId: auth.userId },
       query.limit,
     );

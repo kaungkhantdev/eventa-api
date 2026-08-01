@@ -24,6 +24,8 @@ export const envSchema = z.object({
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
   JWT_ACCESS_TTL: z.coerce.number().int().positive().default(900), // seconds (15m)
   JWT_REFRESH_TTL: z.coerce.number().int().positive().default(604800), // seconds (7d)
+  // "Remember me" off → a shorter, session-length refresh window (US-ACC-08).
+  JWT_REFRESH_TTL_SHORT: z.coerce.number().int().positive().default(86400), // 1d
 
   // HTTP
   CORS_ORIGINS: z.string().default('*'),
@@ -31,6 +33,11 @@ export const envSchema = z.object({
   // Checkout: how long a seat/GA hold survives before it expires and releases
   // inventory (seconds). The attendee must complete checkout within this window.
   HOLD_TTL_SECONDS: z.coerce.number().int().positive().default(600), // 10m
+
+  // Sign-in brute-force protection: after this many consecutive failures the
+  // account is locked out for LOGIN_LOCK_SECONDS (a cool-off).
+  LOGIN_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  LOGIN_LOCK_SECONDS: z.coerce.number().int().positive().default(900), // 15m
 
   // Public web app base URL — used to build shareable/public event links.
   PUBLIC_WEB_URL: z
