@@ -41,6 +41,15 @@ export const users = pgTable(
     status: memberStatusEnum().notNull().default('Invited'),
     passwordHash: text(), // Argon2id; never returned or logged
     avatarUrl: text(),
+    /** Contact number; also gates the SMS notification toggles (US-SET-01/06). */
+    phone: text(),
+    /** Per-user override of the org timezone; IANA name (US-SET-01). */
+    timezone: text(),
+    /**
+     * A requested new email awaiting confirmation (US-SET-01). The current `email`
+     * keeps working for sign-in until the link is opened, then this is promoted.
+     */
+    pendingEmail: citext(),
     twoFactorEnabled: boolean().notNull().default(false),
     locale: localeEnum(), // per-user override of org locale
     // FK -> attendees(id) added once the attendees table lands (portal persona link).
