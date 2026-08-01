@@ -211,6 +211,13 @@ export const paymentMethodEnum = pgEnum('payment_method', [
   'Google Pay',
 ]);
 
+/** Identity providers a member may sign in with (US-ACC-06). */
+export const socialProviderEnum = pgEnum('social_provider', [
+  'google',
+  'apple',
+  'linkedin',
+]);
+
 /** Which payment provider a workspace is connected to (US-SET-08). */
 export const paymentProviderEnum = pgEnum('payment_provider', ['stripe']);
 

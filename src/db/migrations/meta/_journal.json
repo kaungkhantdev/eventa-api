@@ -120,6 +120,20 @@
       "when": 1785560781463,
       "tag": "0016_custom_roles",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1785561672247,
+      "tag": "0017_social_identities",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785563311157,
+      "tag": "0018_rls_social_identities",
+      "breakpoints": true
     }
   ]
 }

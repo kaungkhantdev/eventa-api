@@ -30,6 +30,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { AuthSessionsModule } from './modules/auth-sessions/auth-sessions.module';
 import { AuthTwoFactorModule } from './modules/auth-two-factor/auth-two-factor.module';
 import { AuthSignupModule } from './modules/auth-signup/auth-signup.module';
+import { AuthSocialModule } from './modules/auth-social/auth-social.module';
 import { UsersModule } from './modules/users/users.module';
 import { RegistrationModule } from './modules/registration/registration.module';
 import { RegistrationStatsModule } from './modules/registration-stats/registration-stats.module';
@@ -50,6 +51,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     AuthModule,
     UsersModule,
     AuthSignupModule,
+    AuthSocialModule,
     AuthPasswordModule,
     AuthSessionsModule,
     AuthTwoFactorModule,

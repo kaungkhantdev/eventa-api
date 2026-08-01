@@ -16,6 +16,7 @@ import {
   memberStatusEnum,
   permissionGroupEnum,
   permissionKeyEnum,
+  socialProviderEnum,
   twoFactorMethodEnum,
   userPersonaEnum,
 } from './enums';
@@ -186,6 +187,35 @@ export const authSessions = pgTable(
     index('ix_auth_sessions_active')
       .on(t.userId)
       .where(sql`revoked_at is null`),
+  ],
+);
+
+/**
+ * A provider account linked to a user (US-ACC-06). One row per (provider,
+ * subject); a user may link several providers. Nothing secret is stored — only
+ * the provider's opaque subject id and the email it asserted at link time.
+ */
+export const socialIdentities = pgTable(
+  'social_identities',
+  {
+    id: idPk(),
+    organizationId: bigint({ mode: 'number' })
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    provider: socialProviderEnum().notNull(),
+    /** The provider's stable subject (`sub`) — never an email, which can change. */
+    subject: text().notNull(),
+    email: citext(),
+    linkedAt: createdAt(),
+    lastUsedAt: timestamp({ withTimezone: true }),
+  },
+  (t) => [
+    unique('uq_social_identities_provider_subject').on(t.provider, t.subject),
+    unique('uq_social_identities_user_provider').on(t.userId, t.provider),
+    index('ix_social_identities_user').on(t.userId),
   ],
 );
 
