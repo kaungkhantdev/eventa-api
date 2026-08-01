@@ -13,10 +13,10 @@ import {
 import { createdAt, deletedAt, idPk, updatedAt, version } from './_columns';
 import {
   localeEnum,
-  memberRoleEnum,
   memberStatusEnum,
   permissionGroupEnum,
   permissionKeyEnum,
+  socialProviderEnum,
   twoFactorMethodEnum,
   userPersonaEnum,
 } from './enums';
@@ -41,6 +41,15 @@ export const users = pgTable(
     status: memberStatusEnum().notNull().default('Invited'),
     passwordHash: text(), // Argon2id; never returned or logged
     avatarUrl: text(),
+    /** Contact number; also gates the SMS notification toggles (US-SET-01/06). */
+    phone: text(),
+    /** Per-user override of the org timezone; IANA name (US-SET-01). */
+    timezone: text(),
+    /**
+     * A requested new email awaiting confirmation (US-SET-01). The current `email`
+     * keeps working for sign-in until the link is opened, then this is promoted.
+     */
+    pendingEmail: citext(),
     twoFactorEnabled: boolean().notNull().default(false),
     locale: localeEnum(), // per-user override of org locale
     // FK -> attendees(id) added once the attendees table lands (portal persona link).
@@ -70,7 +79,10 @@ export const roles = pgTable(
     organizationId: bigint({ mode: 'number' })
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
-    name: memberRoleEnum().notNull(),
+    // TEXT, not the member_role enum: a workspace may add custom roles such as
+    // "Volunteer" (US-SET-13). The four built-ins keep their names and are marked
+    // isSystem; uq_roles_org_name still guarantees one name per workspace.
+    name: text().notNull(),
     description: text().notNull(),
     bullets: jsonb().$type<string[]>(),
     isSystem: boolean().notNull().default(true),
@@ -129,7 +141,7 @@ export const memberships = pgTable(
     roleId: bigint({ mode: 'number' })
       .notNull()
       .references(() => roles.id, { onDelete: 'restrict' }),
-    role: memberRoleEnum().notNull(), // denormalized role name
+    role: text().notNull(), // denormalized role name (may be a custom role)
     status: memberStatusEnum().notNull().default('Invited'),
     invitedAt: timestamp({ withTimezone: true }),
     joinedAt: timestamp({ withTimezone: true }),
@@ -175,6 +187,35 @@ export const authSessions = pgTable(
     index('ix_auth_sessions_active')
       .on(t.userId)
       .where(sql`revoked_at is null`),
+  ],
+);
+
+/**
+ * A provider account linked to a user (US-ACC-06). One row per (provider,
+ * subject); a user may link several providers. Nothing secret is stored — only
+ * the provider's opaque subject id and the email it asserted at link time.
+ */
+export const socialIdentities = pgTable(
+  'social_identities',
+  {
+    id: idPk(),
+    organizationId: bigint({ mode: 'number' })
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    provider: socialProviderEnum().notNull(),
+    /** The provider's stable subject (`sub`) — never an email, which can change. */
+    subject: text().notNull(),
+    email: citext(),
+    linkedAt: createdAt(),
+    lastUsedAt: timestamp({ withTimezone: true }),
+  },
+  (t) => [
+    unique('uq_social_identities_provider_subject').on(t.provider, t.subject),
+    unique('uq_social_identities_user_provider').on(t.userId, t.provider),
+    index('ix_social_identities_user').on(t.userId),
   ],
 );
 

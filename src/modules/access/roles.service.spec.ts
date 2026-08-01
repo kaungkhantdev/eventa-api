@@ -1,5 +1,6 @@
 import { DomainException } from '../../common/errors/domain.exception';
 import { AccessRepository } from './access.repository';
+import type { AccessService } from './access.service';
 import { RolesService } from './roles.service';
 
 const orgId = 1;
@@ -15,8 +16,12 @@ describe('RolesService', () => {
       roleExists: jest.fn(),
       setRolePermissions: jest.fn().mockResolvedValue(undefined),
       getRole: jest.fn(),
+      roleGrants: jest.fn().mockResolvedValue(false),
+      countRolesGranting: jest.fn().mockResolvedValue(2),
     } as unknown as jest.Mocked<AccessRepository>;
-    service = new RolesService(repo);
+    service = new RolesService(repo, {
+      assertNoEscalation: jest.fn().mockResolvedValue(undefined),
+    } as unknown as AccessService);
   });
 
   describe('listRoles', () => {
@@ -27,12 +32,14 @@ describe('RolesService', () => {
           name: 'Admin',
           description: 'Full access',
           permissions: ['evCreate', 'setUsers'],
+          memberCount: 3,
+          isSystem: true,
         },
-      ]);
+      ] as never);
 
       const roles = await service.listRoles(orgId);
 
-      expect(repo.listRoles).toHaveBeenCalledWith(orgId);
+      expect(repo.listRoles).toHaveBeenCalledWith(orgId, undefined);
       expect(roles[0]).toMatchObject({
         id: 5,
         name: 'Admin',
@@ -46,7 +53,7 @@ describe('RolesService', () => {
       repo.roleExists.mockResolvedValue(false);
 
       const err = await service
-        .setRolePermissions(orgId, 999, ['evCreate'])
+        .setRolePermissions(orgId, 'actor', 999, ['evCreate'])
         .catch((e: unknown) => e);
 
       expect(err).toBeInstanceOf(DomainException);
@@ -61,9 +68,11 @@ describe('RolesService', () => {
         name: 'Staff',
         description: 'seed',
         permissions: ['regView', 'regCheckin'],
+        memberCount: 0,
+        isSystem: true,
       });
 
-      const role = await service.setRolePermissions(orgId, 5, [
+      const role = await service.setRolePermissions(orgId, 'actor', 5, [
         'regView',
         'regCheckin',
       ]);
@@ -82,9 +91,14 @@ describe('RolesService', () => {
         name: 'Staff',
         description: 'seed',
         permissions: ['regView'],
+        memberCount: 0,
+        isSystem: true,
       });
 
-      await service.setRolePermissions(orgId, 5, ['regView', 'regView']);
+      await service.setRolePermissions(orgId, 'actor', 5, [
+        'regView',
+        'regView',
+      ]);
 
       expect(repo.setRolePermissions).toHaveBeenCalledWith(orgId, 5, [
         'regView',

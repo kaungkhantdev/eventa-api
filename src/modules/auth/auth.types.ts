@@ -50,6 +50,18 @@ export interface EmailVerificationClaims {
 }
 
 /**
+ * Claims of an email-CHANGE confirmation link (US-SET-01). Carries the requested
+ * address so opening the link promotes exactly that one — the current sign-in
+ * email keeps working until then.
+ */
+export interface EmailChangeClaims {
+  sub: string; // userId
+  org: number; // organizationId
+  email: string; // the requested new address
+  typ: 'change_email';
+}
+
+/**
  * Claims of a password-reset token. `pv` is a fingerprint of the current password
  * hash — once the password changes (a successful reset, or any other change) the
  * fingerprint no longer matches, so the link is single-use and self-invalidating.

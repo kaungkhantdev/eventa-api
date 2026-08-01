@@ -206,6 +206,28 @@ export const paymentMethodEnum = pgEnum('payment_method', [
   'Card',
   'PromptPay',
   'Bank transfer',
+  // Wallets (US-SET-09) — appended; enum values are add-only.
+  'Apple Pay',
+  'Google Pay',
+]);
+
+/** Identity providers a member may sign in with (US-ACC-06). */
+export const socialProviderEnum = pgEnum('social_provider', [
+  'google',
+  'apple',
+  'linkedin',
+]);
+
+/** Which payment provider a workspace is connected to (US-SET-08). */
+export const paymentProviderEnum = pgEnum('payment_provider', ['stripe']);
+
+/** Test mode takes no real money; live does (US-SET-08). */
+export const paymentModeEnum = pgEnum('payment_mode', ['test', 'live']);
+
+/** Connection state of a workspace's payment account (US-SET-08). */
+export const paymentConnectionStatusEnum = pgEnum('payment_connection_status', [
+  'disconnected',
+  'connected',
 ]);
 
 export const refundStatusEnum = pgEnum('refund_status', [

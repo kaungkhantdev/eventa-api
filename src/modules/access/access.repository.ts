@@ -1,8 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, ilike, inArray, isNull, sql } from 'drizzle-orm';
 import { DomainException } from '../../common/errors/domain.exception';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
+  authSessions,
   memberships,
   permissions,
   rolePermissions,
@@ -20,6 +21,10 @@ import type {
   PermissionCatalogItem,
   RoleWithPermissions,
 } from './access.types';
+
+const ACTIVE_STATUS = 'Active' as const;
+/** The role that must never be left without a holder. */
+const ADMIN_ROLE = 'Admin' as const;
 
 const MEMBER_COLUMNS = {
   id: memberships.id,
@@ -48,10 +53,13 @@ export class AccessRepository {
       .orderBy(asc(permissions.group), asc(permissions.key));
   }
 
-  /** This org's roles, each with the permission keys it grants. */
-  listRoles(organizationId: number): Promise<RoleWithPermissions[]> {
+  /** This org's roles, each with its grants and live member count. */
+  listRoles(
+    organizationId: number,
+    search?: string,
+  ): Promise<RoleWithPermissions[]> {
     return withTenant(this.db, organizationId, (tx) =>
-      this.rolesWithGrants(tx, organizationId),
+      this.rolesWithGrants(tx, organizationId, undefined, search),
     );
   }
 
@@ -255,23 +263,242 @@ export class AccessRepository {
     });
   }
 
+  /** Is this role name already used in the workspace? */
+  async roleNameTaken(organizationId: number, name: string): Promise<boolean> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({ id: roles.id })
+        .from(roles)
+        .where(
+          and(eq(roles.organizationId, organizationId), eq(roles.name, name)),
+        )
+        .limit(1);
+      return row !== undefined;
+    });
+  }
+
+  /** Create a custom (non-system) role and return its id. */
+  async createRole(
+    organizationId: number,
+    name: string,
+    description: string,
+  ): Promise<number> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .insert(roles)
+        .values({ organizationId, name, description, isSystem: false })
+        .returning({ id: roles.id });
+      return row.id;
+    });
+  }
+
+  /** Does this role currently grant the given permission key? */
+  async roleGrants(
+    organizationId: number,
+    roleId: number,
+    key: PermissionKey,
+  ): Promise<boolean> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({ id: rolePermissions.id })
+        .from(rolePermissions)
+        .innerJoin(roles, eq(roles.id, rolePermissions.roleId))
+        .where(
+          and(
+            eq(roles.organizationId, organizationId),
+            eq(rolePermissions.roleId, roleId),
+            eq(rolePermissions.permissionKey, key),
+            eq(rolePermissions.granted, true),
+          ),
+        )
+        .limit(1);
+      return row !== undefined;
+    });
+  }
+
+  /** How many of this org's roles grant the key — the "never strand" guard. */
+  async countRolesGranting(
+    organizationId: number,
+    key: PermissionKey,
+  ): Promise<number> {
+    const rows = await withTenant(this.db, organizationId, (tx) =>
+      tx
+        .select({ roleId: rolePermissions.roleId })
+        .from(rolePermissions)
+        .innerJoin(roles, eq(roles.id, rolePermissions.roleId))
+        .where(
+          and(
+            eq(roles.organizationId, organizationId),
+            eq(rolePermissions.permissionKey, key),
+            eq(rolePermissions.granted, true),
+          ),
+        ),
+    );
+    return new Set(rows.map((r) => r.roleId)).size;
+  }
+
+  /** How many Active members hold an Admin role — the last-Admin guard. */
+  async countActiveAdmins(organizationId: number): Promise<number> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({ id: memberships.id })
+        .from(memberships)
+        .innerJoin(roles, eq(roles.id, memberships.roleId))
+        .where(
+          and(
+            eq(memberships.organizationId, organizationId),
+            eq(memberships.status, ACTIVE_STATUS),
+            eq(roles.name, ADMIN_ROLE),
+            isNull(memberships.deletedAt),
+          ),
+        );
+      return rows.length;
+    });
+  }
+
+  /** Is this membership an Active Admin? */
+  async isActiveAdmin(
+    organizationId: number,
+    membershipId: number,
+  ): Promise<boolean> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({ id: memberships.id })
+        .from(memberships)
+        .innerJoin(roles, eq(roles.id, memberships.roleId))
+        .where(
+          and(
+            eq(memberships.id, membershipId),
+            eq(memberships.organizationId, organizationId),
+            eq(memberships.status, ACTIVE_STATUS),
+            eq(roles.name, ADMIN_ROLE),
+          ),
+        )
+        .limit(1);
+      return row !== undefined;
+    });
+  }
+
+  /**
+   * Suspend or reactivate: the membership's ROLE is preserved either way, so
+   * reactivating restores exactly the access they had. Suspending also flips the
+   * user row so sign-in is refused, and revokes their live sessions.
+   */
+  async setMemberStatus(
+    organizationId: number,
+    membershipId: number,
+    status: 'Active' | 'Suspended',
+  ): Promise<void> {
+    await withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .update(memberships)
+        .set({ status, updatedAt: new Date() })
+        .where(
+          and(
+            eq(memberships.id, membershipId),
+            eq(memberships.organizationId, organizationId),
+          ),
+        )
+        .returning({ userId: memberships.userId });
+      if (!row) return;
+      await tx
+        .update(users)
+        .set({ status, updatedAt: new Date() })
+        .where(eq(users.id, row.userId));
+      if (status === 'Suspended') {
+        await tx
+          .update(authSessions)
+          .set({ revokedAt: new Date() })
+          .where(
+            and(
+              eq(authSessions.userId, row.userId),
+              isNull(authSessions.revokedAt),
+            ),
+          );
+      }
+    });
+  }
+
+  /**
+   * End access now, keeping their past work for the record: the membership and
+   * user are soft-deleted and every session revoked, so nothing they created is
+   * lost and the email can be re-invited later.
+   */
+  async removeMember(
+    organizationId: number,
+    membershipId: number,
+  ): Promise<void> {
+    await withTenant(this.db, organizationId, async (tx) => {
+      const now = new Date();
+      const [row] = await tx
+        .update(memberships)
+        .set({ status: 'Suspended', deletedAt: now, updatedAt: now })
+        .where(
+          and(
+            eq(memberships.id, membershipId),
+            eq(memberships.organizationId, organizationId),
+          ),
+        )
+        .returning({ userId: memberships.userId });
+      if (!row) return;
+      await tx
+        .update(users)
+        .set({ status: 'Suspended', deletedAt: now, updatedAt: now })
+        .where(eq(users.id, row.userId));
+      await tx
+        .update(authSessions)
+        .set({ revokedAt: now })
+        .where(
+          and(
+            eq(authSessions.userId, row.userId),
+            isNull(authSessions.revokedAt),
+          ),
+        );
+    });
+  }
+
+  /** An existing Invited membership for this email, if any (re-invite, not duplicate). */
+  async findInvitedByEmail(
+    organizationId: number,
+    email: string,
+  ): Promise<{ membershipId: number; userId: string } | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({ membershipId: memberships.id, userId: users.id })
+        .from(memberships)
+        .innerJoin(users, eq(users.id, memberships.userId))
+        .where(
+          and(
+            eq(memberships.organizationId, organizationId),
+            eq(users.email, email),
+            eq(memberships.status, 'Invited'),
+            isNull(memberships.deletedAt),
+          ),
+        )
+        .limit(1);
+      return row ?? null;
+    });
+  }
+
   private async rolesWithGrants(
     tx: Tx,
     organizationId: number,
     roleId?: number,
+    search?: string,
   ): Promise<RoleWithPermissions[]> {
+    const scope = roleId
+      ? and(eq(roles.organizationId, organizationId), eq(roles.id, roleId))
+      : eq(roles.organizationId, organizationId);
+    const where = search ? and(scope, ilike(roles.name, `%${search}%`)) : scope;
     const roleRows = await tx
       .select({
         id: roles.id,
         name: roles.name,
         description: roles.description,
+        isSystem: roles.isSystem,
       })
       .from(roles)
-      .where(
-        roleId
-          ? and(eq(roles.organizationId, organizationId), eq(roles.id, roleId))
-          : eq(roles.organizationId, organizationId),
-      )
+      .where(where)
       .orderBy(asc(roles.id));
     if (roleRows.length === 0) return [];
 
@@ -297,7 +524,26 @@ export class AccessRepository {
       if (list) list.push(g.key);
       else byRole.set(g.roleId, [g.key]);
     }
-    return roleRows.map((r) => ({ ...r, permissions: byRole.get(r.id) ?? [] }));
+
+    const counts = await tx
+      .select({ roleId: memberships.roleId })
+      .from(memberships)
+      .where(
+        and(
+          eq(memberships.organizationId, organizationId),
+          isNull(memberships.deletedAt),
+        ),
+      );
+    const memberCount = new Map<number, number>();
+    for (const row of counts) {
+      memberCount.set(row.roleId, (memberCount.get(row.roleId) ?? 0) + 1);
+    }
+
+    return roleRows.map((r) => ({
+      ...r,
+      permissions: byRole.get(r.id) ?? [],
+      memberCount: memberCount.get(r.id) ?? 0,
+    }));
   }
 
   /** Permission keys granted to the user in this org (via their active membership's role). */

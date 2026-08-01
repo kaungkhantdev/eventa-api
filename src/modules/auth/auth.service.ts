@@ -31,6 +31,8 @@ export interface LoginInput {
   rememberMe?: boolean;
 }
 
+export type { LoginUser };
+
 export interface LoginResult {
   accessToken: string;
   refreshToken: string;
@@ -70,6 +72,19 @@ export class AuthService {
     await this.throttle.assertNotLocked(throttleId);
     const found = await this.authenticateThrottled(input, throttleId);
     await this.assertEligible(found);
+    return this.startSession(found, input);
+  }
+
+  /**
+   * Open a session and mint tokens for an ALREADY-AUTHENTICATED user. Password
+   * sign-in reaches this after checking the hash; social sign-in (US-ACC-06) after
+   * the provider's id token verifies. Callers are responsible for proving identity
+   * first — nothing here re-checks a credential.
+   */
+  async startSession(
+    found: LoginUser,
+    input: Omit<LoginInput, 'email' | 'password' | 'orgSlug'>,
+  ): Promise<LoginResult> {
     const refreshTtl = input.rememberMe
       ? this.tokens.refreshTtlSeconds
       : this.tokens.refreshTtlShortSeconds;
@@ -211,7 +226,7 @@ export class AuthService {
 
   private openSession(
     found: LoginUser,
-    input: LoginInput,
+    input: Pick<LoginInput, 'device' | 'ip'>,
     refreshTtlSeconds: number,
   ): Promise<string> {
     const expiresAt = new Date(
@@ -228,7 +243,7 @@ export class AuthService {
 
   private async recordSignIn(
     found: LoginUser,
-    input: LoginInput,
+    input: Pick<LoginInput, 'device' | 'ip'>,
   ): Promise<void> {
     await this.users.touchLastActive(found.user.id);
     await this.outbox.enqueue(

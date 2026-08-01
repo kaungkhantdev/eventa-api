@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -76,5 +77,40 @@ export class MembersController {
     @Body() dto: UpdateMemberDto,
   ): Promise<MemberResponseDto> {
     return this.access.changeMemberRole(auth.organizationId, id, dto.roleId);
+  }
+
+  @Post(':id/suspend')
+  @RequirePermissions(Permission.setUsers)
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Member suspended.')
+  @ApiData(MemberResponseDto)
+  suspend(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<MemberResponseDto> {
+    return this.access.suspendMember(auth.organizationId, id);
+  }
+
+  @Post(':id/reactivate')
+  @RequirePermissions(Permission.setUsers)
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Member reactivated.')
+  @ApiData(MemberResponseDto)
+  reactivate(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<MemberResponseDto> {
+    return this.access.reactivateMember(auth.organizationId, id);
+  }
+
+  @Delete(':id')
+  @RequirePermissions(Permission.setUsers)
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Member removed.')
+  remove(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<void> {
+    return this.access.removeMember(auth.organizationId, id);
   }
 }

@@ -16,6 +16,6 @@ import { SignupService } from './auth-signup.service';
   imports: [forwardRef(() => AuthModule), AuthPasswordModule, PlatformModule],
   controllers: [AuthSignupController],
   providers: [SignupService, SignupRepository],
-  exports: [SignupService],
+  exports: [SignupService, SignupRepository],
 })
 export class AuthSignupModule {}

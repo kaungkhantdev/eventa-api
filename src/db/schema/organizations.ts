@@ -23,6 +23,10 @@ export const organizations = pgTable(
     name: text().notNull(),
     slug: text().notNull().unique(),
     logoUrl: text(),
+    /** Legal address printed on invoices/receipts (US-SET-07). */
+    address: text(),
+    /** Public website shown on branded surfaces (US-SET-07); http(s) URL. */
+    website: text(),
     currency: char({ length: 3 }).notNull().default('THB'),
     country: char({ length: 2 }).notNull().default('TH'),
     timezone: text().notNull().default('Asia/Bangkok'),

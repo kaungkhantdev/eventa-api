@@ -25,7 +25,8 @@ export interface BootstrapInput {
   slug: string;
   name: string;
   email: string;
-  passwordHash: string;
+  /** Null for a social-only account (US-ACC-06) — there is no password to guess. */
+  passwordHash: string | null;
 }
 
 export interface BootstrapResult {
