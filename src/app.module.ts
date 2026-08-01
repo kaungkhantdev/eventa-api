@@ -16,6 +16,8 @@ import { HealthModule } from './health/health.module';
 import { EventCategoriesModule } from './modules/event-categories/event-categories.module';
 import { EventDuplicationModule } from './modules/event-duplication/event-duplication.module';
 import { EventMonitoringModule } from './modules/event-monitoring/event-monitoring.module';
+import { EventPageModule } from './modules/event-page/event-page.module';
+import { EventPageContentModule } from './modules/event-page-content/event-page-content.module';
 import { EventsModule } from './modules/events/events.module';
 import { NotificationPreferencesModule } from './modules/notification-preferences/notification-preferences.module';
 import { OrganizationModule } from './modules/organization/organization.module';
@@ -32,6 +34,7 @@ import { AuthTwoFactorModule } from './modules/auth-two-factor/auth-two-factor.m
 import { AuthSignupModule } from './modules/auth-signup/auth-signup.module';
 import { AuthSocialModule } from './modules/auth-social/auth-social.module';
 import { UsersModule } from './modules/users/users.module';
+import { PublicPagesModule } from './modules/public-pages/public-pages.module';
 import { RegistrationModule } from './modules/registration/registration.module';
 import { RegistrationStatsModule } from './modules/registration-stats/registration-stats.module';
 import { TicketingModule } from './modules/ticketing/ticketing.module';
@@ -68,6 +71,9 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     EventDuplicationModule,
     EventSharingModule,
     EventMonitoringModule,
+    EventPageModule,
+    EventPageContentModule,
+    PublicPagesModule,
     RegistrationModule,
     RegistrationStatsModule,
   ],
