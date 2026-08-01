@@ -22,6 +22,14 @@ export const envSchema = z.object({
 
   // Auth (JWT — access + refresh)
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
+  /** base64 of exactly 32 random bytes — AES-256-GCM key for recoverable secrets. */
+  SECRET_ENCRYPTION_KEY: z
+    .string()
+    .default('MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=')
+    .refine(
+      (v) => Buffer.from(v, 'base64').length === 32,
+      'SECRET_ENCRYPTION_KEY must be base64 of 32 bytes',
+    ),
   JWT_ACCESS_TTL: z.coerce.number().int().positive().default(900), // seconds (15m)
   JWT_REFRESH_TTL: z.coerce.number().int().positive().default(604800), // seconds (7d)
   // "Remember me" off → a shorter, session-length refresh window (US-ACC-08).

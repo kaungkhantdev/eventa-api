@@ -239,6 +239,100 @@ describe('Access / RBAC management (e2e)', () => {
     expect(res.status).toBe(403);
   });
 
+  describe('custom roles (US-SET-13)', () => {
+    it('creates a custom role with the chosen capabilities', async () => {
+      const adminJwt = await token(ADMIN);
+      const res = await request(server)
+        .post('/api/v1/roles')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({
+          name: 'Volunteer',
+          description: 'Helps on the day',
+          permissions: ['regCheckin'],
+        });
+      expect(res.status).toBe(201);
+      const role = (
+        res.body as {
+          data: { name: string; permissions: string[]; isSystem: boolean };
+        }
+      ).data;
+      expect(role).toMatchObject({
+        name: 'Volunteer',
+        permissions: ['regCheckin'],
+        isSystem: false,
+      });
+    });
+
+    it('rejects a duplicate name and asks for a unique one (409)', async () => {
+      const adminJwt = await token(ADMIN);
+      const res = await request(server)
+        .post('/api/v1/roles')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({ name: 'Volunteer', description: 'again', permissions: [] });
+      expect(res.status).toBe(409);
+      expect((res.body as { message: string }).message).toMatch(/unique name/i);
+    });
+
+    it('shows every role with its member count, and can be searched', async () => {
+      const adminJwt = await token(ADMIN);
+      const all = await request(server)
+        .get('/api/v1/roles')
+        .set('Authorization', `Bearer ${adminJwt}`);
+      const roles = (
+        all.body as { data: { name: string; memberCount: number }[] }
+      ).data;
+      expect(
+        roles.find((r) => r.name === 'Admin')?.memberCount,
+      ).toBeGreaterThan(0);
+      expect(roles.find((r) => r.name === 'Volunteer')?.memberCount).toBe(0);
+
+      const searched = await request(server)
+        .get('/api/v1/roles?q=volun')
+        .set('Authorization', `Bearer ${adminJwt}`);
+      const found = (searched.body as { data: { name: string }[] }).data;
+      expect(found.map((r) => r.name)).toEqual(['Volunteer']);
+    });
+
+    it('a custom role can be assigned to a teammate', async () => {
+      const adminJwt = await token(ADMIN);
+      const roles = await request(server)
+        .get('/api/v1/roles?q=Volunteer')
+        .set('Authorization', `Bearer ${adminJwt}`);
+      const volunteerId = (roles.body as { data: { id: number }[] }).data[0].id;
+
+      const invited = await request(server)
+        .post('/api/v1/members')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({
+          name: 'Volunteer Vic',
+          email: 'vic@access-e2e.test',
+          roleId: volunteerId,
+        });
+      expect(invited.status).toBe(201);
+      expect(
+        (invited.body as { data: { member: { role: string } } }).data.member
+          .role,
+      ).toBe('Volunteer');
+    });
+
+    it('refuses to strip user management from the only role that grants it (409)', async () => {
+      const adminJwt = await token(ADMIN);
+      const roles = await request(server)
+        .get('/api/v1/roles?q=Admin')
+        .set('Authorization', `Bearer ${adminJwt}`);
+      const adminRoleId = (roles.body as { data: { id: number }[] }).data[0].id;
+
+      const res = await request(server)
+        .put(`/api/v1/roles/${adminRoleId}/permissions`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({ permissions: ['regView'] });
+      expect(res.status).toBe(409);
+      expect((res.body as { message: string }).message).toMatch(
+        /manage users and roles/i,
+      );
+    });
+  });
+
   describe('invite flow', () => {
     const INVITEE = 'invitee@access-e2e.test';
     const INVITEE_PW = 'invitee-strong-password';

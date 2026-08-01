@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import type { Env } from '../../config/env.validation';
 import type {
   AccessTokenClaims,
+  EmailChangeClaims,
   EmailVerificationClaims,
   InviteTokenClaims,
   PasswordResetClaims,
@@ -15,6 +16,8 @@ import type {
 const INVITE_TTL_SECONDS = 7 * 24 * 60 * 60;
 /** An email-confirmation link is valid for 24 hours. */
 const EMAIL_VERIFICATION_TTL_SECONDS = 24 * 60 * 60;
+/** An email-change confirmation link is valid for 24 hours. */
+const EMAIL_CHANGE_TTL_SECONDS = 24 * 60 * 60;
 /** A password-reset link is valid for 1 hour. */
 const PASSWORD_RESET_TTL_SECONDS = 60 * 60;
 
@@ -127,6 +130,24 @@ export class TokenService {
 
   verifyEmailVerification(token: string): Promise<EmailVerificationClaims> {
     return this.jwt.verifyAsync<EmailVerificationClaims>(token);
+  }
+
+  signEmailChange(s: {
+    userId: string;
+    organizationId: number;
+    email: string;
+  }): Promise<string> {
+    const claims: EmailChangeClaims = {
+      sub: s.userId,
+      org: s.organizationId,
+      email: s.email,
+      typ: 'change_email',
+    };
+    return this.jwt.signAsync(claims, { expiresIn: EMAIL_CHANGE_TTL_SECONDS });
+  }
+
+  verifyEmailChange(token: string): Promise<EmailChangeClaims> {
+    return this.jwt.verifyAsync<EmailChangeClaims>(token);
   }
 
   signPasswordReset(s: PasswordResetSubject): Promise<string> {

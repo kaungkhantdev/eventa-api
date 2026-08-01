@@ -1,12 +1,15 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { memberRoleEnum, permissionKeyEnum } from '../../../db/schema';
+import { permissionKeyEnum } from '../../../db/schema';
 
-/** A role with the permission keys it currently grants. */
+/** A role with the permission keys it currently grants (US-SET-12/13). */
 export class RoleResponseDto {
   @ApiProperty({ example: 5 })
   id!: number;
 
-  @ApiProperty({ enum: memberRoleEnum.enumValues, example: 'Admin' })
+  @ApiProperty({
+    example: 'Volunteer',
+    description: 'Free text — built-ins are Admin/Organizer/Staff/Attendee',
+  })
   name!: string;
 
   @ApiProperty({ example: 'Full access' })
@@ -18,4 +21,10 @@ export class RoleResponseDto {
     example: ['evCreate', 'setUsers'],
   })
   permissions!: string[];
+
+  @ApiProperty({ example: 3, description: 'Live members holding this role' })
+  memberCount!: number;
+
+  @ApiProperty({ description: 'Built-in roles every workspace starts with' })
+  isSystem!: boolean;
 }

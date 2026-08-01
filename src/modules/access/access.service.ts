@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { DomainException } from '../../common/errors/domain.exception';
 import { Paginated } from '../../common/http/paginated';
+import { Permission } from '../../common/decorators/require-permissions.decorator';
 import { TokenService } from '../auth/token.service';
+import { PermissionsService } from './permissions.service';
 import { AccessRepository } from './access.repository';
 import type {
   InviteMemberInput,
@@ -18,6 +20,7 @@ export class AccessService {
   constructor(
     private readonly repo: AccessRepository,
     private readonly tokens: TokenService,
+    private readonly permissions: PermissionsService,
   ) {}
 
   /** Invite a teammate: create an Invited user + membership, return an invite token. */
@@ -83,5 +86,77 @@ export class AccessService {
     }
     await this.repo.updateMemberRole(organizationId, membershipId, roleId);
     return this.repo.getMember(organizationId, membershipId);
+  }
+
+  /** Pause access without losing the role, so reactivating restores it exactly. */
+  async suspendMember(
+    organizationId: number,
+    membershipId: number,
+  ): Promise<MemberRow> {
+    await this.assertMemberExists(organizationId, membershipId);
+    await this.assertNotLastAdmin(organizationId, membershipId);
+    await this.repo.setMemberStatus(organizationId, membershipId, 'Suspended');
+    return this.repo.getMember(organizationId, membershipId);
+  }
+
+  async reactivateMember(
+    organizationId: number,
+    membershipId: number,
+  ): Promise<MemberRow> {
+    await this.assertMemberExists(organizationId, membershipId);
+    await this.repo.setMemberStatus(organizationId, membershipId, 'Active');
+    return this.repo.getMember(organizationId, membershipId);
+  }
+
+  /** End access now; their past work is kept and the email can be re-invited. */
+  async removeMember(
+    organizationId: number,
+    membershipId: number,
+  ): Promise<void> {
+    await this.assertMemberExists(organizationId, membershipId);
+    await this.assertNotLastAdmin(organizationId, membershipId);
+    await this.repo.removeMember(organizationId, membershipId);
+  }
+
+  /** The workspace must never be left with nobody able to manage users. */
+  private async assertNotLastAdmin(
+    organizationId: number,
+    membershipId: number,
+  ): Promise<void> {
+    if (!(await this.repo.isActiveAdmin(organizationId, membershipId))) return;
+    if ((await this.repo.countActiveAdmins(organizationId)) > 1) return;
+    throw DomainException.conflict(
+      'This is the last Admin — promote someone else first.',
+    );
+  }
+
+  private async assertMemberExists(
+    organizationId: number,
+    membershipId: number,
+  ): Promise<void> {
+    if (!(await this.repo.memberExists(organizationId, membershipId))) {
+      throw DomainException.notFound(
+        `Member ${membershipId} not found in this workspace.`,
+      );
+    }
+  }
+
+  /**
+   * You cannot hand out access you do not hold yourself (US-SET-12) — otherwise
+   * an Organizer could promote themselves to refunds or user management.
+   */
+  async assertNoEscalation(
+    organizationId: number,
+    actorUserId: string,
+    granting: readonly string[],
+  ): Promise<void> {
+    const held = await this.permissions.getFor(organizationId, actorUserId);
+    if (held.includes(Permission.setUsers)) return; // an Admin holds everything
+    const beyond = granting.filter((key) => !held.includes(key));
+    if (beyond.length > 0) {
+      throw DomainException.forbidden(
+        `You cannot grant access you do not have: ${beyond.join(', ')}.`,
+      );
+    }
   }
 }

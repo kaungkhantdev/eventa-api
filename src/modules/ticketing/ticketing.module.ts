@@ -2,7 +2,9 @@ import { Module, forwardRef } from '@nestjs/common';
 import { EventsModule } from '../events/events.module';
 import { TicketAvailabilityPort } from '../events/ports/ticket-availability.port';
 import { AccessModule } from '../access/access.module';
+import { TicketSalesPort } from '../payment-settings/ports/ticket-sales.port';
 import { TicketAvailabilityAdapter } from './ticket-availability.adapter';
+import { TicketSalesAdapter } from './ticket-sales.adapter';
 import { TicketingRepository } from './ticketing.repository';
 import { TicketingService } from './ticketing.service';
 import { TicketingController } from './ticketing.controller';
@@ -21,7 +23,8 @@ import { TicketingController } from './ticketing.controller';
     TicketingService,
     TicketingRepository,
     { provide: TicketAvailabilityPort, useClass: TicketAvailabilityAdapter },
+    { provide: TicketSalesPort, useClass: TicketSalesAdapter },
   ],
-  exports: [TicketingService, TicketAvailabilityPort],
+  exports: [TicketingService, TicketAvailabilityPort, TicketSalesPort],
 })
 export class TicketingModule {}
