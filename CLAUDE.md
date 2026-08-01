@@ -167,6 +167,14 @@ TypeORM/entities.)
 - **Custom, meaningful exceptions** — throw `DomainException` (factories `.notFound()`/`.forbidden()`/
   `.conflict()`/`.validation()`) with a stable `ErrorCode`; never leak internals.
 - **Enums over magic strings** (`pgEnum`, `ErrorCode`); **constants over magic numbers** (module-level `const`).
+- **No hard-coding** — never inline a literal that has a canonical home. Magic strings → enums (`pgEnum`,
+  `ErrorCode`, `Persona`); magic numbers / limits / timeouts → module-level `const` (`DEFAULT_LIMIT`,
+  `MAX_LIMIT`); env, hosts, ports, URLs, secrets, credentials, feature flags → `ConfigService` (zod `Env`),
+  **never** a string literal or `process.env` in app code; money & tax rates (VAT 7%, service fee) and
+  quotas (per-booking seat cap) → the org-settings row or a named constant, never sprinkled literals.
+  **Derive from the single source of truth**: Swagger `enum` lists and DTO validators read the Drizzle
+  `pgEnum().enumValues`; seeds and tests reference the same constants — don't re-type the values. Rule of
+  thumb: if a literal appears twice, or carries domain meaning, name it once.
 - **Transactions for multi-table writes** — use `withTenant(db, orgId, cb)` / `db.transaction` (also sets
   `SET LOCAL app.current_org` for RLS).
 - **Side effects via domain events / background jobs** — emit outbox events (→ RabbitMQ → `eventa-worker`)

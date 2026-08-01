@@ -83,10 +83,36 @@ Open **http://localhost:3000/api/docs** (raw OpenAPI JSON at `/api/docs/json`).
    get back an `accessToken` and `refreshToken`. Copy the **`accessToken`**.
 2. Click **Authorize** (top-right), paste **just the token** (no `Bearer ` prefix — Swagger adds it),
    then **Authorize** → **Close**.
-3. Call the protected endpoints — e.g. **`GET /auth/me`**, **`POST /auth/refresh`**, **`DELETE /session`**.
+3. Call the protected endpoints — e.g. **`GET /auth/me`**, **`POST /auth/refresh`**, **`POST /auth/logout`**.
 
 Access tokens last ~15 minutes; if a call returns `401`, log in again or use `/auth/refresh`, then
 re-Authorize.
+
+### Create and manage events (organizer console)
+
+Event endpoints live under the organizer console and are guarded two ways: you must be an **admin**
+account **and** hold the required **permission**. The seeded `admin@acme.test` has the Admin role (all 12
+permissions), so it can do everything below — stay authorized from the login step above.
+
+- **Create** — `POST /events`:
+  ```json
+  { "name": "Bangkok Tech Conference 2026", "type": "Conference", "startAt": "2026-09-01T09:00:00+07:00" }
+  ```
+  Returns **201** with a generated `slug`, `status: "draft"` and `bucket: "active"`. Optional fields:
+  `description`, `categoryId`, `organizerName`.
+- **Attach a category** — add `"categoryId": <id>`. `pnpm seed` creates a few categories and prints their
+  ids (Conference / Workshop / Concert) — the ids change on each seed, so read them from the seed output.
+  A non-existent id, or one from another workspace, returns **404** (categories are tenant-scoped).
+- **List** — `GET /events` returns a **paginated** envelope: `data: [ ... ]` plus
+  `meta { page, limit, total, totalPages, hasNext, hasPrevious }`. Query params: `q` (search by name),
+  `type`, `bucket` (`active` | `completed`), `sort` (`recent` | `name` | `date`), `page`, `limit`.
+
+**Authorization is enforced server-side (returns 403 — the UI never just hides an action):**
+
+- An **attendee** token can't reach the organizer console → **403** (admin persona required).
+- An admin whose role does **not** grant **`evCreate`** → **403** on create/list. Your granted keys are in
+  the login response under `data.user.permissions`.
+- Swagger / `openapi.json` is the authoritative contract for every field, enum, and status code.
 
 ## Optional: the side-effect pipeline (outbox → RabbitMQ → worker)
 

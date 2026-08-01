@@ -73,3 +73,150 @@ export const webhookStatusEnum = pgEnum('webhook_status', [
   'processed',
   'failed',
 ]);
+
+// ── Events & Program ─────────────────────────────────────────────────────────
+
+export const eventStatusEnum = pgEnum('event_status', [
+  'draft',
+  'planned',
+  'upcoming',
+  'live',
+  'completed',
+  'cancelled',
+]);
+
+export const eventTypeEnum = pgEnum('event_type', [
+  'Conference',
+  'Networking',
+  'Workshop',
+  'Charity & Gala',
+  'Sports & Wellness',
+  'Concert & Festival',
+  'Exhibition',
+  'Seminar',
+]);
+
+export const eventBucketEnum = pgEnum('event_bucket', ['active', 'completed']);
+
+export const visibilityEnum = pgEnum('visibility', [
+  'private',
+  'unlisted',
+  'public',
+]);
+
+export const seatingModeEnum = pgEnum('seating_mode', ['reserved', 'ga']);
+
+export const categoryColorEnum = pgEnum('category_color', [
+  'pink',
+  'blue',
+  'amber',
+  'brand',
+  'violet',
+  'indigo',
+  'teal',
+  'red',
+]);
+
+export const templateIdEnum = pgEnum('template_id', [
+  'aurora',
+  'noir',
+  'minimal',
+  'atlas',
+]);
+
+// ── Program (agenda & speakers) ──────────────────────────────────────────────
+
+export const sessionTypeEnum = pgEnum('session_type', [
+  'Keynote',
+  'Talk',
+  'Workshop',
+  'Panel',
+  'Break',
+]);
+
+export const sessionColorEnum = pgEnum('session_color', [
+  'green',
+  'amber',
+  'rose',
+]);
+
+export const speakerToneEnum = pgEnum('speaker_tone', [
+  'green',
+  'blue',
+  'purple',
+  'amber',
+  'red',
+  'pink',
+]);
+
+export const seatStatusEnum = pgEnum('seat_status', [
+  'available',
+  'held',
+  'reserved',
+  'sold',
+  'blocked',
+]);
+
+// ── Ticketing ────────────────────────────────────────────────────────────────
+
+export const ticketStatusEnum = pgEnum('ticket_status', [
+  'onsale',
+  'scheduled',
+  'paused',
+  'soldout',
+]);
+
+export const admissionTypeEnum = pgEnum('admission_type', [
+  'general_admission',
+  'reserved_seat',
+]);
+
+// ── Registration, Orders & Payments ──────────────────────────────────────────
+
+export const attendeeTagEnum = pgEnum('attendee_tag', [
+  'VIP',
+  'Speaker',
+  'Sponsor',
+  'Student',
+]);
+
+export const orderStatusEnum = pgEnum('order_status', [
+  'confirmed',
+  'pending',
+  'waitlisted',
+  'cancelled',
+]);
+
+export const paymentStatusEnum = pgEnum('payment_status', [
+  'paid',
+  'pending',
+  'refunded',
+  'failed',
+]);
+
+export const issuedTicketStatusEnum = pgEnum('issued_ticket_status', [
+  'issued',
+  'checked_in',
+  'void',
+  'refunded',
+  'transferred',
+]);
+
+export const paymentMethodEnum = pgEnum('payment_method', [
+  'Card',
+  'PromptPay',
+  'Bank transfer',
+]);
+
+export const refundStatusEnum = pgEnum('refund_status', [
+  'pending',
+  'succeeded',
+  'failed',
+]);
+
+export const holdStatusEnum = pgEnum('hold_status', [
+  'active',
+  'converted',
+  'expired',
+  'released',
+]);

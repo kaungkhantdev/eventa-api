@@ -1,0 +1,29 @@
+/**
+ * The Events context depends on this abstraction (DIP) to answer one publish-gate
+ * question — "does this event have at least one ticket type?" — without reaching
+ * into the Ticketing module's tables. The Ticketing module binds the concrete
+ * implementation; the two contexts are wired with `forwardRef` (an event has
+ * tickets; a ticket belongs to an event — a legitimate bidirectional relationship).
+ */
+export abstract class TicketAvailabilityPort {
+  /** Count of live (non-deleted) ticket tiers for an event in this org. */
+  abstract activeCount(
+    organizationId: number,
+    eventId: string,
+  ): Promise<number>;
+
+  /** Sum of the allocations (quantities) across an event's live ticket tiers. */
+  abstract totalQuantity(
+    organizationId: number,
+    eventId: string,
+  ): Promise<number>;
+
+  /** Tickets already sold across an event's tiers (a proxy for registrations). */
+  abstract soldCount(organizationId: number, eventId: string): Promise<number>;
+
+  /** Sold + quantity per event id, in one query — for list "how full" fills. */
+  abstract salesByEvent(
+    organizationId: number,
+    eventIds: string[],
+  ): Promise<Map<string, { sold: number; quantity: number }>>;
+}

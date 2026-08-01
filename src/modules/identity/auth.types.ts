@@ -1,6 +1,11 @@
 import type { organizations, users } from '../../db/schema';
 
-export type Persona = 'admin' | 'attendee';
+/** The two audiences; a login belongs to exactly one (ADR-8). */
+export const Persona = {
+  Admin: 'admin',
+  Attendee: 'attendee',
+} as const;
+export type Persona = (typeof Persona)[keyof typeof Persona];
 
 export type UserRow = typeof users.$inferSelect;
 export type OrganizationRow = typeof organizations.$inferSelect;
@@ -27,4 +32,12 @@ export interface AccessTokenClaims extends BaseClaims {
 
 export interface RefreshTokenClaims extends BaseClaims {
   typ: 'refresh';
+}
+
+/** Claims of a workspace-invite token (accepted to set a password + activate). */
+export interface InviteTokenClaims {
+  sub: string; // userId
+  org: number; // organizationId
+  mid: number; // membership id
+  typ: 'invite';
 }

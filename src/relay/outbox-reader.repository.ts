@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, inArray, isNull, lte } from 'drizzle-orm';
+import { and, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../db/drizzle.constants';
 import { outboxEvents } from '../db/schema';
 import { OutboxReaderPort, type OutboxRow } from './outbox-reader.port';
@@ -23,7 +23,10 @@ export class OutboxReader extends OutboxReaderPort {
       .where(
         and(
           isNull(outboxEvents.publishedAt),
-          lte(outboxEvents.availableAt, new Date()),
+          // Compare against the DB clock, not the app clock: `available_at` is
+          // set by the Postgres `now()` default, and the relay process runs on a
+          // different host — clock skew must not hide a due row.
+          lte(outboxEvents.availableAt, sql`now()`),
         ),
       )
       .orderBy(outboxEvents.id)

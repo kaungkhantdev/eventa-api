@@ -22,6 +22,83 @@
       "when": 1785228868947,
       "tag": "0002_enable_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785248299522,
+      "tag": "0003_events_program",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785248331345,
+      "tag": "0004_rls_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785332288376,
+      "tag": "0005_ticketing",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785332288776,
+      "tag": "0006_rls_ticketing",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785406328892,
+      "tag": "0007_program",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785406347299,
+      "tag": "0008_rls_program",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785414271401,
+      "tag": "0009_seating",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785414324119,
+      "tag": "0010_rls_seating",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785425174313,
+      "tag": "0011_registration",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1785425203726,
+      "tag": "0012_rls_registration",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1785486788403,
+      "tag": "0013_seat_holds_qty_check",
+      "breakpoints": true
     }
   ]
 }

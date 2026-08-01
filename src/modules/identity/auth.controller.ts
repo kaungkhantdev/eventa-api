@@ -1,7 +1,6 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -22,6 +21,10 @@ import { ApiData } from '../../common/http/api-data.decorator';
 import { AuthService } from './auth.service';
 import type { AuthContext } from './auth.types';
 import { CurrentAuth } from './decorators/current-auth.decorator';
+import {
+  AcceptInviteDto,
+  AcceptInviteResponseDto,
+} from './dto/accept-invite.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { LoginResponseDto, RefreshResponseDto } from './dto/token-response.dto';
@@ -83,6 +86,19 @@ export class AuthController {
     };
   }
 
+  @Public()
+  @Post('auth/accept-invite')
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Invitation accepted.')
+  @ApiData(AcceptInviteResponseDto)
+  @ApiUnauthorizedResponse({
+    description: 'Invalid or expired invite token',
+    type: ApiErrorDto,
+  })
+  acceptInvite(@Body() dto: AcceptInviteDto): Promise<AcceptInviteResponseDto> {
+    return this.auth.acceptInvite(dto.token, dto.password);
+  }
+
   @Get('auth/me')
   @ResponseMessage('Profile retrieved successfully.')
   @ApiBearerAuth()
@@ -91,7 +107,8 @@ export class AuthController {
     return this.auth.me(auth);
   }
 
-  @Delete('session')
+  @Post('auth/logout')
+  @HttpCode(HttpStatus.OK)
   @ResponseMessage('Signed out successfully.')
   @ApiBearerAuth()
   @ApiOkResponse({

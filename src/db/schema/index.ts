@@ -9,3 +9,9 @@ export * from './organizations';
 export * from './identity'; // users, roles, permissions, role_permissions, memberships, auth_sessions, two_factors, recovery_codes
 export * from './settings'; // api_keys, notification_preferences
 export * from './platform'; // audit_events, outbox_events, webhook_events
+export * from './events'; // categories, landing_templates, events
+export * from './ticketing'; // ticket_types
+export * from './program'; // speakers, sessions, session_speakers
+export * from './seating'; // seat_maps, seats
+export * from './registration'; // attendees, orders, order_items, tickets, seat_assignments, seat_holds
+export * from './payments'; // payments, refunds

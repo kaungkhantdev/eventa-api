@@ -6,6 +6,7 @@ import { OutboxPort } from '../platform/outbox.port';
 import { signedInEvent } from './events/signed-in.event';
 import type {
   AuthContext,
+  InviteTokenClaims,
   OrganizationRow,
   Persona,
   RefreshTokenClaims,
@@ -30,6 +31,12 @@ export interface LoginResult {
   refreshToken: string;
   expiresIn: number;
   user: MeResponseDto;
+}
+
+export interface AcceptInviteResult {
+  userId: string;
+  email: string;
+  status: 'Active';
 }
 
 type LoginUser = { user: UserRow; org: OrganizationRow };
@@ -96,6 +103,19 @@ export class AuthService {
       actorUserId: auth.userId,
       ip: null,
     });
+  }
+
+  /** Accept a workspace invite: set the password and activate the membership. */
+  async acceptInvite(
+    token: string,
+    password: string,
+  ): Promise<AcceptInviteResult> {
+    const claims = await this.verifyInviteToken(token);
+    const target = await this.repo.findInvitedMembership(claims.mid);
+    if (!target) throw this.invalidToken();
+    const passwordHash = await this.passwords.hash(password);
+    await this.repo.activateInvite(target.userId, claims.mid, passwordHash);
+    return { userId: target.userId, email: target.email, status: 'Active' };
   }
 
   // ── login steps ──────────────────────────────────────────────────────────
@@ -172,6 +192,17 @@ export class AuthService {
       throw this.invalidToken();
     }
     if (claims.typ !== 'refresh') throw this.invalidToken();
+    return claims;
+  }
+
+  private async verifyInviteToken(token: string): Promise<InviteTokenClaims> {
+    let claims: InviteTokenClaims;
+    try {
+      claims = await this.tokens.verifyInvite(token);
+    } catch {
+      throw this.invalidToken();
+    }
+    if (claims.typ !== 'invite') throw this.invalidToken();
     return claims;
   }
 

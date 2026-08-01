@@ -12,7 +12,13 @@ import type { Env } from './config/env.validation';
 import { buildLoggerOptions } from './config/logger.config';
 import { DatabaseModule } from './db/database.module';
 import { HealthModule } from './health/health.module';
+import { DuplicationModule } from './modules/events/duplication/duplication.module';
+import { EventsModule } from './modules/events/events.module';
+import { ProgramModule } from './modules/events/program/program.module';
+import { SeatingModule } from './modules/events/seating/seating.module';
 import { IdentityModule } from './modules/identity/identity.module';
+import { RegistrationModule } from './modules/registration/registration.module';
+import { TicketingModule } from './modules/ticketing/ticketing.module';
 
 @Module({
   imports: [
@@ -26,6 +32,12 @@ import { IdentityModule } from './modules/identity/identity.module';
     CommonModule,
     HealthModule,
     IdentityModule,
+    EventsModule,
+    TicketingModule,
+    ProgramModule,
+    SeatingModule,
+    DuplicationModule,
+    RegistrationModule,
   ],
 })
 export class AppModule implements NestModule {
