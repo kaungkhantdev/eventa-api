@@ -28,6 +28,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { AuthPasswordModule } from './modules/auth-password/auth-password.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthSessionsModule } from './modules/auth-sessions/auth-sessions.module';
+import { AuthTwoFactorModule } from './modules/auth-two-factor/auth-two-factor.module';
 import { AuthSignupModule } from './modules/auth-signup/auth-signup.module';
 import { UsersModule } from './modules/users/users.module';
 import { RegistrationModule } from './modules/registration/registration.module';
@@ -51,6 +52,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     AuthSignupModule,
     AuthPasswordModule,
     AuthSessionsModule,
+    AuthTwoFactorModule,
     AuditModule,
     AccessModule,
     OrganizationModule,
