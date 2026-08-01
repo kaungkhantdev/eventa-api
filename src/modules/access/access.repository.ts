@@ -3,6 +3,7 @@ import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { DomainException } from '../../common/errors/domain.exception';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
+  authSessions,
   memberships,
   permissions,
   rolePermissions,
@@ -20,6 +21,10 @@ import type {
   PermissionCatalogItem,
   RoleWithPermissions,
 } from './access.types';
+
+const ACTIVE_STATUS = 'Active' as const;
+/** The role that must never be left without a holder. */
+const ADMIN_ROLE = 'Admin' as const;
 
 const MEMBER_COLUMNS = {
   id: memberships.id,
@@ -252,6 +257,149 @@ export class AccessRepository {
             eq(memberships.organizationId, organizationId),
           ),
         );
+    });
+  }
+
+  /** How many Active members hold an Admin role — the last-Admin guard. */
+  async countActiveAdmins(organizationId: number): Promise<number> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({ id: memberships.id })
+        .from(memberships)
+        .innerJoin(roles, eq(roles.id, memberships.roleId))
+        .where(
+          and(
+            eq(memberships.organizationId, organizationId),
+            eq(memberships.status, ACTIVE_STATUS),
+            eq(roles.name, ADMIN_ROLE),
+            isNull(memberships.deletedAt),
+          ),
+        );
+      return rows.length;
+    });
+  }
+
+  /** Is this membership an Active Admin? */
+  async isActiveAdmin(
+    organizationId: number,
+    membershipId: number,
+  ): Promise<boolean> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({ id: memberships.id })
+        .from(memberships)
+        .innerJoin(roles, eq(roles.id, memberships.roleId))
+        .where(
+          and(
+            eq(memberships.id, membershipId),
+            eq(memberships.organizationId, organizationId),
+            eq(memberships.status, ACTIVE_STATUS),
+            eq(roles.name, ADMIN_ROLE),
+          ),
+        )
+        .limit(1);
+      return row !== undefined;
+    });
+  }
+
+  /**
+   * Suspend or reactivate: the membership's ROLE is preserved either way, so
+   * reactivating restores exactly the access they had. Suspending also flips the
+   * user row so sign-in is refused, and revokes their live sessions.
+   */
+  async setMemberStatus(
+    organizationId: number,
+    membershipId: number,
+    status: 'Active' | 'Suspended',
+  ): Promise<void> {
+    await withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .update(memberships)
+        .set({ status, updatedAt: new Date() })
+        .where(
+          and(
+            eq(memberships.id, membershipId),
+            eq(memberships.organizationId, organizationId),
+          ),
+        )
+        .returning({ userId: memberships.userId });
+      if (!row) return;
+      await tx
+        .update(users)
+        .set({ status, updatedAt: new Date() })
+        .where(eq(users.id, row.userId));
+      if (status === 'Suspended') {
+        await tx
+          .update(authSessions)
+          .set({ revokedAt: new Date() })
+          .where(
+            and(
+              eq(authSessions.userId, row.userId),
+              isNull(authSessions.revokedAt),
+            ),
+          );
+      }
+    });
+  }
+
+  /**
+   * End access now, keeping their past work for the record: the membership and
+   * user are soft-deleted and every session revoked, so nothing they created is
+   * lost and the email can be re-invited later.
+   */
+  async removeMember(
+    organizationId: number,
+    membershipId: number,
+  ): Promise<void> {
+    await withTenant(this.db, organizationId, async (tx) => {
+      const now = new Date();
+      const [row] = await tx
+        .update(memberships)
+        .set({ status: 'Suspended', deletedAt: now, updatedAt: now })
+        .where(
+          and(
+            eq(memberships.id, membershipId),
+            eq(memberships.organizationId, organizationId),
+          ),
+        )
+        .returning({ userId: memberships.userId });
+      if (!row) return;
+      await tx
+        .update(users)
+        .set({ status: 'Suspended', deletedAt: now, updatedAt: now })
+        .where(eq(users.id, row.userId));
+      await tx
+        .update(authSessions)
+        .set({ revokedAt: now })
+        .where(
+          and(
+            eq(authSessions.userId, row.userId),
+            isNull(authSessions.revokedAt),
+          ),
+        );
+    });
+  }
+
+  /** An existing Invited membership for this email, if any (re-invite, not duplicate). */
+  async findInvitedByEmail(
+    organizationId: number,
+    email: string,
+  ): Promise<{ membershipId: number; userId: string } | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({ membershipId: memberships.id, userId: users.id })
+        .from(memberships)
+        .innerJoin(users, eq(users.id, memberships.userId))
+        .where(
+          and(
+            eq(memberships.organizationId, organizationId),
+            eq(users.email, email),
+            eq(memberships.status, 'Invited'),
+            isNull(memberships.deletedAt),
+          ),
+        )
+        .limit(1);
+      return row ?? null;
     });
   }
 

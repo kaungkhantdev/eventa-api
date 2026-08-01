@@ -59,6 +59,7 @@ export class RolesController {
   ): Promise<RoleResponseDto> {
     return this.roles.setRolePermissions(
       auth.organizationId,
+      auth.userId,
       id,
       dto.permissions,
     );
