@@ -18,6 +18,7 @@ import { EventDuplicationModule } from './modules/event-duplication/event-duplic
 import { EventMonitoringModule } from './modules/event-monitoring/event-monitoring.module';
 import { EventsModule } from './modules/events/events.module';
 import { OrganizationModule } from './modules/organization/organization.module';
+import { PaymentSettingsModule } from './modules/payment-settings/payment-settings.module';
 import { EventProgramModule } from './modules/event-program/event-program.module';
 import { EventSeatingModule } from './modules/event-seating/event-seating.module';
 import { EventSharingModule } from './modules/event-sharing/event-sharing.module';
@@ -48,6 +49,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     AuthPasswordModule,
     AccessModule,
     OrganizationModule,
+    PaymentSettingsModule,
     EventsModule,
     TicketingModule,
     EventCategoriesModule,
