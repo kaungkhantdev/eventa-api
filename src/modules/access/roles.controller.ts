@@ -2,9 +2,13 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseIntPipe,
+  Post,
   Put,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiForbiddenResponse, ApiTags } from '@nestjs/swagger';
@@ -18,6 +22,7 @@ import {
   RequirePermissions,
 } from '../../common/decorators/require-permissions.decorator';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { CreateRoleDto } from './dto/create-role.dto';
 import { RolesService } from './roles.service';
 import { PermissionResponseDto } from './dto/permission-response.dto';
 import { RoleResponseDto } from './dto/role-response.dto';
@@ -44,8 +49,23 @@ export class RolesController {
   @RequirePermissions(Permission.setUsers)
   @ResponseMessage('Roles retrieved.')
   @ApiList(RoleResponseDto)
-  listRoles(@CurrentAuth() auth: AuthContext): Promise<RoleResponseDto[]> {
-    return this.roles.listRoles(auth.organizationId);
+  listRoles(
+    @CurrentAuth() auth: AuthContext,
+    @Query('q') q?: string,
+  ): Promise<RoleResponseDto[]> {
+    return this.roles.listRoles(auth.organizationId, q);
+  }
+
+  @Post('roles')
+  @RequirePermissions(Permission.setUsers)
+  @HttpCode(HttpStatus.CREATED)
+  @ResponseMessage('Role created.')
+  @ApiData(RoleResponseDto, HttpStatus.CREATED)
+  createRole(
+    @CurrentAuth() auth: AuthContext,
+    @Body() dto: CreateRoleDto,
+  ): Promise<RoleResponseDto> {
+    return this.roles.createRole(auth.organizationId, auth.userId, dto);
   }
 
   @Put('roles/:id/permissions')

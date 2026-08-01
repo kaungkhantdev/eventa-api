@@ -13,7 +13,6 @@ import {
 import { createdAt, deletedAt, idPk, updatedAt, version } from './_columns';
 import {
   localeEnum,
-  memberRoleEnum,
   memberStatusEnum,
   permissionGroupEnum,
   permissionKeyEnum,
@@ -79,7 +78,10 @@ export const roles = pgTable(
     organizationId: bigint({ mode: 'number' })
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
-    name: memberRoleEnum().notNull(),
+    // TEXT, not the member_role enum: a workspace may add custom roles such as
+    // "Volunteer" (US-SET-13). The four built-ins keep their names and are marked
+    // isSystem; uq_roles_org_name still guarantees one name per workspace.
+    name: text().notNull(),
     description: text().notNull(),
     bullets: jsonb().$type<string[]>(),
     isSystem: boolean().notNull().default(true),
@@ -138,7 +140,7 @@ export const memberships = pgTable(
     roleId: bigint({ mode: 'number' })
       .notNull()
       .references(() => roles.id, { onDelete: 'restrict' }),
-    role: memberRoleEnum().notNull(), // denormalized role name
+    role: text().notNull(), // denormalized role name (may be a custom role)
     status: memberStatusEnum().notNull().default('Invited'),
     invitedAt: timestamp({ withTimezone: true }),
     joinedAt: timestamp({ withTimezone: true }),

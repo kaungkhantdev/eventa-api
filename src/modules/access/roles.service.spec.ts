@@ -16,6 +16,8 @@ describe('RolesService', () => {
       roleExists: jest.fn(),
       setRolePermissions: jest.fn().mockResolvedValue(undefined),
       getRole: jest.fn(),
+      roleGrants: jest.fn().mockResolvedValue(false),
+      countRolesGranting: jest.fn().mockResolvedValue(2),
     } as unknown as jest.Mocked<AccessRepository>;
     service = new RolesService(repo, {
       assertNoEscalation: jest.fn().mockResolvedValue(undefined),
@@ -30,12 +32,14 @@ describe('RolesService', () => {
           name: 'Admin',
           description: 'Full access',
           permissions: ['evCreate', 'setUsers'],
+          memberCount: 3,
+          isSystem: true,
         },
-      ]);
+      ] as never);
 
       const roles = await service.listRoles(orgId);
 
-      expect(repo.listRoles).toHaveBeenCalledWith(orgId);
+      expect(repo.listRoles).toHaveBeenCalledWith(orgId, undefined);
       expect(roles[0]).toMatchObject({
         id: 5,
         name: 'Admin',
@@ -64,6 +68,8 @@ describe('RolesService', () => {
         name: 'Staff',
         description: 'seed',
         permissions: ['regView', 'regCheckin'],
+        memberCount: 0,
+        isSystem: true,
       });
 
       const role = await service.setRolePermissions(orgId, 'actor', 5, [
@@ -85,6 +91,8 @@ describe('RolesService', () => {
         name: 'Staff',
         description: 'seed',
         permissions: ['regView'],
+        memberCount: 0,
+        isSystem: true,
       });
 
       await service.setRolePermissions(orgId, 'actor', 5, [

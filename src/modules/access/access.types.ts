@@ -9,6 +9,10 @@ export interface RoleWithPermissions {
   name: string;
   description: string;
   permissions: string[];
+  /** Live members holding this role — the roles overview badge (US-SET-13). */
+  memberCount: number;
+  /** Built-in roles cannot be renamed away; custom ones are created by an Admin. */
+  isSystem: boolean;
 }
 
 /** A team member = a membership joined with its user and role. */

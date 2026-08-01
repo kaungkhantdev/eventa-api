@@ -113,6 +113,13 @@
       "when": 1785555971609,
       "tag": "0015_rls_payment_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1785560781463,
+      "tag": "0016_custom_roles",
+      "breakpoints": true
     }
   ]
 }
