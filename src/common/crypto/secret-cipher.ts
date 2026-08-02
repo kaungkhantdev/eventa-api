@@ -25,10 +25,10 @@ export class SecretCipher {
   private readonly key: Buffer;
 
   constructor(config: ConfigService<Env, true>) {
-    this.key = Buffer.from(
-      config.getOrThrow('SECRET_ENCRYPTION_KEY', { infer: true }),
-      'base64',
-    );
+    const encoded: string = config.getOrThrow('SECRET_ENCRYPTION_KEY', {
+      infer: true,
+    });
+    this.key = Buffer.from(encoded, 'base64');
   }
 
   encrypt(plaintext: string): Buffer {

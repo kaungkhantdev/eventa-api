@@ -208,7 +208,7 @@ function usableAccent(accent: string | null): string {
 /** The join produces one row per speaker; fold them back into one session each. */
 function groupAgenda(
   rows: {
-    id: number;
+    id: string;
     title: string;
     day: number;
     startTime: string;
@@ -218,7 +218,7 @@ function groupAgenda(
     speakerName: string | null;
   }[],
 ): PublicSession[] {
-  const byId = new Map<number, PublicSession>();
+  const byId = new Map<string, PublicSession>();
   for (const row of rows) {
     const existing = byId.get(row.id);
     if (existing) {

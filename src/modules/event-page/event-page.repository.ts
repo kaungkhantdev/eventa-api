@@ -3,10 +3,11 @@ import { and, eq, isNull, ne } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { events } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
+import type { TemplateId } from './event-page.types';
 
 export type PageValues = Partial<{
   slug: string;
-  landingTemplateId: string;
+  landingTemplateId: TemplateId;
   accentColor: string;
   agendaTitle: string | null;
   speakersTitle: string | null;
