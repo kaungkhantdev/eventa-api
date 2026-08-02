@@ -18,6 +18,7 @@ import { EventDuplicationModule } from './modules/event-duplication/event-duplic
 import { EventMonitoringModule } from './modules/event-monitoring/event-monitoring.module';
 import { EventPageModule } from './modules/event-page/event-page.module';
 import { EventPageContentModule } from './modules/event-page-content/event-page-content.module';
+import { DiscountsModule } from './modules/discounts/discounts.module';
 import { EventsModule } from './modules/events/events.module';
 import { NotificationPreferencesModule } from './modules/notification-preferences/notification-preferences.module';
 import { OrganizationModule } from './modules/organization/organization.module';
@@ -67,6 +68,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     EventsModule,
     TicketingModule,
     TicketSharingModule,
+    DiscountsModule,
     EventCategoriesModule,
     EventProgramModule,
     EventSeatingModule,

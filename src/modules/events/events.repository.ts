@@ -31,6 +31,20 @@ import type {
 export class EventsRepository {
   constructor(@Inject(DRIZZLE) private readonly db: Database) {}
 
+  /**
+   * Which workspace owns this event — backs `EventOrgLookupPort`. Deliberately
+   * NOT tenant-scoped: it is what establishes the tenant for an anonymous
+   * checkout, and it can only ever return the event's own organization.
+   */
+  async organizationIdFor(eventId: string): Promise<number | null> {
+    const [row] = await this.db
+      .select({ organizationId: events.organizationId })
+      .from(events)
+      .where(and(eq(events.id, eventId), isNull(events.deletedAt)))
+      .limit(1);
+    return row?.organizationId ?? null;
+  }
+
   /** Names for the given events (tenant-scoped) — backs `EventLookupPort`. */
   async briefsByIds(
     organizationId: number,

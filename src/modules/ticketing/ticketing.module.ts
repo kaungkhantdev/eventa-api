@@ -5,7 +5,6 @@ import { AccessModule } from '../access/access.module';
 import { TicketSalesPort } from '../payment-settings/ports/ticket-sales.port';
 import { RegistrationModule } from '../registration/registration.module';
 import { TicketEligibilityPort } from '../registration/ports/ticket-eligibility.port';
-import { EventLookupPort } from './ports/event-lookup.port';
 import { TicketAvailabilityAdapter } from './ticket-availability.adapter';
 import { TicketEligibilityAdapter } from './ticket-eligibility.adapter';
 import { TicketSalesAdapter } from './ticket-sales.adapter';
