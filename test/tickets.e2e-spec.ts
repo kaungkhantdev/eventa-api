@@ -357,6 +357,82 @@ describe('Ticket types (e2e — US-EVT-06)', () => {
     });
   });
 
+  describe('US-TKT-06: share a ticket link and QR', () => {
+    let shareTicketId: string;
+
+    beforeAll(async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      const created = await createTicket(jwt, {
+        name: 'Poster tier',
+        priceSatang: 30000,
+        total: 60,
+      });
+      shareTicketId = (created.body as Success<Ticket>).data.id;
+    });
+
+    const share = (jwt: string, path = '') =>
+      request(server)
+        .get(`/api/v1/events/${eventId}/tickets/${shareTicketId}/share${path}`)
+        .set('Authorization', `Bearer ${jwt}`);
+
+    it('gives a registration link that preselects the tier, and a matching QR', async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      const res = await share(jwt);
+      expect(res.status).toBe(200);
+      const body = (
+        res.body as Success<{
+          registrationUrl: string;
+          qrSvg: string;
+          qrEncodes: string;
+          ticketName: string;
+        }>
+      ).data;
+      expect(body.registrationUrl).toContain(
+        `register?ticket=${shareTicketId}`,
+      );
+      expect(body.qrSvg).toContain('<svg');
+      expect(body.qrEncodes).toBe(body.registrationUrl);
+      expect(body.ticketName).toBe('Poster tier');
+    });
+
+    it('prompts to publish first while the event is a draft', async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      const body = (
+        (await share(jwt)).body as Success<{
+          isPublished: boolean;
+          warning: string | null;
+        }>
+      ).data;
+      expect(body.isPublished).toBe(false);
+      expect(body.warning).toMatch(/publish/i);
+    });
+
+    it('downloads a printable QR as an SVG attachment', async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      const res = await share(jwt, '/qr.svg');
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toMatch(/image\/svg/);
+      expect(res.headers['content-disposition']).toMatch(/attachment/);
+      // supertest hands back a Buffer for image/svg+xml, not `text`
+      expect((res.body as Buffer).toString()).toContain('<svg');
+    });
+
+    it('404s for a tier that is not on this event', async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      const res = await request(server)
+        .get(
+          `/api/v1/events/${eventId}/tickets/00000000-0000-0000-0000-000000000000/share`,
+        )
+        .set('Authorization', `Bearer ${jwt}`);
+      expect(res.status).toBe(404);
+    });
+
+    it('forbids a user without evCreate', async () => {
+      const jwt = await token(LIMITED, ORG.slug);
+      expect((await share(jwt)).status).toBe(403);
+    });
+  });
+
   it('forbids adding a ticket to another tenant’s event (404)', async () => {
     const jwt = await token(ADMIN, ORG.slug);
     const res = await request(server)

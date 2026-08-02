@@ -37,6 +37,7 @@ import { UsersModule } from './modules/users/users.module';
 import { PublicPagesModule } from './modules/public-pages/public-pages.module';
 import { RegistrationModule } from './modules/registration/registration.module';
 import { RegistrationStatsModule } from './modules/registration-stats/registration-stats.module';
+import { TicketSharingModule } from './modules/ticket-sharing/ticket-sharing.module';
 import { TicketingModule } from './modules/ticketing/ticketing.module';
 
 @Module({
@@ -65,6 +66,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     PaymentSettingsModule,
     EventsModule,
     TicketingModule,
+    TicketSharingModule,
     EventCategoriesModule,
     EventProgramModule,
     EventSeatingModule,
