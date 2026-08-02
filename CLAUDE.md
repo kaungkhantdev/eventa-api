@@ -111,8 +111,12 @@ the development guide when implementing:
   they sort together: `auth`, `auth-signup`, `auth-password` · `events`, `event-categories`,
   `event-program`, `event-seating`, `event-sharing`, `event-monitoring`, `event-duplication`.
   Current modules: `auth` (sign-in, tokens, sessions) · `users` (the user record) · `auth-signup` ·
-  `auth-password` · `access` (members, roles, RBAC) · `events` + the six `event-*` sub-domains ·
-  `ticketing` · `registration` · `platform` (outbox/idempotency/audit/jobs). Tree: `src/db/`,
+  `auth-password` · `auth-sessions` · `auth-two-factor` · `auth-social` · `access` (members, roles,
+  RBAC) · `organization` · `payment-settings` · `notification-preferences` · `audit` · `events` + the
+  `event-*` sub-domains (`event-categories`, `event-program`, `event-seating`, `event-sharing`,
+  `event-monitoring`, `event-duplication`, `event-page`, `event-page-content`) · `public-pages` ·
+  `ticketing` · `ticket-sharing` · `discounts` (promotions & redemption) · `registration` ·
+  `registration-stats` · `platform` (outbox/idempotency/audit/jobs). Tree: `src/db/`,
   `src/modules/<name>/`, `src/common/` (`guards/`, `decorators/`, `interceptors/`, `filters/`, `http/`,
   `util/`, tenancy), plus `src/relay.ts` (the outbox publisher) and a generated `openapi.json`.
 - **Cross-cutting code lives in `src/common/`, never in a domain module.** A guard, decorator, pipe or
@@ -215,7 +219,11 @@ inside `events/`, and it became a runtime DI failure the moment it moved out.)*
 its own `ports/` folder; the **owner** implements it as an adapter and binds it
 (`{ provide: EventStatsPort, useClass: RegistrationStatsAdapter }`). So Events reads registration numbers
 without importing Registration's tables. Use `forwardRef` **only** for a genuine bidirectional dependency
-(auth↔access, auth↔auth-signup, auth↔auth-password, events↔ticketing) — not to paper over a bad boundary.
+(auth↔access, auth↔auth-signup, auth↔auth-password, events↔ticketing, ticketing↔registration) — not to
+paper over a bad boundary. Ports in play: `TicketAvailabilityPort` · `EventStatsPort` · `TicketSalesPort` ·
+`TicketEligibilityPort` (Registration asks Ticketing "may this tier be sold right now?") ·
+`CheckoutActivityPort` (Ticketing asks Registration "is anyone mid-checkout?") · `EventLookupPort` ·
+`EventOrgLookupPort` (Discounts resolves an anonymous checkout's tenant from the event, never the caller).
 
 **5. Register it in `app.module.ts`** and write the module docstring: what it owns, what it depends on, and
 why any `forwardRef` exists.
