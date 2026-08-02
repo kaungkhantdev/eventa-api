@@ -12,6 +12,7 @@ export * from './payment-settings'; // payment_settings, payment_method_settings
 export * from './platform'; // audit_events, outbox_events, webhook_events
 export * from './events'; // categories, landing_templates, events
 export * from './ticketing'; // ticket_types
+export * from './promotions'; // discount_codes
 export * from './program'; // speakers, sessions, session_speakers
 export * from './seating'; // seat_maps, seats
 export * from './registration'; // attendees, orders, order_items, tickets, seat_assignments, seat_holds

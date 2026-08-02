@@ -171,6 +171,23 @@ export const admissionTypeEnum = pgEnum('admission_type', [
   'reserved_seat',
 ]);
 
+// ── Promotions ───────────────────────────────────────────────────────────────
+
+/** `percent` is 1–100; `fixed` is an amount in satang. */
+export const discountTypeEnum = pgEnum('discount_type', ['percent', 'fixed']);
+
+/**
+ * A code's sellable state. `scheduled`/`active`/`expired` follow the validity
+ * window and usage limit on their own (US-TKT-10); `disabled` is the organizer
+ * switching it off by hand (US-TKT-09).
+ */
+export const discountStatusEnum = pgEnum('discount_status', [
+  'active',
+  'scheduled',
+  'expired',
+  'disabled',
+]);
+
 // ── Registration, Orders & Payments ──────────────────────────────────────────
 
 export const attendeeTagEnum = pgEnum('attendee_tag', [

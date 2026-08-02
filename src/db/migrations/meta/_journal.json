@@ -148,6 +148,20 @@
       "when": 1785566188528,
       "tag": "0020_rls_public_pages",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1785585122343,
+      "tag": "0021_promotions",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1785585133696,
+      "tag": "0022_rls_promotions",
+      "breakpoints": true
     }
   ]
 }

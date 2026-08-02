@@ -25,6 +25,7 @@ import {
 import { events } from './events';
 import { users } from './identity';
 import { organizations } from './organizations';
+import { discountCodes } from './promotions';
 import { seats } from './seating';
 import { ticketTypes } from './ticketing';
 
@@ -78,11 +79,9 @@ export const orders = pgTable(
     paymentStatus: paymentStatusEnum().notNull().default('pending'),
     seats: smallint().notNull(),
     subtotalSatang: bigint({ mode: 'number' }).notNull(),
-    // discount_code_id: the FK → discount_codes AND its ix_orders_discount index
-    // (entities.md) both land in the Promotions expand migration — the column is
-    // inert (always null) until the discount flow exists, so indexing it now is
-    // premature.
-    discountCodeId: uuid(),
+    discountCodeId: uuid().references(() => discountCodes.id, {
+      onDelete: 'set null',
+    }),
     discountAmountSatang: bigint({ mode: 'number' }).notNull().default(0),
     vatAmountSatang: bigint({ mode: 'number' }).notNull().default(0),
     totalSatang: bigint({ mode: 'number' }).notNull(),
@@ -100,11 +99,51 @@ export const orders = pgTable(
     index('ix_orders_event').on(t.eventId),
     index('ix_orders_attendee').on(t.attendeeId),
     index('ix_orders_status').on(t.organizationId, t.status),
+    index('ix_orders_discount').on(t.discountCodeId),
     check('ck_orders_seats', sql`${t.seats} BETWEEN 1 AND 8`),
     check(
       'ck_orders_money',
       sql`${t.subtotalSatang} >= 0 AND ${t.discountAmountSatang} >= 0 AND ${t.vatAmountSatang} >= 0 AND ${t.totalSatang} >= 0`,
     ),
+  ],
+);
+
+/**
+ * One application of a discount code to an order (US-TKT-11). It lives here
+ * rather than in `promotions.ts` because it points at `orders`, which would make
+ * the two schema modules import each other.
+ *
+ * The unique pair makes re-submitting the same code on the same order a no-op,
+ * and the row set is what `discount_codes.used` counts — so releasing a
+ * cancelled order's redemption frees the code for someone else.
+ */
+export const discountRedemptions = pgTable(
+  'discount_redemptions',
+  {
+    id: idPk(),
+    organizationId: bigint({ mode: 'number' })
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    discountCodeId: uuid()
+      .notNull()
+      .references(() => discountCodes.id, { onDelete: 'restrict' }),
+    orderId: uuid()
+      .notNull()
+      .references(() => orders.id, { onDelete: 'cascade' }),
+    /** Who redeemed it — drives the per-person limit without joining orders. */
+    buyerEmail: citext().notNull(),
+    amountSatang: bigint({ mode: 'number' }).notNull(),
+    redeemedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('uq_discount_redemptions_code_order').on(
+      t.discountCodeId,
+      t.orderId,
+    ),
+    index('ix_discount_redemptions_code').on(t.discountCodeId),
+    index('ix_discount_redemptions_order').on(t.orderId),
+    index('ix_discount_redemptions_buyer').on(t.discountCodeId, t.buyerEmail),
+    check('ck_discount_redemptions_amount', sql`${t.amountSatang} >= 0`),
   ],
 );
 
