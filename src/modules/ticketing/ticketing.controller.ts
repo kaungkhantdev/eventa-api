@@ -81,6 +81,32 @@ export class TicketingController {
     );
   }
 
+  @Post(':ticketId/pause')
+  @RequirePermissions(Permission.evCreate)
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Ticket sales paused.')
+  @ApiData(TicketResponseDto)
+  pause(
+    @CurrentAuth() auth: AuthContext,
+    @Param('eventId') eventId: string,
+    @Param('ticketId') ticketId: string,
+  ): Promise<TicketResponseDto> {
+    return this.tickets.pauseTicket(actorOf(auth), eventId, ticketId);
+  }
+
+  @Post(':ticketId/resume')
+  @RequirePermissions(Permission.evCreate)
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Ticket sales resumed.')
+  @ApiData(TicketResponseDto)
+  resume(
+    @CurrentAuth() auth: AuthContext,
+    @Param('eventId') eventId: string,
+    @Param('ticketId') ticketId: string,
+  ): Promise<TicketResponseDto> {
+    return this.tickets.resumeTicket(actorOf(auth), eventId, ticketId);
+  }
+
   @Delete(':ticketId')
   @RequirePermissions(Permission.evCreate)
   @HttpCode(HttpStatus.OK)

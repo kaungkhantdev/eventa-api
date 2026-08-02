@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
   seatAssignments,
@@ -156,6 +156,37 @@ export class SeatHoldRepository {
         })
         .returning();
       return { ok: true, hold };
+    });
+  }
+
+  /**
+   * The distinct ticket tiers backing the given seats within an event — the sales
+   * eligibility gate reads these before reserving. Seats with no tier are omitted;
+   * a read outside the reservation transaction (no locking), scoped by tenant + event.
+   */
+  async ticketTypeIdsForSeats(
+    organizationId: number,
+    eventId: string,
+    seatIds: number[],
+  ): Promise<string[]> {
+    const ids = [...new Set(seatIds)];
+    if (ids.length === 0) return [];
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .selectDistinct({ ticketTypeId: seats.ticketTypeId })
+        .from(seats)
+        .innerJoin(seatMaps, eq(seats.seatMapId, seatMaps.id))
+        .where(
+          and(
+            eq(seats.organizationId, organizationId),
+            inArray(seats.id, ids),
+            eq(seatMaps.eventId, eventId),
+            isNotNull(seats.ticketTypeId),
+          ),
+        );
+      return rows
+        .map((r) => r.ticketTypeId)
+        .filter((id): id is string => id !== null);
     });
   }
 

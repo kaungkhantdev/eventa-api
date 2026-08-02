@@ -3,8 +3,11 @@ import { EventsModule } from '../events/events.module';
 import { TicketAvailabilityPort } from '../events/ports/ticket-availability.port';
 import { AccessModule } from '../access/access.module';
 import { TicketSalesPort } from '../payment-settings/ports/ticket-sales.port';
+import { TicketEligibilityPort } from '../registration/ports/ticket-eligibility.port';
 import { TicketAvailabilityAdapter } from './ticket-availability.adapter';
+import { TicketEligibilityAdapter } from './ticket-eligibility.adapter';
 import { TicketSalesAdapter } from './ticket-sales.adapter';
+import { TicketingPolicy } from './ticketing.policy';
 import { TicketingRepository } from './ticketing.repository';
 import { TicketingService } from './ticketing.service';
 import { TicketingController } from './ticketing.controller';
@@ -21,10 +24,17 @@ import { TicketingController } from './ticketing.controller';
   controllers: [TicketingController],
   providers: [
     TicketingService,
+    TicketingPolicy,
     TicketingRepository,
     { provide: TicketAvailabilityPort, useClass: TicketAvailabilityAdapter },
     { provide: TicketSalesPort, useClass: TicketSalesAdapter },
+    { provide: TicketEligibilityPort, useClass: TicketEligibilityAdapter },
   ],
-  exports: [TicketingService, TicketAvailabilityPort, TicketSalesPort],
+  exports: [
+    TicketingService,
+    TicketAvailabilityPort,
+    TicketSalesPort,
+    TicketEligibilityPort,
+  ],
 })
 export class TicketingModule {}

@@ -12,7 +12,7 @@ import { SeatHoldService } from '../src/modules/registration/seat-hold.service';
 const ORG = { slug: 'hold-e2e', name: 'Hold E2E' };
 const TTL_MS = 600_000;
 
-describe('Seat-hold engine (US-DISC-04 reserve/hold, e2e)', () => {
+describe('Seat-hold engine (US-TKT-03 reserve/hold, e2e)', () => {
   let app: INestApplication;
   let pool: Pool;
   let repo: SeatHoldRepository;
@@ -25,6 +25,7 @@ describe('Seat-hold engine (US-DISC-04 reserve/hold, e2e)', () => {
   let seats: number[]; // 6 available seats
   let blockedSeat: number;
   let foreignSeat: number; // an available seat that belongs to otherEventId
+  let seatMapId: number; // the event's seat map (for seats bound to a tier)
 
   const now = () => new Date();
   const future = (from = now()) => new Date(from.getTime() + TTL_MS);
@@ -59,6 +60,14 @@ describe('Seat-hold engine (US-DISC-04 reserve/hold, e2e)', () => {
     const { rows } = await pool.query<{ n: string }>(
       `SELECT count(*) n FROM seat_holds WHERE seat_id = $1 AND status = 'active'`,
       [seatId],
+    );
+    return Number(rows[0].n);
+  };
+
+  const activeHoldsForTier = async (ticketTypeId: string): Promise<number> => {
+    const { rows } = await pool.query<{ n: string }>(
+      `SELECT count(*) n FROM seat_holds WHERE ticket_type_id = $1 AND status = 'active'`,
+      [ticketTypeId],
     );
     return Number(rows[0].n);
   };
@@ -307,6 +316,120 @@ describe('Seat-hold engine (US-DISC-04 reserve/hold, e2e)', () => {
     });
   });
 
+  // The service composes the real Ticketing sales-eligibility port + policy against
+  // the DB — a tier must be on sale, inside its window, and within per-order bounds
+  // before the concurrency engine runs (US-TKT-03).
+  describe('per-tier sales eligibility (service path, US-TKT-03)', () => {
+    const actor = () => ({ organizationId: orgId });
+    const isoOffset = (ms: number) => new Date(Date.now() + ms).toISOString();
+
+    it('holds a GA quantity when the tier is on sale and within bounds', async () => {
+      const tier = await insertTier({ name: 'Elig-OK', total: 5 });
+      const hold = await service.holdQuantity(actor(), {
+        eventId,
+        ticketTypeId: tier,
+        quantity: 2,
+      });
+      expect(hold.status).toBe('active');
+    });
+
+    it('409s a paused tier before reserving', async () => {
+      const tier = await insertTier({ name: 'Elig-Paused', status: 'paused' });
+      await expect(
+        service.holdQuantity(actor(), {
+          eventId,
+          ticketTypeId: tier,
+          quantity: 1,
+        }),
+      ).rejects.toMatchObject({ code: 'CONFLICT' });
+      expect(await activeHoldsForTier(tier)).toBe(0);
+    });
+
+    it('409s a tier whose sales window has ended', async () => {
+      const tier = await insertTier({
+        name: 'Elig-Ended',
+        salesEndAt: isoOffset(-60_000),
+      });
+      await expect(
+        service.holdQuantity(actor(), {
+          eventId,
+          ticketTypeId: tier,
+          quantity: 1,
+        }),
+      ).rejects.toMatchObject({ code: 'CONFLICT' });
+    });
+
+    it('409s a tier whose sales window has not opened', async () => {
+      const tier = await insertTier({
+        name: 'Elig-NotOpen',
+        salesStartAt: isoOffset(60_000),
+      });
+      await expect(
+        service.holdQuantity(actor(), {
+          eventId,
+          ticketTypeId: tier,
+          quantity: 1,
+        }),
+      ).rejects.toMatchObject({ code: 'CONFLICT' });
+    });
+
+    it('422s a quantity above maxPerOrder even within the global cap', async () => {
+      const tier = await insertTier({
+        name: 'Elig-Max',
+        total: 10,
+        maxPerOrder: 2,
+      });
+      await expect(
+        service.holdQuantity(actor(), {
+          eventId,
+          ticketTypeId: tier,
+          quantity: 3,
+        }),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      expect(await activeHoldsForTier(tier)).toBe(0);
+    });
+
+    it('422s a quantity below minPerOrder', async () => {
+      const tier = await insertTier({ name: 'Elig-Min', minPerOrder: 3 });
+      await expect(
+        service.holdQuantity(actor(), {
+          eventId,
+          ticketTypeId: tier,
+          quantity: 1,
+        }),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    });
+
+    it('404s an unknown tier', async () => {
+      await expect(
+        service.holdQuantity(actor(), {
+          eventId,
+          ticketTypeId: '00000000-0000-0000-0000-000000000000',
+          quantity: 1,
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('409s reserving a seat whose tier is not on sale', async () => {
+      const tier = await insertTier({ name: 'Seat-Paused', status: 'paused' });
+      const seatId = await insertSeat(seatMapId, 'GATE1', 'available', tier);
+      await expect(
+        service.holdSeats(actor(), { eventId, seatIds: [seatId] }),
+      ).rejects.toMatchObject({ code: 'CONFLICT' });
+      expect(await activeHoldsForSeat(seatId)).toBe(0);
+    });
+
+    it('reserves a seat whose tier is on sale', async () => {
+      const tier = await insertTier({ name: 'Seat-OK' });
+      const seatId = await insertSeat(seatMapId, 'GATE2', 'available', tier);
+      const holds = await service.holdSeats(actor(), {
+        eventId,
+        seatIds: [seatId],
+      });
+      expect(holds).toHaveLength(1);
+    });
+  });
+
   async function seed(): Promise<void> {
     const org = await pool.query<{ id: string }>(
       `INSERT INTO organizations (name, slug) VALUES ($1, $2) RETURNING id`,
@@ -317,6 +440,7 @@ describe('Seat-hold engine (US-DISC-04 reserve/hold, e2e)', () => {
     otherEventId = await insertEvent('other-ev', 'Other Ev');
 
     const mapId = await insertSeatMap(eventId);
+    seatMapId = mapId;
     seats = [];
     for (let i = 1; i <= 6; i += 1) {
       seats.push(await insertSeat(mapId, `A${i}`, 'available'));
@@ -357,13 +481,43 @@ describe('Seat-hold engine (US-DISC-04 reserve/hold, e2e)', () => {
     mapId: number,
     seatNumber: string,
     status: string,
+    ticketTypeId: string | null = null,
   ): Promise<number> {
     const seat = await pool.query<{ id: string }>(
-      `INSERT INTO seats (organization_id, seat_map_id, seat_number, status)
-       VALUES ($1, $2, $3, $4) RETURNING id`,
-      [orgId, mapId, seatNumber, status],
+      `INSERT INTO seats (organization_id, seat_map_id, seat_number, status, ticket_type_id)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [orgId, mapId, seatNumber, status, ticketTypeId],
     );
     return Number(seat.rows[0].id);
+  }
+
+  async function insertTier(opts: {
+    name: string;
+    status?: string;
+    total?: number;
+    salesStartAt?: string | null;
+    salesEndAt?: string | null;
+    minPerOrder?: number;
+    maxPerOrder?: number;
+  }): Promise<string> {
+    const tt = await pool.query<{ id: string }>(
+      `INSERT INTO ticket_types
+         (organization_id, event_id, name, total, sold, status,
+          sales_start_at, sales_end_at, min_per_order, max_per_order)
+       VALUES ($1, $2, $3, $4, 0, $5, $6, $7, $8, $9) RETURNING id`,
+      [
+        orgId,
+        eventId,
+        opts.name,
+        opts.total ?? 5,
+        opts.status ?? 'onsale',
+        opts.salesStartAt ?? null,
+        opts.salesEndAt ?? null,
+        opts.minPerOrder ?? 1,
+        opts.maxPerOrder ?? 8,
+      ],
+    );
+    return tt.rows[0].id;
   }
 });
 

@@ -85,6 +85,27 @@ export class TicketingRepository {
     });
   }
 
+  /** Live tiers by id (tenant-scoped) — backs the checkout eligibility gate. */
+  async findByIds(
+    organizationId: number,
+    ticketTypeIds: string[],
+  ): Promise<TicketRow[]> {
+    const ids = [...new Set(ticketTypeIds)];
+    if (ids.length === 0) return [];
+    return withTenant(this.db, organizationId, (tx) =>
+      tx
+        .select()
+        .from(ticketTypes)
+        .where(
+          and(
+            eq(ticketTypes.organizationId, organizationId),
+            inArray(ticketTypes.id, ids),
+            isNull(ticketTypes.deletedAt),
+          ),
+        ),
+    );
+  }
+
   /** Optimistic update; null when no row matched (concurrent change) → caller 409s. */
   async update(
     organizationId: number,
