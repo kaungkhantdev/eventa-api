@@ -42,3 +42,26 @@ export interface UpdateTicketInput {
 export interface DeleteTicketResult {
   outcome: 'removed' | 'retired';
 }
+
+/** Filters for the cross-event inventory list (US-TKT-04). */
+export interface ListTicketsQuery {
+  page?: number;
+  limit?: number;
+  status?: TicketStatus;
+  eventId?: string;
+  search?: string;
+}
+
+/** How the repository is asked for a page of tiers. */
+export interface SearchTicketsOptions {
+  limit: number;
+  offset: number;
+  status?: TicketStatus;
+  eventId?: string;
+  search?: string;
+  /** Events whose name matched the search — their tiers match too. */
+  eventIds?: string[];
+}
+
+/** One live count per availability state — the list's tab badges. */
+export type TicketStatusCounts = Record<TicketStatus, number>;

@@ -5,6 +5,7 @@ import { AccessModule } from '../access/access.module';
 import { TicketSalesPort } from '../payment-settings/ports/ticket-sales.port';
 import { RegistrationModule } from '../registration/registration.module';
 import { TicketEligibilityPort } from '../registration/ports/ticket-eligibility.port';
+import { EventLookupPort } from './ports/event-lookup.port';
 import { TicketAvailabilityAdapter } from './ticket-availability.adapter';
 import { TicketEligibilityAdapter } from './ticket-eligibility.adapter';
 import { TicketSalesAdapter } from './ticket-sales.adapter';
@@ -12,6 +13,8 @@ import { TicketingPolicy } from './ticketing.policy';
 import { TicketingRepository } from './ticketing.repository';
 import { TicketingService } from './ticketing.service';
 import { TicketingController } from './ticketing.controller';
+import { TicketingQueryController } from './ticketing-query.controller';
+import { TicketingQueryService } from './ticketing-query.service';
 
 /**
  * Ticketing bounded context: sellable ticket tiers per event. Depends on the
@@ -26,9 +29,10 @@ import { TicketingController } from './ticketing.controller';
     forwardRef(() => RegistrationModule),
     AccessModule,
   ],
-  controllers: [TicketingController],
+  controllers: [TicketingController, TicketingQueryController],
   providers: [
     TicketingService,
+    TicketingQueryService,
     TicketingPolicy,
     TicketingRepository,
     { provide: TicketAvailabilityPort, useClass: TicketAvailabilityAdapter },

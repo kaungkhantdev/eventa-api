@@ -4,6 +4,8 @@ import { AccessModule } from '../access/access.module';
 import { PlatformModule } from '../platform/platform.module';
 import { TicketingModule } from '../ticketing/ticketing.module';
 import { EventsController } from './events.controller';
+import { EventLookupPort } from '../ticketing/ports/event-lookup.port';
+import { EventLookupAdapter } from './event-lookup.adapter';
 import { EventsRepository } from './events.repository';
 import { EventsQueryService } from './events-query.service';
 import { EventsService } from './events.service';
@@ -22,7 +24,13 @@ import { EventsService } from './events.service';
 @Module({
   imports: [AccessModule, PlatformModule, forwardRef(() => TicketingModule)],
   controllers: [EventsController],
-  providers: [EventsService, EventsQueryService, EventsRepository, AdminGuard],
-  exports: [EventsService, EventsQueryService],
+  providers: [
+    EventsService,
+    EventsQueryService,
+    EventsRepository,
+    AdminGuard,
+    { provide: EventLookupPort, useClass: EventLookupAdapter },
+  ],
+  exports: [EventsService, EventsQueryService, EventLookupPort],
 })
 export class EventsModule {}

@@ -1,9 +1,25 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  ne,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
-import { organizations, ticketTypes } from '../../db/schema';
+import { organizations, ticketStatusEnum, ticketTypes } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
-import type { NewTicketValues, TicketRow } from './ticketing.types';
+import type {
+  NewTicketValues,
+  SearchTicketsOptions,
+  TicketRow,
+  TicketStatusCounts,
+} from './ticketing.types';
 
 const DEFAULT_VAT_RATE = 0.07;
 
@@ -83,6 +99,76 @@ export class TicketingRepository {
         .limit(1);
       return row ?? null;
     });
+  }
+
+  /**
+   * A filtered page of this org's tiers across every event, newest first, plus
+   * the total (US-TKT-04). A search term matches the tier's own name OR any tier
+   * on an event whose name matched — Events resolves those ids for us.
+   */
+  async search(
+    organizationId: number,
+    opts: SearchTicketsOptions,
+  ): Promise<{ items: TicketRow[]; total: number }> {
+    const where = this.searchWhere(organizationId, opts);
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [{ count }] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(ticketTypes)
+        .where(where);
+      const items = await tx
+        .select()
+        .from(ticketTypes)
+        .where(where)
+        .orderBy(desc(ticketTypes.createdAt), asc(ticketTypes.id))
+        .limit(opts.limit)
+        .offset(opts.offset);
+      return { items, total: count };
+    });
+  }
+
+  /** Live tier counts per availability state — the list's tab badges. */
+  async countsByStatus(organizationId: number): Promise<TicketStatusCounts> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({
+          status: ticketTypes.status,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(ticketTypes)
+        .where(
+          and(
+            eq(ticketTypes.organizationId, organizationId),
+            isNull(ticketTypes.deletedAt),
+          ),
+        )
+        .groupBy(ticketTypes.status);
+      // Every state is present, so a tab that matches nothing reads 0, not blank.
+      const counts = Object.fromEntries(
+        ticketStatusEnum.enumValues.map((s) => [s, 0]),
+      ) as TicketStatusCounts;
+      for (const row of rows) counts[row.status] = row.count;
+      return counts;
+    });
+  }
+
+  private searchWhere(organizationId: number, opts: SearchTicketsOptions) {
+    const nameOrEvent =
+      opts.search === undefined
+        ? undefined
+        : or(
+            ilike(ticketTypes.name, `%${opts.search}%`),
+            opts.eventIds && opts.eventIds.length > 0
+              ? inArray(ticketTypes.eventId, opts.eventIds)
+              : undefined,
+          );
+    return and(
+      eq(ticketTypes.organizationId, organizationId),
+      isNull(ticketTypes.deletedAt),
+      opts.status ? eq(ticketTypes.status, opts.status) : undefined,
+      opts.eventId ? eq(ticketTypes.eventId, opts.eventId) : undefined,
+      nameOrEvent,
+    );
   }
 
   /** Live tiers by id (tenant-scoped) — backs the checkout eligibility gate. */

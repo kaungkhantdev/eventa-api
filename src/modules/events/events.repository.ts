@@ -6,6 +6,7 @@ import {
   eq,
   gte,
   ilike,
+  inArray,
   isNull,
   like,
   lt,
@@ -29,6 +30,47 @@ import type {
 @Injectable()
 export class EventsRepository {
   constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+
+  /** Names for the given events (tenant-scoped) — backs `EventLookupPort`. */
+  async briefsByIds(
+    organizationId: number,
+    eventIds: string[],
+  ): Promise<{ id: string; name: string }[]> {
+    const ids = [...new Set(eventIds)];
+    if (ids.length === 0) return [];
+    return withTenant(this.db, organizationId, (tx) =>
+      tx
+        .select({ id: events.id, name: events.name })
+        .from(events)
+        .where(
+          and(
+            eq(events.organizationId, organizationId),
+            inArray(events.id, ids),
+            isNull(events.deletedAt),
+          ),
+        ),
+    );
+  }
+
+  /** Ids of live events whose name matches `search` — backs `EventLookupPort`. */
+  async idsMatchingName(
+    organizationId: number,
+    search: string,
+  ): Promise<string[]> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({ id: events.id })
+        .from(events)
+        .where(
+          and(
+            eq(events.organizationId, organizationId),
+            ilike(events.name, `%${search}%`),
+            isNull(events.deletedAt),
+          ),
+        );
+      return rows.map((r) => r.id);
+    });
+  }
 
   /** Slugs in this org that begin with `base` — used to pick a free, unique slug. */
   async existingSlugs(organizationId: number, base: string): Promise<string[]> {

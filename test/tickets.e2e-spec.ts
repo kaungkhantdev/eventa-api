@@ -288,6 +288,75 @@ describe('Ticket types (e2e — US-EVT-06)', () => {
     expect((res.body as { message: string }).message).toMatch(/end date/i);
   });
 
+  describe('US-TKT-04: cross-event inventory', () => {
+    const inventory = (jwt: string, qs = '') =>
+      request(server)
+        .get(`/api/v1/tickets${qs}`)
+        .set('Authorization', `Bearer ${jwt}`);
+
+    it('searches by tier name, case-insensitively', async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      await createTicket(jwt, { name: 'Jazz pass', total: 40 });
+      const res = await inventory(jwt, '?search=JAZZ');
+      expect(res.status).toBe(200);
+      const names = (res.body as Success<Ticket[]>).data.map((t) => t.name);
+      expect(names).toContain('Jazz pass');
+    });
+
+    it('finds tiers by the name of the event they belong to', async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      const res = await inventory(jwt, '?search=Ticketed');
+      const rows = (res.body as Success<{ eventName: string }[]>).data;
+      expect(rows.length).toBeGreaterThan(0);
+      // every hit belongs to the matched event, not to a same-named tier
+      expect(rows.every((r) => r.eventName === 'Ticketed Event')).toBe(true);
+    });
+
+    it('shows sales progress and the event name on each row', async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      const res = await inventory(jwt, '?limit=100');
+      const row = (
+        res.body as Success<
+          { name: string; sold: number; total: number; eventName: string }[]
+        >
+      ).data.find((r) => r.name === 'Jazz pass');
+      expect(row).toMatchObject({
+        sold: 0,
+        total: 40,
+        eventName: 'Ticketed Event',
+      });
+    });
+
+    it('filters by status and the tab counts agree with the list', async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      const counts = await inventory(jwt, '/counts');
+      const soldout = (counts.body as Success<Record<string, number>>).data
+        .soldout;
+
+      const filtered = await inventory(jwt, '?status=soldout&limit=100');
+      const body = filtered.body as Success<Ticket[]> & {
+        meta: { total: number };
+      };
+      expect(body.data.every((t) => t.status === 'soldout')).toBe(true);
+      expect(body.meta.total).toBe(soldout);
+    });
+
+    it('returns an empty page when nothing matches', async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      const res = await inventory(jwt, '?search=no-such-ticket-anywhere');
+      const body = res.body as Success<Ticket[]> & { meta: { total: number } };
+      expect(body.data).toEqual([]);
+      expect(body.meta.total).toBe(0);
+    });
+
+    it('never shows another tenant’s tiers', async () => {
+      const other = await token(ADMIN2, ORG2.slug);
+      const res = await inventory(other, '?limit=100');
+      const names = (res.body as Success<Ticket[]>).data.map((t) => t.name);
+      expect(names).not.toContain('Jazz pass');
+    });
+  });
+
   it('forbids adding a ticket to another tenant’s event (404)', async () => {
     const jwt = await token(ADMIN, ORG.slug);
     const res = await request(server)
