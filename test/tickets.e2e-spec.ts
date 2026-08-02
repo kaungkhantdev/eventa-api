@@ -302,17 +302,78 @@ describe('Ticket types (e2e — US-EVT-06)', () => {
     expect((await createTicket(jwt, { name: 'Nope' })).status).toBe(403);
   });
 
-  it('refuses to delete a tier that has sales (409)', async () => {
+  it('US-TKT-05: a tier that never sold is removed completely', async () => {
     const jwt = await token(ADMIN, ORG.slug);
-    const created = await createTicket(jwt, { name: 'Sold Out', total: 100 });
+    const created = await createTicket(jwt, { name: 'Mistake', total: 100 });
     const ticketId = (created.body as Success<Ticket>).data.id;
-    await pool.query(`UPDATE ticket_types SET sold = 4 WHERE id = $1`, [
+
+    const res = await request(server)
+      .delete(`/api/v1/events/${eventId}/tickets/${ticketId}`)
+      .set('Authorization', `Bearer ${jwt}`);
+    expect(res.status).toBe(200);
+    expect((res.body as Success<{ outcome: string }>).data.outcome).toBe(
+      'removed',
+    );
+    const { rows } = await pool.query(
+      `SELECT id FROM ticket_types WHERE id = $1`,
+      [ticketId],
+    );
+    expect(rows).toHaveLength(0); // gone, not hidden
+  });
+
+  it('US-TKT-05: a tier that has sold is retired — the holders keep their tickets', async () => {
+    const jwt = await token(ADMIN, ORG.slug);
+    const created = await createTicket(jwt, { name: 'Sold Out', total: 300 });
+    const ticketId = (created.body as Success<Ticket>).data.id;
+    await pool.query(`UPDATE ticket_types SET sold = 210 WHERE id = $1`, [
       ticketId,
     ]);
-    await request(server)
+
+    const res = await request(server)
       .delete(`/api/v1/events/${eventId}/tickets/${ticketId}`)
-      .set('Authorization', `Bearer ${jwt}`)
-      .expect(409);
+      .set('Authorization', `Bearer ${jwt}`);
+    expect(res.status).toBe(200);
+    expect((res.body as Success<{ outcome: string }>).data.outcome).toBe(
+      'retired',
+    );
+
+    // the row survives (so issued tickets still resolve) but leaves the active list
+    const { rows } = await pool.query<{
+      deleted_at: Date | null;
+      sold: number;
+    }>(`SELECT deleted_at, sold FROM ticket_types WHERE id = $1`, [ticketId]);
+    expect(rows[0].deleted_at).not.toBeNull();
+    expect(Number(rows[0].sold)).toBe(210); // nothing was refunded or cancelled
+
+    const list = await request(server)
+      .get(`/api/v1/events/${eventId}/tickets`)
+      .set('Authorization', `Bearer ${jwt}`);
+    const names = (list.body as Success<Ticket[]>).data.map((t) => t.name);
+    expect(names).not.toContain('Sold Out');
+  });
+
+  it('US-TKT-05: refuses while a checkout is in progress', async () => {
+    const jwt = await token(ADMIN, ORG.slug);
+    const created = await createTicket(jwt, {
+      name: 'Mid-checkout',
+      total: 50,
+    });
+    const ticketId = (created.body as Success<Ticket>).data.id;
+    const { rows } = await pool.query<{ organization_id: string }>(
+      `SELECT organization_id FROM ticket_types WHERE id = $1`,
+      [ticketId],
+    );
+    await pool.query(
+      `INSERT INTO seat_holds (organization_id, event_id, ticket_type_id, quantity, status, expires_at)
+       VALUES ($1, $2, $3, 2, 'active', now() + interval '10 minutes')`,
+      [rows[0].organization_id, eventId, ticketId],
+    );
+
+    const res = await request(server)
+      .delete(`/api/v1/events/${eventId}/tickets/${ticketId}`)
+      .set('Authorization', `Bearer ${jwt}`);
+    expect(res.status).toBe(409);
+    expect((res.body as { message: string }).message).toMatch(/pause/i);
   });
 
   it('refuses to delete the last remaining tier but allows others', async () => {

@@ -1,5 +1,7 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
+import { CheckoutActivityPort } from '../ticketing/ports/checkout-activity.port';
 import { TicketingModule } from '../ticketing/ticketing.module';
+import { CheckoutActivityAdapter } from './checkout-activity.adapter';
 import { SeatHoldRepository } from './seat-hold.repository';
 import { SeatHoldService } from './seat-hold.service';
 import { TicketEligibilityPolicy } from './ticket-eligibility.policy';
@@ -11,14 +13,22 @@ import { TicketEligibilityPolicy } from './ticket-eligibility.policy';
  * RegistrationStatsModule; the HTTP surface and order/attendee write model arrive
  * with the checkout (`POST /orders`) slice.
  *
- * Imports TicketingModule only for the `TicketEligibilityPort` it binds: this
- * module owns that abstraction (it is the consumer) and never reads `ticket_types`
- * itself — the gate that refuses a sale outside the window (US-TKT-03) asks
- * Ticketing, it does not query it.
+ * Registration and Ticketing are genuinely bidirectional, so each side owns the
+ * port it consumes and neither reads the other's tables (`forwardRef`):
+ *   · Registration → Ticketing: `TicketEligibilityPort`, "may this tier be sold
+ *     right now?" — the gate that refuses a sale outside the window (US-TKT-03).
+ *   · Ticketing → Registration: `CheckoutActivityPort`, "is anyone mid-checkout
+ *     with this tier?" — so retiring one never yanks inventory from a buyer
+ *     who is paying (US-TKT-05). Registration binds the adapter here.
  */
 @Module({
-  imports: [TicketingModule],
-  providers: [SeatHoldService, SeatHoldRepository, TicketEligibilityPolicy],
-  exports: [SeatHoldService],
+  imports: [forwardRef(() => TicketingModule)],
+  providers: [
+    SeatHoldService,
+    SeatHoldRepository,
+    TicketEligibilityPolicy,
+    { provide: CheckoutActivityPort, useClass: CheckoutActivityAdapter },
+  ],
+  exports: [SeatHoldService, CheckoutActivityPort],
 })
 export class RegistrationModule {}

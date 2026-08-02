@@ -6,6 +6,7 @@ import { pickDefined } from '../../common/util/pick-defined';
 import type { EventActor } from '../events/events.types';
 import { EventsService } from '../events/events.service';
 import { TicketResponseDto } from './dto/ticket-response.dto';
+import { CheckoutActivityPort } from './ports/checkout-activity.port';
 import { toTicketResponse } from './ticketing.mapper';
 import { TicketingPolicy } from './ticketing.policy';
 import { TicketingRepository } from './ticketing.repository';
@@ -13,6 +14,7 @@ import type {
   CreateTicketInput,
   NewTicketValues,
   TicketRow,
+  DeleteTicketResult,
   TicketStatus,
   UpdateTicketInput,
 } from './ticketing.types';
@@ -37,6 +39,7 @@ export class TicketingService {
     private readonly events: EventsService,
     private readonly policy: TicketingPolicy,
     private readonly clock: Clock,
+    private readonly checkout: CheckoutActivityPort,
   ) {}
 
   async createTicket(
@@ -215,17 +218,19 @@ export class TicketingService {
     );
   }
 
+  /**
+   * Remove a tier created by mistake, or retire one that has already sold
+   * (US-TKT-05). A tier that never sold is erased; one with sales is soft-deleted
+   * so it leaves the active list and stops selling while every issued ticket
+   * still resolves to it. Nothing is refunded or cancelled here — those are
+   * finance actions, taken deliberately and separately.
+   */
   async deleteTicket(
     actor: EventActor,
     eventId: string,
     ticketId: string,
-  ): Promise<void> {
+  ): Promise<DeleteTicketResult> {
     const ticket = await this.load(actor.organizationId, eventId, ticketId);
-    if (ticket.sold > 0) {
-      throw DomainException.conflict(
-        "This ticket type has sales and can't be removed. Close it instead.",
-      );
-    }
     const remaining = await this.repo.countActive(
       actor.organizationId,
       eventId,
@@ -235,7 +240,17 @@ export class TicketingService {
         'An event must keep at least one ticket type — this is the last one.',
       );
     }
+    if (await this.checkout.hasActiveHolds(actor.organizationId, ticketId)) {
+      throw DomainException.conflict(
+        'Someone is checking out with this ticket type — pause it and try again shortly.',
+      );
+    }
+    if (ticket.sold === 0) {
+      await this.repo.hardDelete(actor.organizationId, ticketId);
+      return { outcome: 'removed' };
+    }
     await this.repo.softDelete(actor.organizationId, ticketId);
+    return { outcome: 'retired' };
   }
 
   /** Copy the source event's tiers onto a new event: 0 sold, sales window cleared. */

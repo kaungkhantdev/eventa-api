@@ -34,3 +34,11 @@ export interface UpdateTicketInput {
   salesEndAt?: Date | null;
   version?: number;
 }
+
+/**
+ * What became of a tier on delete (US-TKT-05): erased outright when it never
+ * sold, or retired so existing holders keep valid tickets.
+ */
+export interface DeleteTicketResult {
+  outcome: 'removed' | 'retired';
+}

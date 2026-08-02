@@ -147,6 +147,26 @@ export class TicketingRepository {
     });
   }
 
+  /**
+   * Erase a tier outright — only ever called for one that never sold (US-TKT-05),
+   * so no order, issued ticket or seat assignment can reference it.
+   */
+  async hardDelete(organizationId: number, ticketId: string): Promise<boolean> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .delete(ticketTypes)
+        .where(
+          and(
+            eq(ticketTypes.id, ticketId),
+            eq(ticketTypes.organizationId, organizationId),
+            eq(ticketTypes.sold, 0),
+          ),
+        )
+        .returning({ id: ticketTypes.id });
+      return rows.length > 0;
+    });
+  }
+
   /** Number of live tiers on the event (guards "can't remove the last one"). */
   async countActive(organizationId: number, eventId: string): Promise<number> {
     return withTenant(this.db, organizationId, async (tx) => {

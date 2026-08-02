@@ -1,6 +1,7 @@
 import { Clock } from '../../common/time/clock';
 import { DomainException } from '../../common/errors/domain.exception';
 import { EventsService } from '../events/events.service';
+import { CheckoutActivityPort } from './ports/checkout-activity.port';
 import { TicketingPolicy } from './ticketing.policy';
 import { TicketingRepository } from './ticketing.repository';
 import { TicketingService } from './ticketing.service';
@@ -44,6 +45,7 @@ function ticketRow(o: Partial<TicketRow> = {}): TicketRow {
 describe('TicketingService', () => {
   let repo: jest.Mocked<TicketingRepository>;
   let events: jest.Mocked<EventsService>;
+  let checkout: jest.Mocked<CheckoutActivityPort>;
   let service: TicketingService;
 
   beforeEach(() => {
@@ -62,14 +64,24 @@ describe('TicketingService', () => {
           Promise.resolve(ticketRow({ ...v, version: 2 })),
         ),
       softDelete: jest.fn().mockResolvedValue(true),
+      hardDelete: jest.fn().mockResolvedValue(true),
       countActive: jest.fn().mockResolvedValue(2),
       orgVatRate: jest.fn().mockResolvedValue(0.07),
     } as unknown as jest.Mocked<TicketingRepository>;
+    checkout = {
+      hasActiveHolds: jest.fn().mockResolvedValue(false),
+    };
     events = {
       getEvent: jest.fn().mockResolvedValue({ id: eventId }),
     } as unknown as jest.Mocked<EventsService>;
     const clock: Clock = { now: () => NOW };
-    service = new TicketingService(repo, events, new TicketingPolicy(), clock);
+    service = new TicketingService(
+      repo,
+      events,
+      new TicketingPolicy(),
+      clock,
+      checkout,
+    );
   });
 
   describe('createTicket', () => {
@@ -140,7 +152,6 @@ describe('TicketingService', () => {
         priceSatang: 50000,
         total: 100,
         salesStartAt: FUTURE,
-        status: 'onsale', // a client cannot force a scheduled tier on sale
       });
       expect(repo.insert.mock.calls[0][0].status).toBe('scheduled');
     });
@@ -264,16 +275,37 @@ describe('TicketingService', () => {
     });
   });
 
-  describe('deleteTicket', () => {
-    it('refuses to remove a tier that has sales (409 — close it instead)', async () => {
-      repo.findTicket.mockResolvedValue(ticketRow({ sold: 3 }));
+  describe('deleteTicket (US-TKT-05)', () => {
+    it('removes a tier that has never sold, completely', async () => {
+      repo.findTicket.mockResolvedValue(ticketRow({ sold: 0 }));
       repo.countActive.mockResolvedValue(3);
+      const res = await service.deleteTicket(actor, eventId, 't1');
+      expect(res).toEqual({ outcome: 'removed' });
+      expect(repo.hardDelete).toHaveBeenCalledWith(1, 't1');
+      expect(repo.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('retires a tier that has sold — holders keep their tickets', async () => {
+      repo.findTicket.mockResolvedValue(ticketRow({ sold: 210 }));
+      repo.countActive.mockResolvedValue(3);
+      const res = await service.deleteTicket(actor, eventId, 't1');
+      expect(res).toEqual({ outcome: 'retired' });
+      // retire = soft delete: the row survives, so issued tickets keep resolving
+      expect(repo.softDelete).toHaveBeenCalledWith(1, 't1');
+      expect(repo.hardDelete).not.toHaveBeenCalled();
+    });
+
+    it('refuses while a checkout is in progress, and says what to do', async () => {
+      repo.findTicket.mockResolvedValue(ticketRow({ sold: 5 }));
+      repo.countActive.mockResolvedValue(3);
+      checkout.hasActiveHolds.mockResolvedValue(true);
       const err = await service
         .deleteTicket(actor, eventId, 't1')
         .catch((e: unknown) => e);
       expect((err as DomainException).getStatus()).toBe(409);
-      expect((err as DomainException).message).toMatch(/sales/i);
+      expect((err as DomainException).message).toMatch(/pause/i);
       expect(repo.softDelete).not.toHaveBeenCalled();
+      expect(repo.hardDelete).not.toHaveBeenCalled();
     });
 
     it('refuses to remove the last remaining tier (422)', async () => {
@@ -284,13 +316,7 @@ describe('TicketingService', () => {
         .catch((e: unknown) => e);
       expect((err as DomainException).getStatus()).toBe(422);
       expect(repo.softDelete).not.toHaveBeenCalled();
-    });
-
-    it('soft-deletes when other tiers remain', async () => {
-      repo.findTicket.mockResolvedValue(ticketRow());
-      repo.countActive.mockResolvedValue(3);
-      await service.deleteTicket(actor, eventId, 't1');
-      expect(repo.softDelete).toHaveBeenCalledWith(1, 't1');
+      expect(repo.hardDelete).not.toHaveBeenCalled();
     });
   });
 });

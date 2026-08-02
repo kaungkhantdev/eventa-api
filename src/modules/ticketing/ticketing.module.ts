@@ -3,6 +3,7 @@ import { EventsModule } from '../events/events.module';
 import { TicketAvailabilityPort } from '../events/ports/ticket-availability.port';
 import { AccessModule } from '../access/access.module';
 import { TicketSalesPort } from '../payment-settings/ports/ticket-sales.port';
+import { RegistrationModule } from '../registration/registration.module';
 import { TicketEligibilityPort } from '../registration/ports/ticket-eligibility.port';
 import { TicketAvailabilityAdapter } from './ticket-availability.adapter';
 import { TicketEligibilityAdapter } from './ticket-eligibility.adapter';
@@ -20,7 +21,11 @@ import { TicketingController } from './ticketing.controller';
  * reference each other (`forwardRef`) — an event has tickets, a ticket an event.
  */
 @Module({
-  imports: [forwardRef(() => EventsModule), AccessModule],
+  imports: [
+    forwardRef(() => EventsModule),
+    forwardRef(() => RegistrationModule),
+    AccessModule,
+  ],
   controllers: [TicketingController],
   providers: [
     TicketingService,

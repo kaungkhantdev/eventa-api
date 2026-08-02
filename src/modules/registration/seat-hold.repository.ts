@@ -190,6 +190,32 @@ export class SeatHoldRepository {
     });
   }
 
+  /**
+   * Is a checkout still holding this tier? Only unexpired `active` holds count —
+   * a lapsed one reserves nothing and must not block the organizer (US-TKT-05).
+   */
+  async hasActiveHolds(
+    organizationId: number,
+    ticketTypeId: string,
+    now: Date,
+  ): Promise<boolean> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({ id: seatHolds.id })
+        .from(seatHolds)
+        .where(
+          and(
+            eq(seatHolds.organizationId, organizationId),
+            eq(seatHolds.ticketTypeId, ticketTypeId),
+            eq(seatHolds.status, 'active'),
+            sql`${seatHolds.expiresAt} > ${now}`,
+          ),
+        )
+        .limit(1);
+      return row !== undefined;
+    });
+  }
+
   /** Release active holds early (buyer abandoned checkout) — frees the inventory. */
   async release(organizationId: number, holdIds: number[]): Promise<void> {
     if (holdIds.length === 0) return;
