@@ -176,6 +176,13 @@
       "when": 1785745597303,
       "tag": "0024_saved_events",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1785747731602,
+      "tag": "0025_order_idempotency",
+      "breakpoints": true
     }
   ]
 }

@@ -12,9 +12,12 @@ import { ApiNoContentResponse, ApiTags } from '@nestjs/swagger';
 import { Public } from '../../common/decorators/public.decorator';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 import { ApiData } from '../../common/http/api-data.decorator';
+import { CheckoutOrderService } from './checkout-order.service';
 import { CheckoutService } from './checkout.service';
 import { CheckoutViewService } from './checkout-view.service';
 import { CheckoutViewDto } from './dto/checkout-view.dto';
+import { ConfirmOrderDto } from './dto/confirm-order.dto';
+import { OrderPlacedDto } from './dto/order-placed.dto';
 import { CheckoutHoldDto, OrderSummaryDto } from './dto/order-summary.dto';
 import {
   HoldCheckoutDto,
@@ -37,6 +40,7 @@ export class CheckoutController {
   constructor(
     private readonly view: CheckoutViewService,
     private readonly checkout: CheckoutService,
+    private readonly orders: CheckoutOrderService,
   ) {}
 
   @Public()
@@ -64,6 +68,19 @@ export class CheckoutController {
   @ApiData(CheckoutHoldDto, HttpStatus.CREATED)
   hold(@Body() dto: HoldCheckoutDto): Promise<CheckoutHoldDto> {
     return this.checkout.hold(dto);
+  }
+
+  /**
+   * Place the registration. Idempotent by the client's key: a double-tapped
+   * Confirm returns the order it already created rather than a second one.
+   */
+  @Public()
+  @Post('confirm')
+  @HttpCode(HttpStatus.CREATED)
+  @ResponseMessage("You're registered!")
+  @ApiData(OrderPlacedDto, HttpStatus.CREATED)
+  confirm(@Body() dto: ConfirmOrderDto): Promise<OrderPlacedDto> {
+    return this.orders.confirm(dto);
   }
 
   @Public()

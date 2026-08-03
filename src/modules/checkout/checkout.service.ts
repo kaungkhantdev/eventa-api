@@ -23,6 +23,12 @@ export interface QuoteCheckoutInput {
   discountCode?: string;
   /** Lets Discounts enforce a per-person redemption limit before the order exists. */
   buyerEmail?: string;
+  /**
+   * The buyer's own reservations, when they already hold this selection. Seats
+   * they hold count as available TO THEM, so re-pricing before confirming does
+   * not report their own seats as taken.
+   */
+  holdIds?: number[];
 }
 
 export type HoldCheckoutInput = Omit<
@@ -33,6 +39,15 @@ export type HoldCheckoutInput = Omit<
 export interface ReleaseCheckoutInput {
   eventId: string;
   holdIds: number[];
+}
+
+/** A priced selection with the internals order placement needs. */
+export interface PricedSelection {
+  summary: OrderSummaryDto;
+  event: CheckoutEvent;
+  tier: CheckoutTier;
+  selection: CheckoutSelection;
+  discountCodeId: string | null;
 }
 
 /**
@@ -61,6 +76,15 @@ export class CheckoutService {
 
   /** Price the current selection. Reads only — safe to call as often as it changes. */
   async quote(input: QuoteCheckoutInput): Promise<OrderSummaryDto> {
+    return (await this.priceSelection(input)).summary;
+  }
+
+  /**
+   * The same pricing, plus the internals placing an order needs: which event and
+   * tier it resolved to, and which discount row was applied. Kept off
+   * `OrderSummaryDto` so an anonymous response never carries an internal id.
+   */
+  async priceSelection(input: QuoteCheckoutInput): Promise<PricedSelection> {
     const { event, tier, selection } = await this.resolve(input);
     const quantity = selectionSize(selection);
     const subtotalSatang = tier.priceSatang * quantity;
@@ -71,7 +95,7 @@ export class CheckoutService {
       discountSatang: discount.discountSatang,
       ...rates,
     });
-    return {
+    const summary: OrderSummaryDto = {
       eventId: event.id,
       ticketTypeId: tier.id,
       ticketTypeName: tier.name,
@@ -90,6 +114,7 @@ export class CheckoutService {
       // A free order skips payment entirely (US-DISC-04).
       paymentRequired: totals.totalSatang > 0,
     };
+    return { summary, event, tier, selection, discountCodeId: discount.id };
   }
 
   /** Reserve the selection so nobody else can take it while the buyer pays. */
@@ -147,7 +172,7 @@ export class CheckoutService {
       // Every chosen seat must exist, be free, and be priced by this tier —
       // checked here so a bad pick fails before the reservation transaction.
       this.policy.resolveSeats(
-        await this.view.seatsFor(event),
+        await this.view.seatsFor(event, input.holdIds),
         selection.seatIds,
         tier.id,
       );
@@ -158,14 +183,24 @@ export class CheckoutService {
   private async discountFor(
     input: QuoteCheckoutInput,
     subtotalSatang: number,
-  ): Promise<{ discountSatang: number; code: string | null }> {
-    if (!input.discountCode) return { discountSatang: 0, code: null };
+  ): Promise<{
+    discountSatang: number;
+    code: string | null;
+    id: string | null;
+  }> {
+    if (!input.discountCode) {
+      return { discountSatang: 0, code: null, id: null };
+    }
     const quote = await this.discounts.quote({
       code: input.discountCode,
       eventId: input.eventId,
       subtotalSatang,
       buyerEmail: input.buyerEmail,
     });
-    return { discountSatang: quote.discountSatang, code: quote.code };
+    return {
+      discountSatang: quote.discountSatang,
+      code: quote.code,
+      id: quote.discountCodeId,
+    };
   }
 }

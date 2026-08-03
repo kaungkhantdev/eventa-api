@@ -12,9 +12,16 @@ import type { CheckoutSeat } from '../checkout.types';
  * reservation transaction re-checks under a row lock and is the only authority.
  */
 export abstract class SeatMapPort {
+  /**
+   * `ownHoldIds` are the caller's own reservations, and they do NOT make a seat
+   * unavailable — availability here means "available to you". Without it a buyer
+   * who has just held seat 4 would be told seat 4 was taken, by themselves, the
+   * moment they tried to confirm.
+   */
   abstract seatsForEvent(
     organizationId: number,
     eventId: string,
     now: Date,
+    ownHoldIds?: number[],
   ): Promise<CheckoutSeat[]>;
 }

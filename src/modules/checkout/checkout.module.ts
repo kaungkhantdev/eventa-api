@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
 import { DiscountsModule } from '../discounts/discounts.module';
+import { PlatformModule } from '../platform/platform.module';
 import { EventsModule } from '../events/events.module';
 import { RegistrationModule } from '../registration/registration.module';
 import { TicketingModule } from '../ticketing/ticketing.module';
 import { CheckoutController } from './checkout.controller';
+import { CheckoutOrderService } from './checkout-order.service';
 import { CheckoutPolicy } from './checkout.policy';
 import { CheckoutRepository } from './checkout.repository';
 import { CheckoutService } from './checkout.service';
@@ -28,14 +30,21 @@ import { CheckoutViewService } from './checkout-view.service';
  * `forwardRef` anywhere — nothing in those contexts needs Checkout back.
  */
 @Module({
-  imports: [EventsModule, TicketingModule, RegistrationModule, DiscountsModule],
+  imports: [
+    EventsModule,
+    TicketingModule,
+    RegistrationModule,
+    DiscountsModule,
+    PlatformModule,
+  ],
   controllers: [CheckoutController],
   providers: [
     CheckoutViewService,
     CheckoutService,
+    CheckoutOrderService,
     CheckoutRepository,
     CheckoutPolicy,
   ],
-  exports: [CheckoutViewService, CheckoutService],
+  exports: [CheckoutViewService, CheckoutService, CheckoutOrderService],
 })
 export class CheckoutModule {}

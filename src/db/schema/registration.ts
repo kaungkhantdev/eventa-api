@@ -77,6 +77,12 @@ export const orders = pgTable(
     buyerPhone: text(),
     status: orderStatusEnum().notNull().default('pending'),
     paymentStatus: paymentStatusEnum().notNull().default('pending'),
+    /**
+     * The buyer's key for this attempt (US-DISC-06). Unique per workspace, so a
+     * double-tapped Confirm or a retried request finds the order it already
+     * created instead of placing a second one — and charges once.
+     */
+    idempotencyKey: text(),
     seats: smallint().notNull(),
     subtotalSatang: bigint({ mode: 'number' }).notNull(),
     discountCodeId: uuid().references(() => discountCodes.id, {
@@ -96,6 +102,7 @@ export const orders = pgTable(
   },
   (t) => [
     unique('uq_orders_org_reference').on(t.organizationId, t.reference),
+    unique('uq_orders_org_idem').on(t.organizationId, t.idempotencyKey),
     index('ix_orders_event').on(t.eventId),
     index('ix_orders_attendee').on(t.attendeeId),
     index('ix_orders_status').on(t.organizationId, t.status),

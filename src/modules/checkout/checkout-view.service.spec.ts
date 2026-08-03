@@ -195,7 +195,25 @@ describe('CheckoutViewService (US-DISC-04)', () => {
       expect(view.seatMap?.seats).toHaveLength(2);
       // A taken seat is still drawn — greyed out, not missing from the row.
       expect(view.seatMap?.seats[1]).toMatchObject({ id: 2, available: false });
-      expect(seatMap.seatsForEvent).toHaveBeenCalledWith(ORG, EVENT_ID, NOW);
+      expect(seatMap.seatsForEvent).toHaveBeenCalledWith(
+        ORG,
+        EVENT_ID,
+        NOW,
+        undefined,
+      );
+    });
+
+    it('counts a buyer’s own reservation as still available to them', async () => {
+      events.findPublishedBySlug.mockResolvedValue(
+        event({ seatingMode: 'reserved' }),
+      );
+      await service.seatsFor(event({ seatingMode: 'reserved' }), [21, 22]);
+      expect(seatMap.seatsForEvent).toHaveBeenCalledWith(
+        ORG,
+        EVENT_ID,
+        NOW,
+        [21, 22],
+      );
     });
 
     it('caps a booking at 8 wherever the client renders it', async () => {

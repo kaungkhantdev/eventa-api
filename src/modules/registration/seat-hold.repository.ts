@@ -8,6 +8,7 @@ import {
   isNotNull,
   isNull,
   lte,
+  notInArray,
   sql,
 } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
@@ -184,6 +185,7 @@ export class SeatHoldRepository {
     organizationId: number,
     eventId: string,
     now: Date,
+    ownHoldIds: number[] = [],
   ): Promise<CheckoutSeat[]> {
     return withTenant(this.db, organizationId, async (tx) => {
       const rows = await tx
@@ -205,6 +207,11 @@ export class SeatHoldRepository {
             eq(seatHolds.seatId, seats.id),
             eq(seatHolds.status, ACTIVE),
             gt(seatHolds.expiresAt, now),
+            // The caller's own reservation does not make a seat unavailable
+            // to the caller — otherwise confirming your own hold would 409.
+            ownHoldIds.length > 0
+              ? notInArray(seatHolds.id, ownHoldIds)
+              : undefined,
           ),
         )
         .leftJoin(

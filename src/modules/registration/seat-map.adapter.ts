@@ -19,7 +19,8 @@ export class SeatMapAdapter extends SeatMapPort {
     organizationId: number,
     eventId: string,
     now: Date,
+    ownHoldIds?: number[],
   ): Promise<CheckoutSeat[]> {
-    return this.repo.seatsForEvent(organizationId, eventId, now);
+    return this.repo.seatsForEvent(organizationId, eventId, now, ownHoldIds);
   }
 }

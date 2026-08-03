@@ -90,11 +90,15 @@ export class CheckoutViewService {
   }
 
   /** Every seat of a reserved-seating event, taken ones included (greyed out). */
-  seatsFor(event: CheckoutEvent): Promise<CheckoutSeat[]> {
+  seatsFor(
+    event: CheckoutEvent,
+    ownHoldIds?: number[],
+  ): Promise<CheckoutSeat[]> {
     return this.seatMap.seatsForEvent(
       event.organizationId,
       event.id,
       this.clock.now(),
+      ownHoldIds,
     );
   }
 
