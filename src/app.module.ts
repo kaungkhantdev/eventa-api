@@ -35,6 +35,7 @@ import { AuthTwoFactorModule } from './modules/auth-two-factor/auth-two-factor.m
 import { AuthSignupModule } from './modules/auth-signup/auth-signup.module';
 import { AuthSocialModule } from './modules/auth-social/auth-social.module';
 import { UsersModule } from './modules/users/users.module';
+import { DiscoverModule } from './modules/discover/discover.module';
 import { PublicPagesModule } from './modules/public-pages/public-pages.module';
 import { RegistrationModule } from './modules/registration/registration.module';
 import { RegistrationStatsModule } from './modules/registration-stats/registration-stats.module';
@@ -78,6 +79,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     EventPageModule,
     EventPageContentModule,
     PublicPagesModule,
+    DiscoverModule,
     RegistrationModule,
     RegistrationStatsModule,
   ],

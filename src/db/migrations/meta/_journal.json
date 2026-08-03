@@ -162,6 +162,13 @@
       "when": 1785585133696,
       "tag": "0022_rls_promotions",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1785738330317,
+      "tag": "0023_discover_search",
+      "breakpoints": true
     }
   ]
 }
