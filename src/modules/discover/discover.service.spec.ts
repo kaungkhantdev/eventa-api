@@ -49,6 +49,7 @@ describe('DiscoverService (US-DISC-01, US-DISC-02)', () => {
       search: jest.fn().mockResolvedValue({ items: [eventRow()], total: 1 }),
       tiersByEvent: jest.fn().mockResolvedValue(new Map([['e1', [tier()]]])),
       categoryNames: jest.fn().mockResolvedValue(['Technology', 'Music']),
+      findByIds: jest.fn().mockResolvedValue([eventRow()]),
     } as unknown as jest.Mocked<DiscoverRepository>;
     attendance = {
       goingCounts: jest.fn().mockResolvedValue(new Map([['e1', 128]])),
@@ -201,5 +202,33 @@ describe('DiscoverService (US-DISC-01, US-DISC-02)', () => {
   it('offers the categories that published events actually use', async () => {
     expect(await service.categories()).toEqual(['Technology', 'Music']);
     expect(repo.categoryNames).toHaveBeenCalledWith(NOW);
+  });
+
+  // The same card, addressed by id — how a saved list (US-DISC-03) renders.
+  describe('cardsByIds', () => {
+    it('builds the same decorated card the grid shows', async () => {
+      const [card] = await service.cardsByIds(['e1']);
+      expect(card).toMatchObject({ id: 'e1', goingCount: 128, badge: null });
+    });
+
+    it('answers in the order asked, not the order stored', async () => {
+      repo.findByIds.mockResolvedValue([
+        eventRow({ id: 'e2' }),
+        eventRow({ id: 'e1' }),
+      ]);
+      repo.tiersByEvent.mockResolvedValue(new Map());
+      const cards = await service.cardsByIds(['e1', 'e2']);
+      expect(cards.map((c) => c.id)).toEqual(['e1', 'e2']);
+    });
+
+    it('drops an id that is no longer publicly visible', async () => {
+      repo.findByIds.mockResolvedValue([]);
+      expect(await service.cardsByIds(['gone'])).toEqual([]);
+    });
+
+    it('asks nothing at all for an empty list of ids', async () => {
+      expect(await service.cardsByIds([])).toEqual([]);
+      expect(repo.findByIds).not.toHaveBeenCalled();
+    });
   });
 });

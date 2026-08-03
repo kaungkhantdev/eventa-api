@@ -169,6 +169,13 @@
       "when": 1785738330317,
       "tag": "0023_discover_search",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1785745597303,
+      "tag": "0024_saved_events",
+      "breakpoints": true
     }
   ]
 }

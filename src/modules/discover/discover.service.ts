@@ -59,6 +59,25 @@ export class DiscoverService {
     return this.repo.categoryNames(this.clock.now());
   }
 
+  /**
+   * The same decorated card, addressed by id — how an attendee's saved list
+   * (US-DISC-03) renders, and the single place that answers "may this person see
+   * this event at all?". Ids that no longer resolve are dropped rather than
+   * faulted, and the answer keeps the order asked.
+   *
+   * Unlike the grid this does NOT filter out events already under way: an
+   * attendee who saved something should still see it on the day.
+   */
+  async cardsByIds(eventIds: string[]): Promise<EventCardDto[]> {
+    if (eventIds.length === 0) return [];
+    const rows = await this.repo.findByIds(eventIds);
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const found = eventIds
+      .map((id) => byId.get(id))
+      .filter((row): row is DiscoverEventRow => row !== undefined);
+    return this.decorate(found);
+  }
+
   private async decorate(rows: DiscoverEventRow[]): Promise<EventCardDto[]> {
     if (rows.length === 0) return [];
     const ids = rows.map((r) => r.id);

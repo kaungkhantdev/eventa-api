@@ -25,6 +25,24 @@ const LIVE_STATUSES = ['planned', 'upcoming', 'live'] as const;
 /** Only a public event belongs in the grid; unlisted and private do not. */
 const PUBLIC_VISIBILITY = 'public';
 
+/** The one projection behind every card, so the grid and a saved list agree. */
+const EVENT_CARD_COLUMNS = {
+  id: events.id,
+  slug: events.slug,
+  name: events.name,
+  description: events.description,
+  type: events.type,
+  categoryName: categories.name,
+  startAt: events.startAt,
+  endAt: events.endAt,
+  timezone: events.timezone,
+  isOnline: events.isOnline,
+  venueName: events.venueName,
+  city: events.city,
+  coverImage: events.coverImage,
+  organizerName: events.organizerName,
+};
+
 /**
  * Reads for the ANONYMOUS Discover grid (US-DISC-01/02). Deliberately not
  * tenant-scoped and deliberately cross-tenant: a visitor has no tenant, and the
@@ -52,22 +70,7 @@ export class DiscoverRepository {
       .leftJoin(categories, eq(categories.id, events.categoryId))
       .where(where);
     const items = await this.db
-      .select({
-        id: events.id,
-        slug: events.slug,
-        name: events.name,
-        description: events.description,
-        type: events.type,
-        categoryName: categories.name,
-        startAt: events.startAt,
-        endAt: events.endAt,
-        timezone: events.timezone,
-        isOnline: events.isOnline,
-        venueName: events.venueName,
-        city: events.city,
-        coverImage: events.coverImage,
-        organizerName: events.organizerName,
-      })
+      .select(EVENT_CARD_COLUMNS)
       .from(events)
       .leftJoin(categories, eq(categories.id, events.categoryId))
       .where(where)
@@ -76,6 +79,22 @@ export class DiscoverRepository {
       .limit(query.limit)
       .offset(query.offset);
     return { items, total: count };
+  }
+
+  /**
+   * The same event rows addressed by id, for an attendee's saved list
+   * (US-DISC-03). Still published and publicly visible — an event the organizer
+   * has taken down is gone from every surface — but deliberately WITHOUT the
+   * "still ahead of now" filter, so a saved event survives to its own start time.
+   */
+  findByIds(eventIds: string[]): Promise<DiscoverEventRow[]> {
+    const ids = [...new Set(eventIds)];
+    if (ids.length === 0) return Promise.resolve([]);
+    return this.db
+      .select(EVENT_CARD_COLUMNS)
+      .from(events)
+      .leftJoin(categories, eq(categories.id, events.categoryId))
+      .where(and(this.published(), inArray(events.id, ids)));
   }
 
   /** Live tiers for the given events, grouped by event (empty ids → empty map). */
@@ -125,16 +144,19 @@ export class DiscoverRepository {
     ) as SQL;
   }
 
-  /** Published, publicly visible, live, and not yet under way. */
-  private browsable(now: Date): SQL {
+  /** Published and publicly visible — the floor for showing an event anywhere. */
+  private published(): SQL {
     return and(
       eq(events.visibility, PUBLIC_VISIBILITY),
       isNull(events.deletedAt),
       isNotNull(events.publishedAt),
       inArray(events.status, [...LIVE_STATUSES]),
-      // An event that has started or finished is no longer worth discovering.
-      gt(events.startAt, now),
     ) as SQL;
+  }
+
+  /** Published, and still ahead — one under way is no longer worth discovering. */
+  private browsable(now: Date): SQL {
+    return and(this.published(), gt(events.startAt, now)) as SQL;
   }
 
   /** Title, category, city or venue — accent- and tone-mark-insensitive. */

@@ -36,6 +36,7 @@ import { AuthSignupModule } from './modules/auth-signup/auth-signup.module';
 import { AuthSocialModule } from './modules/auth-social/auth-social.module';
 import { UsersModule } from './modules/users/users.module';
 import { DiscoverModule } from './modules/discover/discover.module';
+import { SavedEventsModule } from './modules/saved-events/saved-events.module';
 import { PublicPagesModule } from './modules/public-pages/public-pages.module';
 import { RegistrationModule } from './modules/registration/registration.module';
 import { RegistrationStatsModule } from './modules/registration-stats/registration-stats.module';
@@ -80,6 +81,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     EventPageContentModule,
     PublicPagesModule,
     DiscoverModule,
+    SavedEventsModule,
     RegistrationModule,
     RegistrationStatsModule,
   ],
