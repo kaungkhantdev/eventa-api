@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { SATANG_PER_BAHT } from '../../common/booking/booking.limits';
+import { formatBaht } from '../../common/money/baht';
 import type { DiscoverBadge, PriceFrom, TierInventory } from './discover.types';
 
 /** An allocation of 0 means unlimited — mirrors `TicketingPolicy`. */
@@ -7,8 +7,6 @@ const UNLIMITED = 0;
 /** At/above this share of the allocation sold, the card starts nudging. */
 const SELLING_FAST_RATIO = 0.9;
 const FREE_LABEL = 'Free';
-const BAHT_SYMBOL = '฿';
-const PRICE_LOCALE = 'en-US';
 
 /**
  * The two judgements a Discover card makes about an event's inventory (US-DISC-01):
@@ -45,12 +43,7 @@ export class DiscoverPolicy {
   label(price: PriceFrom | null): string | null {
     if (price === null) return null;
     if (price.isFree || price.satang === 0) return FREE_LABEL;
-    const baht = price.satang / SATANG_PER_BAHT;
-    const fraction = baht % 1 === 0 ? 0 : 2;
-    return `${BAHT_SYMBOL}${baht.toLocaleString(PRICE_LOCALE, {
-      minimumFractionDigits: fraction,
-      maximumFractionDigits: 2,
-    })}`;
+    return formatBaht(price.satang);
   }
 
   private isSoldOut(tiers: TierInventory[]): boolean {

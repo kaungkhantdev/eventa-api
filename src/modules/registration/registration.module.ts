@@ -1,7 +1,9 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { CheckoutActivityPort } from '../ticketing/ports/checkout-activity.port';
 import { TicketingModule } from '../ticketing/ticketing.module';
+import { SeatMapPort } from '../checkout/ports/seat-map.port';
 import { CheckoutActivityAdapter } from './checkout-activity.adapter';
+import { SeatMapAdapter } from './seat-map.adapter';
 import { SeatHoldRepository } from './seat-hold.repository';
 import { SeatHoldService } from './seat-hold.service';
 import { TicketEligibilityPolicy } from './ticket-eligibility.policy';
@@ -28,7 +30,13 @@ import { TicketEligibilityPolicy } from './ticket-eligibility.policy';
     SeatHoldRepository,
     TicketEligibilityPolicy,
     { provide: CheckoutActivityPort, useClass: CheckoutActivityAdapter },
+    { provide: SeatMapPort, useClass: SeatMapAdapter },
   ],
-  exports: [SeatHoldService, CheckoutActivityPort],
+  exports: [
+    SeatHoldService,
+    SeatHoldRepository,
+    CheckoutActivityPort,
+    SeatMapPort,
+  ],
 })
 export class RegistrationModule {}

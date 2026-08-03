@@ -1,5 +1,15 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  sql,
+} from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
   seatAssignments,
@@ -9,6 +19,7 @@ import {
   ticketTypes,
 } from '../../db/schema';
 import { withTenant, type Tx } from '../../db/tenant';
+import type { CheckoutSeat } from '../checkout/checkout.types';
 import type { HoldQuantityResult, HoldSeatsResult } from './seat-hold.types';
 
 type NewSeatHold = typeof seatHolds.$inferInsert;
@@ -156,6 +167,71 @@ export class SeatHoldRepository {
         })
         .returning();
       return { ok: true, hold };
+    });
+  }
+
+  /**
+   * Every seat of an event's map with whether it can be picked right now — backs
+   * `SeatMapPort` for drawing the checkout seat map (US-DISC-04). A seat is
+   * offered only if it is `available`, has no unexpired active hold, and carries
+   * no live assignment; a lapsed hold reserves nothing, so it does not block.
+   *
+   * A READ, not a reservation: no row locks, and the answer may be stale by the
+   * time the buyer clicks. `holdSeats` re-checks under a lock and remains the
+   * only authority — this exists so the map greys out what is obviously gone.
+   */
+  async seatsForEvent(
+    organizationId: number,
+    eventId: string,
+    now: Date,
+  ): Promise<CheckoutSeat[]> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({
+          id: seats.id,
+          section: seats.section,
+          rowLabel: seats.rowLabel,
+          seatNumber: seats.seatNumber,
+          ticketTypeId: seats.ticketTypeId,
+          status: seats.status,
+          heldUntil: seatHolds.expiresAt,
+          assignedAt: seatAssignments.assignedAt,
+        })
+        .from(seats)
+        .innerJoin(seatMaps, eq(seats.seatMapId, seatMaps.id))
+        .leftJoin(
+          seatHolds,
+          and(
+            eq(seatHolds.seatId, seats.id),
+            eq(seatHolds.status, ACTIVE),
+            gt(seatHolds.expiresAt, now),
+          ),
+        )
+        .leftJoin(
+          seatAssignments,
+          and(
+            eq(seatAssignments.seatId, seats.id),
+            isNull(seatAssignments.releasedAt),
+          ),
+        )
+        .where(
+          and(
+            eq(seats.organizationId, organizationId),
+            eq(seatMaps.eventId, eventId),
+          ),
+        )
+        .orderBy(asc(seats.section), asc(seats.rowLabel), asc(seats.id));
+      return rows.map((r) => ({
+        id: r.id,
+        section: r.section,
+        rowLabel: r.rowLabel,
+        seatNumber: r.seatNumber,
+        ticketTypeId: r.ticketTypeId,
+        available:
+          r.status === 'available' &&
+          r.heldUntil === null &&
+          r.assignedAt === null,
+      }));
     });
   }
 

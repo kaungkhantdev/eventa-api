@@ -7,6 +7,7 @@ import {
   gte,
   ilike,
   inArray,
+  isNotNull,
   isNull,
   like,
   lt,
@@ -17,6 +18,7 @@ import {
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { categories, events, organizations } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
+import type { CheckoutEvent } from '../checkout/checkout.types';
 import type {
   EventBucketCounts,
   EventRow,
@@ -25,6 +27,11 @@ import type {
   ListEventsOptions,
   NewEventValues,
 } from './events.types';
+
+/** Statuses whose event is live to the public — a draft or cancelled one is not. */
+const LIVE_STATUSES = ['planned', 'upcoming', 'live'] as const;
+/** Only a public event is buyable by an anonymous visitor. */
+const PUBLIC_VISIBILITY = 'public';
 
 /** Data access for the Events context. All reads/writes are tenant-scoped (RLS). */
 @Injectable()
@@ -43,6 +50,48 @@ export class EventsRepository {
       .where(and(eq(events.id, eventId), isNull(events.deletedAt)))
       .limit(1);
     return row?.organizationId ?? null;
+  }
+
+  /**
+   * The event an anonymous checkout is buying into — backs `CheckoutEventPort`.
+   * Deliberately NOT tenant-scoped, for the same reason as `organizationIdFor`:
+   * a buyer has no tenant, and this is what establishes one. Only a PUBLISHED,
+   * publicly-visible, live event resolves, so this doubles as the authorization
+   * check — a draft or private event is simply not found.
+   */
+  async findPublishedForCheckout(
+    by: { slug: string } | { id: string },
+  ): Promise<CheckoutEvent | null> {
+    const [row] = await this.db
+      .select({
+        id: events.id,
+        organizationId: events.organizationId,
+        slug: events.slug,
+        name: events.name,
+        startAt: events.startAt,
+        endAt: events.endAt,
+        timezone: events.timezone,
+        isOnline: events.isOnline,
+        onlineNote: events.onlineNote,
+        venueName: events.venueName,
+        venueAddress: events.venueAddress,
+        city: events.city,
+        coverImage: events.coverImage,
+        organizerName: events.organizerName,
+        seatingMode: events.seatingMode,
+      })
+      .from(events)
+      .where(
+        and(
+          'slug' in by ? eq(events.slug, by.slug) : eq(events.id, by.id),
+          eq(events.visibility, PUBLIC_VISIBILITY),
+          isNotNull(events.publishedAt),
+          inArray(events.status, [...LIVE_STATUSES]),
+          isNull(events.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
   }
 
   /** Names for the given events (tenant-scoped) — backs `EventLookupPort`. */

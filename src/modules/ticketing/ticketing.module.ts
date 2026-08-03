@@ -5,6 +5,8 @@ import { AccessModule } from '../access/access.module';
 import { TicketSalesPort } from '../payment-settings/ports/ticket-sales.port';
 import { RegistrationModule } from '../registration/registration.module';
 import { TicketEligibilityPort } from '../registration/ports/ticket-eligibility.port';
+import { TicketCatalogPort } from '../checkout/ports/ticket-catalog.port';
+import { CheckoutCatalogAdapter } from './checkout-catalog.adapter';
 import { TicketAvailabilityAdapter } from './ticket-availability.adapter';
 import { TicketEligibilityAdapter } from './ticket-eligibility.adapter';
 import { TicketSalesAdapter } from './ticket-sales.adapter';
@@ -37,12 +39,14 @@ import { TicketingQueryService } from './ticketing-query.service';
     { provide: TicketAvailabilityPort, useClass: TicketAvailabilityAdapter },
     { provide: TicketSalesPort, useClass: TicketSalesAdapter },
     { provide: TicketEligibilityPort, useClass: TicketEligibilityAdapter },
+    { provide: TicketCatalogPort, useClass: CheckoutCatalogAdapter },
   ],
   exports: [
     TicketingService,
     TicketAvailabilityPort,
     TicketSalesPort,
     TicketEligibilityPort,
+    TicketCatalogPort,
   ],
 })
 export class TicketingModule {}

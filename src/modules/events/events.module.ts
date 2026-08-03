@@ -4,8 +4,10 @@ import { AccessModule } from '../access/access.module';
 import { PlatformModule } from '../platform/platform.module';
 import { TicketingModule } from '../ticketing/ticketing.module';
 import { EventsController } from './events.controller';
+import { CheckoutEventPort } from '../checkout/ports/checkout-event.port';
 import { EventOrgLookupPort } from '../discounts/ports/event-org-lookup.port';
 import { EventLookupPort } from '../ticketing/ports/event-lookup.port';
+import { CheckoutEventAdapter } from './checkout-event.adapter';
 import { EventOrgLookupAdapter } from './event-org-lookup.adapter';
 import { EventLookupAdapter } from './event-lookup.adapter';
 import { EventsRepository } from './events.repository';
@@ -33,12 +35,14 @@ import { EventsService } from './events.service';
     AdminGuard,
     { provide: EventLookupPort, useClass: EventLookupAdapter },
     { provide: EventOrgLookupPort, useClass: EventOrgLookupAdapter },
+    { provide: CheckoutEventPort, useClass: CheckoutEventAdapter },
   ],
   exports: [
     EventsService,
     EventsQueryService,
     EventLookupPort,
     EventOrgLookupPort,
+    CheckoutEventPort,
   ],
 })
 export class EventsModule {}
