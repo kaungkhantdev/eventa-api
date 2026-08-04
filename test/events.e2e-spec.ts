@@ -85,7 +85,14 @@ describe('Events (e2e — create draft + list)', () => {
   const token = async (email: string, orgSlug: string, persona: string) => {
     const res = await request(server)
       .post('/api/v1/auth/login')
-      .send({ email, password: PASSWORD, orgSlug, persona });
+      // Attendee sign-in has no workspace — it resolves to the platform org
+      // (US-DISC-08); JSON.stringify drops the undefined key.
+      .send({
+        email,
+        password: PASSWORD,
+        orgSlug: persona === 'attendee' ? undefined : orgSlug,
+        persona,
+      });
     return (res.body as SuccessBody<{ accessToken: string }>).data.accessToken;
   };
 
@@ -310,12 +317,17 @@ async function seedTenant(
     [org.name, org.slug],
   );
   const orgId = Number(res.rows[0].id);
+  const platform = await pool.query<{ id: string }>(
+    `SELECT id FROM organizations WHERE slug = 'eventa'`,
+  );
   const passwordHash = await hash(PASSWORD);
   for (const p of people) {
+    // Attendee accounts live in the platform org (US-DISC-08), never the workspace.
+    const home = p.persona === 'attendee' ? Number(platform.rows[0].id) : orgId;
     const user = await pool.query<{ id: string }>(
       `INSERT INTO users (organization_id, name, email, persona, status, password_hash)
        VALUES ($1, 'Seed User', $2, $3, 'Active', $4) RETURNING id`,
-      [orgId, p.email, p.persona, passwordHash],
+      [home, p.email, p.persona, passwordHash],
     );
     if (p.roleName && p.grants) {
       await grantRole(pool, orgId, user.rows[0].id, p.roleName, p.grants);
@@ -357,6 +369,13 @@ async function grantRole(
 }
 
 async function cleanup(pool: Pool): Promise<void> {
+  // The attendee user lives in the shared platform org — remove it by email.
+  await pool.query(
+    `DELETE FROM outbox_events WHERE aggregate_id IN
+       (SELECT id::text FROM users WHERE email = $1)`,
+    [ATTENDEE_A],
+  );
+  await pool.query(`DELETE FROM users WHERE email = $1`, [ATTENDEE_A]);
   await pool.query(`DELETE FROM organizations WHERE slug = ANY($1)`, [
     [ORG_A.slug, ORG_B.slug],
   ]);

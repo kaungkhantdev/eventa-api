@@ -56,6 +56,7 @@ describe('AuthService', () => {
   let tokens: jest.Mocked<TokenService>;
   let outbox: jest.Mocked<OutboxPort>;
   let signup: jest.Mocked<SignupService>;
+  let throttle: jest.Mocked<LoginThrottleService>;
   let service: AuthService;
 
   beforeEach(() => {
@@ -91,11 +92,11 @@ describe('AuthService', () => {
     outbox = {
       enqueue: jest.fn().mockResolvedValue(undefined),
     };
-    const throttle = {
+    throttle = {
       assertNotLocked: jest.fn().mockResolvedValue(undefined),
       recordFailure: jest.fn().mockResolvedValue(undefined),
       recordSuccess: jest.fn().mockResolvedValue(undefined),
-    } as unknown as LoginThrottleService;
+    } as unknown as jest.Mocked<LoginThrottleService>;
     signup = {
       resendVerification: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<SignupService>;
@@ -188,6 +189,54 @@ describe('AuthService', () => {
       expect(event.payload).toMatchObject({ userId: 'u1', device: 'jest' });
       expect(repo.recordAudit).not.toHaveBeenCalledWith(
         expect.objectContaining({ type: 'signin' }),
+      );
+    });
+  });
+
+  // US-DISC-08: attendees live in ONE platform workspace; organizers name theirs.
+  describe('login — resolving the workspace by persona', () => {
+    beforeEach(() => {
+      users.findLoginUser.mockResolvedValue({
+        user: userRow({ persona: 'attendee' }),
+        org,
+      });
+      passwords.verify.mockResolvedValue(true);
+    });
+
+    it('signs an attendee into the platform workspace with no orgSlug at all', async () => {
+      await service.login({
+        ...input,
+        orgSlug: undefined,
+        persona: 'attendee',
+      });
+      expect(users.findLoginUser).toHaveBeenCalledWith(
+        'eventa',
+        input.email,
+        'attendee',
+      );
+    });
+
+    it('refuses an attendee login that names a workspace', async () => {
+      await expect(
+        service.login({ ...input, orgSlug: 'acme', persona: 'attendee' }),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      expect(users.findLoginUser).not.toHaveBeenCalled();
+    });
+
+    it('still requires the workspace slug for an organizer login', async () => {
+      await expect(
+        service.login({ ...input, orgSlug: undefined }),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      expect(users.findLoginUser).not.toHaveBeenCalled();
+    });
+
+    it('throttles attendee attempts against the platform realm', async () => {
+      users.findLoginUser.mockResolvedValue(null);
+      await service
+        .login({ ...input, orgSlug: undefined, persona: 'attendee' })
+        .catch(() => undefined);
+      expect(throttle.assertNotLocked).toHaveBeenCalledWith(
+        `eventa|attendee|${input.email}`,
       );
     });
   });

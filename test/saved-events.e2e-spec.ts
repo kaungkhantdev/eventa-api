@@ -222,10 +222,10 @@ describe('Saved events (e2e — US-DISC-03)', () => {
 });
 
 async function signIn(server: Server, email: string): Promise<string> {
+  // No orgSlug: attendees live in the platform workspace (US-DISC-08).
   const res = await request(server).post('/api/v1/auth/login').send({
     email,
     password: PASSWORD,
-    orgSlug: ORG.slug,
     persona: 'attendee',
   });
   expect(res.status).toBe(200);
@@ -238,12 +238,17 @@ async function seed(pool: Pool): Promise<Record<string, string>> {
     [ORG.name, ORG.slug],
   );
   const orgId = Number(org.rows[0].id);
+  const platform = await pool.query<{ id: string }>(
+    `SELECT id FROM organizations WHERE slug = 'eventa'`,
+  );
+  const platformOrgId = Number(platform.rows[0].id);
   const passwordHash = await hash(PASSWORD);
   for (const email of [ANAN, MALEE]) {
+    // Attendee accounts live in the platform org, whatever workspace runs the event.
     await pool.query(
       `INSERT INTO users (organization_id, name, email, persona, status, password_hash)
        VALUES ($1,'Attendee',$2,'attendee','Active',$3)`,
-      [orgId, email, passwordHash],
+      [platformOrgId, email, passwordHash],
     );
   }
 
@@ -289,10 +294,12 @@ async function insertEvent(
 }
 
 async function cleanup(pool: Pool): Promise<void> {
+  // The platform org is shared and permanent — remove only OUR users from it.
   await pool.query(
-    `DELETE FROM outbox_events WHERE organization_id IN
-       (SELECT id FROM organizations WHERE slug = $1)`,
-    [ORG.slug],
+    `DELETE FROM outbox_events WHERE aggregate_id IN
+       (SELECT id::text FROM users WHERE email = ANY($1))`,
+    [[ANAN, MALEE]],
   );
+  await pool.query(`DELETE FROM users WHERE email = ANY($1)`, [[ANAN, MALEE]]);
   await pool.query(`DELETE FROM organizations WHERE slug = $1`, [ORG.slug]);
 }
