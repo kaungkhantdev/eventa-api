@@ -12,9 +12,16 @@ import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
 
 const PASSWORD = 'signin1password';
-const OWNER = 'owner@signin-e2e.test';
-const SUSPENDED = 'suspended@signin-e2e.test';
-const ATTENDEE = 'attendee@signin-e2e.test';
+/**
+ * Emails are unique per run: the login throttle lives in Redis (15-minute lock
+ * TTL), which outlives any database cleanup — a fixed email this suite
+ * deliberately fails (the organizer probing the attendee door, the suspended
+ * account) would accumulate strikes across runs and start answering 429.
+ */
+const RUN = Date.now();
+const OWNER = `owner-${RUN}@signin-e2e.test`;
+const SUSPENDED = `suspended-${RUN}@signin-e2e.test`;
+const ATTENDEE = `attendee-${RUN}@signin-e2e.test`;
 const ORG_SLUG = 'signin-co';
 
 describe('Sign-in hardening & audience separation (US-ACC-02/03/08/11, e2e)', () => {
@@ -200,11 +207,11 @@ async function cleanup(pool: Pool): Promise<void> {
        (SELECT id FROM organizations WHERE slug LIKE 'signin-co%')`,
   );
   // The attendee user lives in the shared platform org — remove it by email.
+  // LIKE catches this run's user and any earlier run's leftovers.
   await pool.query(
     `DELETE FROM outbox_events WHERE aggregate_id IN
-       (SELECT id::text FROM users WHERE email = $1)`,
-    [ATTENDEE],
+       (SELECT id::text FROM users WHERE email LIKE '%@signin-e2e.test')`,
   );
-  await pool.query(`DELETE FROM users WHERE email = $1`, [ATTENDEE]);
+  await pool.query(`DELETE FROM users WHERE email LIKE '%@signin-e2e.test'`);
   await pool.query(`DELETE FROM organizations WHERE slug LIKE 'signin-co%'`);
 }

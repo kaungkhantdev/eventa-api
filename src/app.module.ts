@@ -29,6 +29,7 @@ import { EventSharingModule } from './modules/event-sharing/event-sharing.module
 import { AccessModule } from './modules/access/access.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { AuthPasswordModule } from './modules/auth-password/auth-password.module';
+import { AttendeeTicketsModule } from './modules/attendee-tickets/attendee-tickets.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthSessionsModule } from './modules/auth-sessions/auth-sessions.module';
 import { AuthTwoFactorModule } from './modules/auth-two-factor/auth-two-factor.module';
@@ -84,6 +85,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     PublicPagesModule,
     DiscoverModule,
     SavedEventsModule,
+    AttendeeTicketsModule,
     RegistrationModule,
     RegistrationStatsModule,
     CheckoutModule,

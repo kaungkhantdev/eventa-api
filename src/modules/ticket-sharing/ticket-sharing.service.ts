@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { toString as qrToString } from 'qrcode';
 import { DomainException } from '../../common/errors/domain.exception';
+import { qrSvg } from '../../common/qr/qr';
 import type { Env } from '../../config/env.validation';
 import { EventsService } from '../events/events.service';
 import type { EventActor } from '../events/events.types';
@@ -10,14 +10,6 @@ import { TicketShareDto } from './dto/ticket-share.dto';
 
 const NOT_PUBLISHED_WARNING =
   "This event isn't published yet — publish it first, or the link and QR won't open for anyone.";
-
-/** Medium correction level: survives a fold or a smudge on a printed poster. */
-const QR_OPTIONS = {
-  type: 'svg',
-  errorCorrectionLevel: 'M',
-  margin: 2,
-  width: 512,
-} as const;
 
 /**
  * A shareable registration link and matching QR for one ticket type (US-TKT-06),
@@ -98,10 +90,6 @@ export class TicketSharingService {
       url: `${this.baseUrl}/e/${event.slug}/register?ticket=${ticketId}`,
     };
   }
-}
-
-function qrSvg(url: string): Promise<string> {
-  return qrToString(url, QR_OPTIONS);
 }
 
 /** Shareable = actually reachable by a stranger: published, live and public. */
