@@ -1,8 +1,10 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  IsDateString,
   IsIn,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   MinLength,
   ValidateIf,
@@ -44,4 +46,34 @@ export class UpdateProfileDto {
   @ValidateIf((_o, v) => v !== null)
   @IsString()
   avatarUrl?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: 'Bangkok' })
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsString()
+  @MaxLength(120)
+  city?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: '1995-04-12' })
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsDateString()
+  dateOfBirth?: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsString()
+  @MaxLength(500)
+  bio?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'THB',
+    description: 'Display only — charges always settle in THB (US-DISC-12)',
+  })
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @Matches(/^[A-Z]{3}$/)
+  displayCurrency?: string | null;
 }

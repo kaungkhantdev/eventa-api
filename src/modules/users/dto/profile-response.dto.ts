@@ -18,4 +18,14 @@ export class ProfileResponseDto {
   @ApiProperty({ nullable: true, enum: ['en', 'th'] })
   locale!: string | null;
   @ApiProperty({ nullable: true }) avatarUrl!: string | null;
+  @ApiProperty({ nullable: true }) city!: string | null;
+  @ApiProperty({ nullable: true, example: '1995-04-12' })
+  dateOfBirth!: string | null;
+  @ApiProperty({ nullable: true }) bio!: string | null;
+  @ApiProperty({
+    nullable: true,
+    example: 'THB',
+    description: 'Display only — every charge still settles in THB',
+  })
+  displayCurrency!: string | null;
 }

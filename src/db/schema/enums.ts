@@ -54,6 +54,9 @@ export const notificationKindEnum = pgEnum('notification_kind', [
   'payout',
   'alert',
   'task',
+  // Attendee topics (US-DISC-12) — appended; enum values are add-only.
+  'reminder',
+  'marketing',
 ]);
 
 export const auditTypeEnum = pgEnum('audit_type', [

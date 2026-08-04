@@ -4,6 +4,7 @@ import { NotificationPreferencesRepository } from './notification-preferences.re
 import { NotificationPreferencesService } from './notification-preferences.service';
 
 const auth = { organizationId: 1, userId: 'u1', sessionId: 's1' };
+const attendee = { ...auth, persona: 'attendee' };
 
 describe('NotificationPreferencesService (US-SET-06)', () => {
   let repo: jest.Mocked<NotificationPreferencesRepository>;
@@ -59,6 +60,33 @@ describe('NotificationPreferencesService (US-SET-06)', () => {
     await expect(
       service.set(auth, 'payment', { smsEnabled: true }),
     ).rejects.toBeInstanceOf(DomainException);
+    expect(repo.set).not.toHaveBeenCalled();
+  });
+
+  // US-DISC-12: each audience sees — and may toggle — only its own topics.
+  it('shows an attendee reminders and marketing, never payout alerts', async () => {
+    const res = await service.list(attendee as never);
+    expect(res.map((r) => r.category)).toEqual(['reminder', 'marketing']);
+  });
+
+  it('keeps attendee topics out of the organizer list', async () => {
+    const categories = (await service.list(auth)).map((r) => r.category);
+    expect(categories).not.toContain('marketing');
+    expect(categories).not.toContain('reminder');
+    expect(categories).toContain('payout');
+  });
+
+  it('lets an attendee switch marketing off', async () => {
+    await service.set(attendee as never, 'marketing', { emailEnabled: false });
+    expect(repo.set).toHaveBeenCalledWith(1, 'u1', 'marketing', {
+      emailEnabled: false,
+    });
+  });
+
+  it("refuses a topic that isn't the caller's to toggle", async () => {
+    await expect(
+      service.set(attendee as never, 'payout', { emailEnabled: false }),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
     expect(repo.set).not.toHaveBeenCalled();
   });
 });

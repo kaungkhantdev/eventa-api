@@ -8,8 +8,16 @@ import {
   type NotificationCategory,
 } from './notification-preferences.repository';
 
-/** Every topic a member can be alerted about — derived from the schema enum. */
-const ALL_CATEGORIES = notificationKindEnum.enumValues;
+/**
+ * Which topics each audience can be alerted about (both derived from the schema
+ * enum). Organizers watch their events' commerce; attendees manage reminders and
+ * marketing (US-DISC-12). Order confirmations and receipts are transactional —
+ * they are deliberately in NEITHER list, so nothing here can switch them off.
+ */
+const ATTENDEE_CATEGORIES = ['reminder', 'marketing'] as const;
+const ORGANIZER_CATEGORIES = notificationKindEnum.enumValues.filter(
+  (kind) => !(ATTENDEE_CATEGORIES as readonly string[]).includes(kind),
+);
 
 /** Defaults when a member has never touched a topic. */
 const DEFAULT_EMAIL = true;
@@ -42,7 +50,7 @@ export class NotificationPreferencesService {
     ]);
     const smsAvailable = Boolean(me.phone);
     const byCategory = new Map(stored.map((r) => [r.category, r]));
-    return ALL_CATEGORIES.map((category) => {
+    return categoriesFor(auth).map((category) => {
       const row = byCategory.get(category);
       return {
         category,
@@ -59,6 +67,7 @@ export class NotificationPreferencesService {
     values: { emailEnabled?: boolean; smsEnabled?: boolean },
   ): Promise<PreferenceView[]> {
     if (values.smsEnabled === true) await this.assertPhoneOnFile(auth);
+    assertOwnCategory(auth, category);
     await this.repo.set(auth.organizationId, auth.userId, category, values);
     return this.list(auth);
   }
@@ -72,4 +81,22 @@ export class NotificationPreferencesService {
       );
     }
   }
+}
+
+/** The topic list for the caller's audience. */
+function categoriesFor(auth: AuthContext): readonly NotificationCategory[] {
+  return auth.persona === 'attendee'
+    ? ATTENDEE_CATEGORIES
+    : ORGANIZER_CATEGORIES;
+}
+
+/** An attendee cannot toggle payout alerts, nor an organizer marketing. */
+function assertOwnCategory(
+  auth: AuthContext,
+  category: NotificationCategory,
+): void {
+  if ((categoriesFor(auth) as readonly string[]).includes(category)) return;
+  throw DomainException.validation(
+    "That notification topic isn't part of your settings.",
+  );
 }
