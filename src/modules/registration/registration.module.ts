@@ -10,7 +10,7 @@ import { TicketEligibilityPolicy } from './ticket-eligibility.policy';
 
 /**
  * Registration & Orders: the checkout seat-hold engine (reserve / release / expire
- * inventory) — the sanctioned money-path transaction (CLAUDE.md), synchronous,
+ * inventory) — the sanctioned money-path transaction (AGENTS.md), synchronous,
  * row-locked and idempotent. The Monitor read model lives in
  * RegistrationStatsModule; the HTTP surface and order/attendee write model arrive
  * with the checkout (`POST /orders`) slice.

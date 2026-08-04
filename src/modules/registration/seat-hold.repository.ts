@@ -31,7 +31,7 @@ const ACTIVE = 'active' as const;
  * Data access for the checkout seat-hold engine. These methods run the money-path
  * reservation transaction: they lock inventory rows (`SELECT … FOR UPDATE`) across
  * seats / ticket_types and write `seat_holds` atomically. This is the sanctioned
- * cross-context transaction (CLAUDE.md: "money/inventory … in one DB transaction").
+ * cross-context transaction (AGENTS.md: "money/inventory … in one DB transaction").
  * Every query is tenant-scoped by `organization_id` and by RLS (defence in depth),
  * and every method is safe for a direct caller (the checkout slice) — not only the
  * validated service path.

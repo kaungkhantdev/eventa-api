@@ -136,7 +136,7 @@ export class CheckoutRepository {
 
   /**
    * Place an order, and — when nothing is owed — issue its tickets, in ONE
-   * transaction (CLAUDE.md: money/inventory is synchronous, row-locked and
+   * transaction (AGENTS.md: money/inventory is synchronous, row-locked and
    * idempotent; never behind the queue).
    *
    * The order of operations is the safety property:
