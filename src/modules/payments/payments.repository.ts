@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { organizations, payments, webhookEvents } from '../../db/schema';
 import { withTenant, type Tx } from '../../db/tenant';
@@ -118,9 +118,16 @@ export class PaymentsRepository {
   }
 
   /**
-   * Log an inbound callback; false when this provider event was seen before.
-   * `uq_webhook_events_provider_event` is what makes processing exactly-once —
-   * two replicas racing the same event agree here, in the database, not in code.
+   * Claim an inbound callback for processing; false only when it has already
+   * been processed to completion. `uq_webhook_events_provider_event` is what
+   * makes processing exactly-once — two replicas racing the same event agree
+   * here, in the database, not in code.
+   *
+   * The row is claimed, not merely recorded: a first attempt that died midway
+   * (a deadlock while settling, a pod restart) leaves the row at `received`,
+   * and the provider's retry MUST be allowed to finish the job. Short-circuiting
+   * on mere existence would turn every retry into a silent no-op — money
+   * captured, order never settled.
    */
   async recordWebhook(
     provider: string,
@@ -140,7 +147,45 @@ export class PaymentsRepository {
       })
       .onConflictDoNothing()
       .returning({ id: webhookEvents.id });
-    return inserted !== undefined;
+    if (inserted) return true;
+    const [existing] = await this.db
+      .select({ status: webhookEvents.status })
+      .from(webhookEvents)
+      .where(
+        and(
+          eq(webhookEvents.provider, provider),
+          eq(webhookEvents.providerEventId, verified.eventId),
+        ),
+      )
+      .limit(1);
+    return existing?.status !== 'processed';
+  }
+
+  /** True when a DIFFERENT payment already settled this order (double charge). */
+  async otherPaidPaymentExists(
+    orderId: string,
+    exceptPaymentId: string,
+  ): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: payments.id })
+      .from(payments)
+      .where(
+        and(
+          eq(payments.orderId, orderId),
+          eq(payments.status, 'paid'),
+          ne(payments.id, exceptPaymentId),
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
+  }
+
+  /** Repoint a payment at the intent the buyer was actually handed. */
+  async updateGatewayRef(paymentId: string, gatewayRef: string): Promise<void> {
+    await this.db
+      .update(payments)
+      .set({ gatewayRef })
+      .where(eq(payments.id, paymentId));
   }
 
   /** Stamp the outcome, and attach the tenant once it is known. */

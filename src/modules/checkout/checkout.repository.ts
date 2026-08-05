@@ -276,6 +276,16 @@ export class CheckoutRepository {
     });
   }
 
+  /** Queue a refund for money that arrived on an order already paid for. */
+  async enqueueRefund(
+    organizationId: number,
+    event: OutboxEventInput,
+  ): Promise<void> {
+    await withTenant(this.db, organizationId, (tx) =>
+      this.outbox.enqueueIn(tx, event),
+    );
+  }
+
   private async lockOrder(tx: Tx, input: SettleOrderInput): Promise<OrderRow> {
     const [order] = await tx
       .select()

@@ -11,13 +11,17 @@ import { emailChangeRequestedEvent } from './events/email-change-requested.event
 import { ProfileRepository } from './profile.repository';
 import type { ProfileRow, UpdateProfileInput } from './users.types';
 
-/** Fields a member may change on their own profile. */
+/**
+ * Fields a member may change on their own profile. `avatarUrl` is deliberately
+ * ABSENT: a photo is only ever set by `setAvatarUrl`, after the profile-photo
+ * module has verified an upload it issued. Accepting a hand-written URL here
+ * would let anyone point their avatar at any address on the internet.
+ */
 const UPDATABLE_KEYS = [
   'name',
   'phone',
   'timezone',
   'locale',
-  'avatarUrl',
   'city',
   'dateOfBirth',
   'bio',
@@ -57,6 +61,22 @@ export class ProfileService {
       auth.userId,
       pickProvided(input),
     );
+    if (!saved) throw DomainException.notFound('Profile not found.');
+    return toProfileResponse(saved);
+  }
+
+  /**
+   * Set (or clear) the profile photo. Called by the profile-photo module once it
+   * has confirmed an upload it issued the key for — the only route by which an
+   * `avatarUrl` reaches this table.
+   */
+  async setAvatarUrl(
+    auth: AuthContext,
+    avatarUrl: string | null,
+  ): Promise<ProfileResponseDto> {
+    const saved = await this.repo.update(auth.organizationId, auth.userId, {
+      avatarUrl,
+    });
     if (!saved) throw DomainException.notFound('Profile not found.');
     return toProfileResponse(saved);
   }

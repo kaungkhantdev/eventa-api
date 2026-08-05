@@ -90,6 +90,8 @@ describe('PaymentsService (US-DISC-05)', () => {
       markFailed: jest.fn().mockResolvedValue(undefined),
       recordWebhook: jest.fn().mockResolvedValue(true),
       markWebhookProcessed: jest.fn().mockResolvedValue(undefined),
+      otherPaidPaymentExists: jest.fn().mockResolvedValue(false),
+      updateGatewayRef: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<PaymentsRepository>;
     provider = {
       start: jest.fn().mockResolvedValue(started()),
@@ -103,6 +105,7 @@ describe('PaymentsService (US-DISC-05)', () => {
         ticketCount: 2,
       }),
       releaseHolds: jest.fn().mockResolvedValue(undefined),
+      queueRefund: jest.fn().mockResolvedValue(undefined),
     };
     const clock: Clock = { now: () => NOW };
     const config = {
@@ -323,6 +326,113 @@ describe('PaymentsService (US-DISC-05)', () => {
       await service.handleWebhook(raw, 'sig');
       expect(repo.markFailed).toHaveBeenCalledWith('p-1');
       expect(orders.releaseHolds).toHaveBeenCalledWith(ORG, ORDER_ID);
+    });
+  });
+});
+
+describe('PaymentsService — money-path defences', () => {
+  let repo: jest.Mocked<PaymentsRepository>;
+  let provider: jest.Mocked<PaymentProviderPort>;
+  let orders: jest.Mocked<OrderPaymentPort>;
+  let service: PaymentsService;
+
+  beforeEach(() => {
+    repo = {
+      orgStatementDescriptor: jest.fn().mockResolvedValue(null),
+      upsertAttempt: jest.fn().mockResolvedValue(paymentRow()),
+      findByGatewayRef: jest.fn().mockResolvedValue(paymentRow()),
+      markPaidIn: jest.fn().mockResolvedValue(undefined),
+      markFailed: jest.fn().mockResolvedValue(undefined),
+      recordWebhook: jest.fn().mockResolvedValue(true),
+      markWebhookProcessed: jest.fn().mockResolvedValue(undefined),
+      otherPaidPaymentExists: jest.fn().mockResolvedValue(false),
+      updateGatewayRef: jest.fn().mockResolvedValue(undefined),
+    } as unknown as jest.Mocked<PaymentsRepository>;
+    provider = {
+      start: jest.fn().mockResolvedValue(started()),
+      verifyWebhook: jest.fn().mockReturnValue(verified()),
+    };
+    orders = {
+      findPayable: jest.fn().mockResolvedValue(payable()),
+      settle: jest.fn().mockResolvedValue({
+        outcome: 'settled',
+        reference: 'ORD-7K2M9QX4',
+        ticketCount: 2,
+      }),
+      releaseHolds: jest.fn().mockResolvedValue(undefined),
+      queueRefund: jest.fn().mockResolvedValue(undefined),
+    };
+    const clock: Clock = { now: () => NOW };
+    service = new PaymentsService(repo, provider, orders, clock, {
+      getOrThrow: () => 'fake',
+    } as unknown as ConfigService<Env, true>);
+  });
+
+  const webhook = () => service.handleWebhook(Buffer.from('{}'), 'sig');
+
+  describe('a second successful payment on an already-settled order', () => {
+    beforeEach(() => {
+      orders.settle.mockResolvedValue({
+        outcome: 'already_settled',
+        reference: 'ORD-7K2M9QX4',
+        ticketCount: 2,
+      });
+    });
+
+    it('queues a refund instead of quietly banking it', async () => {
+      // The buyer paid by PromptPay AND by card; one order, two live intents.
+      repo.otherPaidPaymentExists.mockResolvedValue(true);
+      await webhook();
+      expect(orders.queueRefund).toHaveBeenCalledWith(
+        ORG,
+        ORDER_ID,
+        expect.objectContaining({ amountSatang: TOTAL }),
+      );
+    });
+
+    it('does NOT queue a refund when it is merely the same webhook redelivered', async () => {
+      repo.otherPaidPaymentExists.mockResolvedValue(false);
+      await webhook();
+      expect(orders.queueRefund).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a webhook that failed midway', () => {
+    it('is re-processed when the provider retries, not silently acknowledged', async () => {
+      // recordWebhook claims a row that exists but was never finished.
+      repo.recordWebhook.mockResolvedValue(true);
+      await webhook();
+      expect(orders.settle).toHaveBeenCalled();
+    });
+
+    it('is skipped once it really has been processed', async () => {
+      repo.recordWebhook.mockResolvedValue(false);
+      await webhook();
+      expect(orders.settle).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('an idempotency-key replay that produced a NEW intent', () => {
+    it('repoints the ledger at the intent the buyer was actually given', async () => {
+      // Stripe forgets keys after 24h, so a re-post creates pi_B while our row
+      // still names pi_A — and the pi_B webhook would never match anything.
+      provider.start.mockResolvedValue(started({ gatewayRef: 'pi_B' }));
+      repo.upsertAttempt.mockResolvedValue(paymentRow({ gatewayRef: 'pi_A' }));
+      await service.pay({
+        orderId: ORDER_ID,
+        method: 'Card',
+        idempotencyKey: 'attempt-1',
+      } as never);
+      expect(repo.updateGatewayRef).toHaveBeenCalledWith('p-1', 'pi_B');
+    });
+
+    it('leaves the row alone when the provider replayed the same intent', async () => {
+      await service.pay({
+        orderId: ORDER_ID,
+        method: 'Card',
+        idempotencyKey: 'attempt-1',
+      } as never);
+      expect(repo.updateGatewayRef).not.toHaveBeenCalled();
     });
   });
 });

@@ -22,6 +22,7 @@ import { DiscountsModule } from './modules/discounts/discounts.module';
 import { EventsModule } from './modules/events/events.module';
 import { NotificationPreferencesModule } from './modules/notification-preferences/notification-preferences.module';
 import { OrganizationModule } from './modules/organization/organization.module';
+import { ProfilePhotoModule } from './modules/profile-photo/profile-photo.module';
 import { PaymentSettingsModule } from './modules/payment-settings/payment-settings.module';
 import { EventProgramModule } from './modules/event-program/event-program.module';
 import { EventSeatingModule } from './modules/event-seating/event-seating.module';
@@ -70,6 +71,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     AuditModule,
     AccessModule,
     AccountDeletionModule,
+    ProfilePhotoModule,
     OrganizationModule,
     NotificationPreferencesModule,
     PaymentSettingsModule,
