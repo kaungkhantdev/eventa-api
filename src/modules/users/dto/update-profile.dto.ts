@@ -41,12 +41,6 @@ export class UpdateProfileDto {
   @IsIn([...LOCALES])
   locale?: 'en' | 'th' | null;
 
-  @ApiPropertyOptional({ nullable: true })
-  @IsOptional()
-  @ValidateIf((_o, v) => v !== null)
-  @IsString()
-  avatarUrl?: string | null;
-
   @ApiPropertyOptional({ nullable: true, example: 'Bangkok' })
   @IsOptional()
   @ValidateIf((_o, v) => v !== null)

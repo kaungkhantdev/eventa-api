@@ -86,6 +86,34 @@ export class OrderPaymentAdapter extends OrderPaymentPort {
     return this.repo.releaseHoldsForOrder(organizationId, orderId);
   }
 
+  /**
+   * A second payment settled an order the first already paid for. The tickets
+   * stand; this money goes back, through the same `payment.refund_required`
+   * contract the inventory-conflict path uses.
+   */
+  async queueRefund(
+    organizationId: number,
+    orderId: string,
+    input: { amountSatang: number; reason: string },
+  ): Promise<void> {
+    const order = await this.repo.orderById(organizationId, orderId);
+    if (!order) throw DomainException.notFound("This order isn't available.");
+    await this.repo.enqueueRefund(
+      organizationId,
+      refundRequiredEvent({
+        organizationId,
+        orderId: order.id,
+        reference: order.reference,
+        eventId: order.eventId,
+        buyerEmail: order.buyerEmail,
+        amountSatang: input.amountSatang,
+        currency: order.currency,
+        reason: input.reason,
+        occurredAt: this.clock.now().toISOString(),
+      }),
+    );
+  }
+
   private confirmedEvent(
     order: OrderRow,
     ticketCount: number,

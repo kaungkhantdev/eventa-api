@@ -75,6 +75,26 @@ export const envSchema = z
     /** How long a PromptPay QR stays scannable before the buyer must ask again. */
     PROMPTPAY_EXPIRY_SECONDS: z.coerce.number().int().positive().default(900), // 15m
 
+    // Object storage (US-DISC-11). Profile photos go straight from the browser
+    // to the bucket via a presigned URL — the bytes never pass through the API.
+    // `memory` is the in-process double for local dev and tests.
+    STORAGE_PROVIDER: z.enum(['s3', 'memory']).default('memory'),
+    S3_BUCKET: z.string().min(1).optional(),
+    S3_REGION: z.string().min(1).optional(),
+    /** Set for a S3-compatible endpoint (MinIO); enables path-style addressing. */
+    S3_ENDPOINT: z.string().url().optional(),
+    /** Omit BOTH in deployment so the default chain uses the instance's IAM role. */
+    S3_ACCESS_KEY_ID: z.string().min(1).optional(),
+    S3_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+    /** CDN or bucket origin the photos are served from. */
+    S3_PUBLIC_BASE_URL: z
+      .string()
+      .url()
+      .optional()
+      .transform((v) => v?.replace(/\/+$/, '')),
+    UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(5_242_880), // 5 MiB
+    UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(300), // 5m
+
     // OpenAPI
     EMIT_OPENAPI: z
       .enum(['true', 'false'])
@@ -104,6 +124,27 @@ export const envSchema = z
       message:
         'A live Stripe key (sk_live_/rk_live_) is only allowed when NODE_ENV=production — use a test-mode key from the Stripe dashboard.',
       path: ['STRIPE_SECRET_KEY'],
+    },
+  )
+  // The fake provider in production is the worst fail-open on the money path:
+  // it signs webhooks with a constant, so anyone who knows it can POST an order
+  // "paid" and collect real tickets. A dropped env var must not default into it.
+  .refine(
+    (env) => env.NODE_ENV !== 'production' || env.PAYMENT_PROVIDER === 'stripe',
+    {
+      message:
+        'PAYMENT_PROVIDER=fake cannot run in production — it would accept forged payment webhooks.',
+      path: ['PAYMENT_PROVIDER'],
+    },
+  )
+  // A bucket that is not named cannot be written to; find out at boot, not at
+  // the first upload.
+  .refine(
+    (env) =>
+      env.STORAGE_PROVIDER !== 's3' || (!!env.S3_BUCKET && !!env.S3_REGION),
+    {
+      message: 'STORAGE_PROVIDER=s3 requires S3_BUCKET and S3_REGION',
+      path: ['STORAGE_PROVIDER'],
     },
   );
 

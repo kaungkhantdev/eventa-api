@@ -78,7 +78,11 @@ export class PaymentsService {
       status: started.status === 'failed' ? 'failed' : 'pending',
       now: this.clock.now(),
     });
-    return this.toIntent(payment, order, started);
+    return this.toIntent(
+      await this.reconcileGatewayRef(payment, started.gatewayRef),
+      order,
+      started,
+    );
   }
 
   /**
@@ -161,12 +165,58 @@ export class PaymentsService {
           'settlement could not honour the inventory — refund queued',
         );
       }
+      if (result.outcome === 'already_settled') {
+        await this.refundIfDuplicate(payment);
+      }
     }
     await this.repo.markWebhookProcessed(
       verified.eventId,
       payment.organizationId,
       'processed',
     );
+  }
+
+  /**
+   * An idempotency key is only remembered by the provider for a day or so, so a
+   * retry the next morning creates a NEW intent while `upsertAttempt` returns
+   * our ORIGINAL row. The buyer is then handed a live instrument the ledger has
+   * no reference for, and its webhook would match nothing — money in, no
+   * tickets. Repoint the row at the intent the buyer actually got.
+   */
+  private async reconcileGatewayRef(
+    payment: PaymentRow,
+    gatewayRef: string,
+  ): Promise<PaymentRow> {
+    if (payment.gatewayRef === gatewayRef) return payment;
+    this.logger.warn(
+      { paymentId: payment.id, was: payment.gatewayRef, now: gatewayRef },
+      'idempotent retry produced a new intent — repointing the payment',
+    );
+    await this.repo.updateGatewayRef(payment.id, gatewayRef);
+    return { ...payment, gatewayRef };
+  }
+
+  /**
+   * `already_settled` has two very different causes. Usually it is the same
+   * webhook redelivered — nothing to do. But it also fires when a SECOND live
+   * payment lands on an order another payment already confirmed, and that money
+   * is a genuine double charge: the buyer has one set of tickets and two
+   * debits. Only the second case gets a refund event.
+   */
+  private async refundIfDuplicate(payment: PaymentRow): Promise<void> {
+    const duplicate = await this.repo.otherPaidPaymentExists(
+      payment.orderId,
+      payment.id,
+    );
+    if (!duplicate) return;
+    this.logger.warn(
+      { orderId: payment.orderId, paymentId: payment.id },
+      'a second payment settled an already-paid order — refund queued',
+    );
+    await this.orders.queueRefund(payment.organizationId, payment.orderId, {
+      amountSatang: payment.amountSatang,
+      reason: 'duplicate_payment',
+    });
   }
 
   private async requirePayable(orderId: string): Promise<PayableOrder> {

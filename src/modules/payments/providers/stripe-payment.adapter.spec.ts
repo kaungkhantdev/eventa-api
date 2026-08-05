@@ -159,6 +159,16 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
       expect(params.statement_descriptor_suffix).toBeUndefined();
     });
 
+    it('tags the intent with the order it belongs to, for reconciliation', async () => {
+      const { adapter, create } = harness();
+      await adapter.start(input());
+      const [params] = create.mock.calls[0] as [
+        Stripe.PaymentIntentCreateParams,
+      ];
+      expect(params.metadata).toEqual({ order_id: 'o-1', org_id: '7' });
+      expect(params.receipt_email).toBe('anan@example.test');
+    });
+
     it('reports a declined intent as failed, with a reason', async () => {
       const { adapter } = harness({
         status: 'requires_payment_method',
@@ -240,6 +250,21 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
         .catch((e: unknown) => e);
       expect((err as DomainException).getStatus()).toBe(422);
       expect(create).not.toHaveBeenCalled();
+    });
+
+    it('refuses an amount above what one payment can collect', async () => {
+      const { adapter, create } = harness();
+      await expect(
+        adapter.start(input({ amountSatang: 100_000_000 })),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('accepts exactly the Thai minimum and maximum', async () => {
+      const { adapter, create } = harness();
+      await adapter.start(input({ amountSatang: 1_000 }));
+      await adapter.start(input({ amountSatang: 99_999_999 }));
+      expect(create).toHaveBeenCalledTimes(2);
     });
 
     it('refuses a currency the method cannot settle in', async () => {

@@ -92,7 +92,73 @@ describe('validateEnv', () => {
           .PROMPTPAY_EXPIRY_SECONDS,
       ).toBe(600);
     });
+  });
 
+  describe('object storage (US-DISC-11)', () => {
+    it('defaults to in-process storage, so local dev needs no AWS account', () => {
+      const env = validateEnv(base);
+      expect(env.STORAGE_PROVIDER).toBe('memory');
+      expect(env.UPLOAD_MAX_BYTES).toBe(5_242_880);
+      expect(env.UPLOAD_URL_TTL_SECONDS).toBe(300);
+    });
+
+    it('refuses to boot on s3 without a bucket', () => {
+      expect(() =>
+        validateEnv({
+          ...base,
+          STORAGE_PROVIDER: 's3',
+          S3_REGION: 'ap-southeast-1',
+        }),
+      ).toThrow(/S3_BUCKET/);
+    });
+
+    it('refuses to boot on s3 without a region', () => {
+      expect(() =>
+        validateEnv({ ...base, STORAGE_PROVIDER: 's3', S3_BUCKET: 'b' }),
+      ).toThrow(/S3_REGION/);
+    });
+
+    it('accepts s3 once the bucket and region are named', () => {
+      const env = validateEnv({
+        ...base,
+        STORAGE_PROVIDER: 's3',
+        S3_BUCKET: 'eventa-uploads',
+        S3_REGION: 'ap-southeast-1',
+      });
+      expect(env.STORAGE_PROVIDER).toBe('s3');
+    });
+
+    it('trims a trailing slash off the public base so URLs never double up', () => {
+      const env = validateEnv({
+        ...base,
+        S3_PUBLIC_BASE_URL: 'https://cdn.eventa.co.th/',
+      });
+      expect(env.S3_PUBLIC_BASE_URL).toBe('https://cdn.eventa.co.th');
+    });
+  });
+
+  describe('production refuses the fake provider', () => {
+    it('will not boot in production on the fake provider', () => {
+      // The fake signs webhooks with a constant; in production that is a public
+      // HMAC key, and anyone who knows it can POST themselves free tickets.
+      expect(() => validateEnv({ ...base, NODE_ENV: 'production' })).toThrow(
+        /PAYMENT_PROVIDER/,
+      );
+    });
+
+    it('boots in production on the real provider', () => {
+      const env = validateEnv({
+        ...base,
+        NODE_ENV: 'production',
+        PAYMENT_PROVIDER: 'stripe',
+        STRIPE_SECRET_KEY: 'sk_live_realmoney',
+        STRIPE_WEBHOOK_SECRET: 'whsec_live',
+      });
+      expect(env.PAYMENT_PROVIDER).toBe('stripe');
+    });
+  });
+
+  describe('Stripe key mode (US-DISC-05)', () => {
     it('refuses a LIVE secret key outside production — a test run must not charge anyone', () => {
       expect(() =>
         validateEnv({
@@ -126,6 +192,18 @@ describe('validateEnv', () => {
         STRIPE_WEBHOOK_SECRET: 'whsec_live',
       });
       expect(env.STRIPE_SECRET_KEY).toBe('sk_live_realmoney');
+    });
+
+    it('refuses a live key even on the fake provider — it must not be lying around', () => {
+      // Inert today, but one PAYMENT_PROVIDER=stripe away from charging real
+      // cards from a developer's machine. Refuse the key, not just its use.
+      expect(() =>
+        validateEnv({
+          ...base,
+          NODE_ENV: 'development',
+          STRIPE_SECRET_KEY: 'sk_live_leftover',
+        }),
+      ).toThrow(/live/i);
     });
 
     it('accepts a test key outside production', () => {

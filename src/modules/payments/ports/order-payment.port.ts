@@ -59,4 +59,16 @@ export abstract class OrderPaymentPort {
    * give the held inventory back so someone else can buy it (US-DISC-05).
    */
   abstract releaseHolds(organizationId: number, orderId: string): Promise<void>;
+
+  /**
+   * Money arrived for an order that is already paid for — a second live payment
+   * settled after the first (a buyer who started PromptPay, then paid by card,
+   * and whose bank app scanned the old QR anyway). The registration stands; the
+   * duplicate must go back, so a refund event is queued for the finance flow.
+   */
+  abstract queueRefund(
+    organizationId: number,
+    orderId: string,
+    input: { amountSatang: number; reason: string },
+  ): Promise<void>;
 }

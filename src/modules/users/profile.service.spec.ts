@@ -54,6 +54,28 @@ describe('ProfileService (US-SET-01)', () => {
     } as never);
   });
 
+  describe('setAvatarUrl', () => {
+    it('saves the URL the photo upload verified', async () => {
+      const res = await service.setAvatarUrl(auth, 'https://cdn.test/a.jpg');
+      const [, , values] = repo.update.mock.calls[0];
+      expect(values).toEqual({ avatarUrl: 'https://cdn.test/a.jpg' });
+      expect(res.avatarUrl).toBe('https://cdn.test/a.jpg');
+    });
+
+    it('clears the photo when passed null', async () => {
+      await service.setAvatarUrl(auth, null);
+      const [, , values] = repo.update.mock.calls[0];
+      expect(values).toEqual({ avatarUrl: null });
+    });
+
+    it('fails loudly if the profile vanished', async () => {
+      repo.update.mockResolvedValue(null);
+      await expect(
+        service.setAvatarUrl(auth, 'https://cdn.test/a.jpg'),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+  });
+
   describe('get', () => {
     it('returns the fields the profile page edits', async () => {
       const res = await service.get(auth);
@@ -92,6 +114,15 @@ describe('ProfileService (US-SET-01)', () => {
       await service.update(auth, { phone: '+66800000000' });
       const [, , values] = repo.update.mock.calls[0];
       expect(Object.keys(values)).toEqual(['phone']);
+    });
+
+    it('ignores a hand-written avatarUrl — a photo only arrives through a verified upload', async () => {
+      await service.update(auth, {
+        name: 'Somchai',
+        avatarUrl: 'https://evil.test/tracker.png',
+      });
+      const [, , values] = repo.update.mock.calls[0];
+      expect(values).not.toHaveProperty('avatarUrl');
     });
 
     it('rejects an unusable timezone', async () => {
