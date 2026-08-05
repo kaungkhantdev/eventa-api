@@ -46,6 +46,9 @@ export const twoFactorMethodEnum = pgEnum('two_factor_method', ['totp']);
 
 export const apiKeyStatusEnum = pgEnum('api_key_status', ['active', 'revoked']);
 
+/** How an automated message reaches its recipient (E7). */
+export const messageChannelEnum = pgEnum('message_channel', ['email', 'sms']);
+
 export const notificationKindEnum = pgEnum('notification_kind', [
   'registration',
   'payment',
