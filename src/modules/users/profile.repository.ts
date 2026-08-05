@@ -15,6 +15,10 @@ const PROFILE_COLUMNS = {
   timezone: users.timezone,
   locale: users.locale,
   avatarUrl: users.avatarUrl,
+  city: users.city,
+  dateOfBirth: users.dateOfBirth,
+  bio: users.bio,
+  displayCurrency: users.displayCurrency,
 };
 
 /** Data access for a member's own profile (US-SET-01). */

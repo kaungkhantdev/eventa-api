@@ -78,6 +78,8 @@ export class AuthSocialController {
       ip: req.ip ?? null,
     });
     return {
+      // Social sign-in verified the provider's own second factor already.
+      twoFactorRequired: false,
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
       tokenType: BEARER,

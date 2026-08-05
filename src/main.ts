@@ -22,7 +22,12 @@ function configureApp(app: INestApplication, config: TypedConfig): void {
 }
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // rawBody: the payment webhook verifies a signature over the exact bytes
+  // sent, so the original body must survive parsing (US-DISC-05).
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+    rawBody: true,
+  });
   app.useLogger(app.get(Logger));
 
   const config = app.get<TypedConfig>(ConfigService);

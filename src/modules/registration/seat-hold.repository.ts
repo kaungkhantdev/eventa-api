@@ -1,5 +1,16 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, inArray, isNull, lte, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  notInArray,
+  sql,
+} from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
   seatAssignments,
@@ -9,6 +20,7 @@ import {
   ticketTypes,
 } from '../../db/schema';
 import { withTenant, type Tx } from '../../db/tenant';
+import type { CheckoutSeat } from '../checkout/checkout.types';
 import type { HoldQuantityResult, HoldSeatsResult } from './seat-hold.types';
 
 type NewSeatHold = typeof seatHolds.$inferInsert;
@@ -19,7 +31,7 @@ const ACTIVE = 'active' as const;
  * Data access for the checkout seat-hold engine. These methods run the money-path
  * reservation transaction: they lock inventory rows (`SELECT … FOR UPDATE`) across
  * seats / ticket_types and write `seat_holds` atomically. This is the sanctioned
- * cross-context transaction (CLAUDE.md: "money/inventory … in one DB transaction").
+ * cross-context transaction (AGENTS.md: "money/inventory … in one DB transaction").
  * Every query is tenant-scoped by `organization_id` and by RLS (defence in depth),
  * and every method is safe for a direct caller (the checkout slice) — not only the
  * validated service path.
@@ -156,6 +168,134 @@ export class SeatHoldRepository {
         })
         .returning();
       return { ok: true, hold };
+    });
+  }
+
+  /**
+   * Every seat of an event's map with whether it can be picked right now — backs
+   * `SeatMapPort` for drawing the checkout seat map (US-DISC-04). A seat is
+   * offered only if it is `available`, has no unexpired active hold, and carries
+   * no live assignment; a lapsed hold reserves nothing, so it does not block.
+   *
+   * A READ, not a reservation: no row locks, and the answer may be stale by the
+   * time the buyer clicks. `holdSeats` re-checks under a lock and remains the
+   * only authority — this exists so the map greys out what is obviously gone.
+   */
+  async seatsForEvent(
+    organizationId: number,
+    eventId: string,
+    now: Date,
+    ownHoldIds: number[] = [],
+  ): Promise<CheckoutSeat[]> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({
+          id: seats.id,
+          section: seats.section,
+          rowLabel: seats.rowLabel,
+          seatNumber: seats.seatNumber,
+          ticketTypeId: seats.ticketTypeId,
+          status: seats.status,
+          heldUntil: seatHolds.expiresAt,
+          assignedAt: seatAssignments.assignedAt,
+        })
+        .from(seats)
+        .innerJoin(seatMaps, eq(seats.seatMapId, seatMaps.id))
+        .leftJoin(
+          seatHolds,
+          and(
+            eq(seatHolds.seatId, seats.id),
+            eq(seatHolds.status, ACTIVE),
+            gt(seatHolds.expiresAt, now),
+            // The caller's own reservation does not make a seat unavailable
+            // to the caller — otherwise confirming your own hold would 409.
+            ownHoldIds.length > 0
+              ? notInArray(seatHolds.id, ownHoldIds)
+              : undefined,
+          ),
+        )
+        .leftJoin(
+          seatAssignments,
+          and(
+            eq(seatAssignments.seatId, seats.id),
+            isNull(seatAssignments.releasedAt),
+          ),
+        )
+        .where(
+          and(
+            eq(seats.organizationId, organizationId),
+            eq(seatMaps.eventId, eventId),
+          ),
+        )
+        .orderBy(asc(seats.section), asc(seats.rowLabel), asc(seats.id));
+      return rows.map((r) => ({
+        id: r.id,
+        section: r.section,
+        rowLabel: r.rowLabel,
+        seatNumber: r.seatNumber,
+        ticketTypeId: r.ticketTypeId,
+        available:
+          r.status === 'available' &&
+          r.heldUntil === null &&
+          r.assignedAt === null,
+      }));
+    });
+  }
+
+  /**
+   * The distinct ticket tiers backing the given seats within an event — the sales
+   * eligibility gate reads these before reserving. Seats with no tier are omitted;
+   * a read outside the reservation transaction (no locking), scoped by tenant + event.
+   */
+  async ticketTypeIdsForSeats(
+    organizationId: number,
+    eventId: string,
+    seatIds: number[],
+  ): Promise<string[]> {
+    const ids = [...new Set(seatIds)];
+    if (ids.length === 0) return [];
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .selectDistinct({ ticketTypeId: seats.ticketTypeId })
+        .from(seats)
+        .innerJoin(seatMaps, eq(seats.seatMapId, seatMaps.id))
+        .where(
+          and(
+            eq(seats.organizationId, organizationId),
+            inArray(seats.id, ids),
+            eq(seatMaps.eventId, eventId),
+            isNotNull(seats.ticketTypeId),
+          ),
+        );
+      return rows
+        .map((r) => r.ticketTypeId)
+        .filter((id): id is string => id !== null);
+    });
+  }
+
+  /**
+   * Is a checkout still holding this tier? Only unexpired `active` holds count —
+   * a lapsed one reserves nothing and must not block the organizer (US-TKT-05).
+   */
+  async hasActiveHolds(
+    organizationId: number,
+    ticketTypeId: string,
+    now: Date,
+  ): Promise<boolean> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({ id: seatHolds.id })
+        .from(seatHolds)
+        .where(
+          and(
+            eq(seatHolds.organizationId, organizationId),
+            eq(seatHolds.ticketTypeId, ticketTypeId),
+            eq(seatHolds.status, 'active'),
+            sql`${seatHolds.expiresAt} > ${now}`,
+          ),
+        )
+        .limit(1);
+      return row !== undefined;
     });
   }
 

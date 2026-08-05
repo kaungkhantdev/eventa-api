@@ -1,6 +1,7 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { DomainException } from '../../common/errors/domain.exception';
 import { ErrorCode } from '../../common/errors/error-codes';
+import { PLATFORM_ORG_SLUG } from '../../common/tenancy/platform-org';
 import { Clock } from '../../common/time/clock';
 import { OutboxPort } from '../platform/outbox.port';
 import { signedInEvent } from './events/signed-in.event';
@@ -24,7 +25,8 @@ import { TokenService } from './token.service';
 export interface LoginInput {
   email: string;
   password: string;
-  orgSlug: string;
+  /** The organizer's workspace. Absent — and refused — for attendees (US-DISC-08). */
+  orgSlug?: string;
   persona?: Persona;
   device: string;
   ip: string | null;
@@ -40,6 +42,16 @@ export interface LoginResult {
   user: MeResponseDto;
 }
 
+/** Password checked out, but a code is required before any session exists. */
+export interface TwoFactorChallenge {
+  twoFactorRequired: true;
+  challengeToken: string;
+  /** How long the code prompt is valid, seconds. */
+  expiresIn: number;
+}
+
+export type LoginOutcome = LoginResult | TwoFactorChallenge;
+
 export interface AcceptInviteResult {
   userId: string;
   email: string;
@@ -48,9 +60,36 @@ export interface AcceptInviteResult {
 
 type LoginUser = { user: UserRow; org: OrganizationRow };
 
-/** Brute-force throttle key for a sign-in attempt: org + audience + email. */
-function throttleIdentity(input: LoginInput): string {
+/** A login whose workspace has been resolved — what the private steps consume. */
+type ResolvedLoginInput = LoginInput & { orgSlug: string };
+
+/** Brute-force throttle key for a sign-in attempt: realm + audience + email. */
+function throttleIdentity(input: ResolvedLoginInput): string {
   return `${input.orgSlug}|${input.persona ?? 'admin'}|${input.email.toLowerCase()}`;
+}
+
+/**
+ * Which workspace a login authenticates against (US-DISC-08). An organizer
+ * names theirs. An attendee has exactly one — the platform organization — so
+ * none is taken, and naming one is refused rather than ignored: a client that
+ * sends a workspace for an attendee is confused, and should fail loudly rather
+ * than be silently redirected.
+ */
+function resolveRealm(input: LoginInput): string {
+  if ((input.persona ?? 'admin') === 'attendee') {
+    if (input.orgSlug) {
+      throw DomainException.validation(
+        "Attendee sign-in doesn't take a workspace — leave orgSlug out.",
+      );
+    }
+    return PLATFORM_ORG_SLUG;
+  }
+  if (!input.orgSlug) {
+    throw DomainException.validation(
+      'Organizer sign-in requires your workspace slug.',
+    );
+  }
+  return input.orgSlug;
 }
 
 @Injectable()
@@ -67,12 +106,38 @@ export class AuthService {
     private readonly signup: SignupService,
   ) {}
 
-  async login(input: LoginInput): Promise<LoginResult> {
-    const throttleId = throttleIdentity(input);
+  async login(input: LoginInput): Promise<LoginOutcome> {
+    const resolved: ResolvedLoginInput = {
+      ...input,
+      orgSlug: resolveRealm(input),
+    };
+    const throttleId = throttleIdentity(resolved);
     await this.throttle.assertNotLocked(throttleId);
-    const found = await this.authenticateThrottled(input, throttleId);
+    const found = await this.authenticateThrottled(resolved, throttleId);
     await this.assertEligible(found);
+    // A correct password is necessary but not sufficient (US-ACC-05): with 2FA
+    // on, no session exists until the code checks out — the challenge token is
+    // the only thing the password earns.
+    if (found.user.twoFactorEnabled) {
+      return this.issueTwoFactorChallenge(found, input);
+    }
     return this.startSession(found, input);
+  }
+
+  private async issueTwoFactorChallenge(
+    found: LoginUser,
+    input: LoginInput,
+  ): Promise<TwoFactorChallenge> {
+    return {
+      twoFactorRequired: true,
+      challengeToken: await this.tokens.signTwoFactorChallenge({
+        userId: found.user.id,
+        organizationId: found.org.id,
+        persona: found.user.persona,
+        rememberMe: input.rememberMe ?? false,
+      }),
+      expiresIn: this.tokens.twoFactorChallengeTtlSeconds,
+    };
   }
 
   /**
@@ -113,7 +178,7 @@ export class AuthService {
    * (that isn't password guessing); a success clears the counter.
    */
   private async authenticateThrottled(
-    input: LoginInput,
+    input: ResolvedLoginInput,
     throttleId: string,
   ): Promise<LoginUser> {
     let found: LoginUser;
@@ -181,7 +246,7 @@ export class AuthService {
 
   // ── login steps ──────────────────────────────────────────────────────────
 
-  private async authenticate(input: LoginInput): Promise<LoginUser> {
+  private async authenticate(input: ResolvedLoginInput): Promise<LoginUser> {
     const found = await this.users.findLoginUser(
       input.orgSlug,
       input.email,

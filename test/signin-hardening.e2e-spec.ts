@@ -12,9 +12,16 @@ import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
 
 const PASSWORD = 'signin1password';
-const OWNER = 'owner@signin-e2e.test';
-const SUSPENDED = 'suspended@signin-e2e.test';
-const ATTENDEE = 'attendee@signin-e2e.test';
+/**
+ * Emails are unique per run: the login throttle lives in Redis (15-minute lock
+ * TTL), which outlives any database cleanup — a fixed email this suite
+ * deliberately fails (the organizer probing the attendee door, the suspended
+ * account) would accumulate strikes across runs and start answering 429.
+ */
+const RUN = Date.now();
+const OWNER = `owner-${RUN}@signin-e2e.test`;
+const SUSPENDED = `suspended-${RUN}@signin-e2e.test`;
+const ATTENDEE = `attendee-${RUN}@signin-e2e.test`;
 const ORG_SLUG = 'signin-co';
 
 describe('Sign-in hardening & audience separation (US-ACC-02/03/08/11, e2e)', () => {
@@ -54,7 +61,7 @@ describe('Sign-in hardening & audience separation (US-ACC-02/03/08/11, e2e)', ()
     // Seed a suspended organizer + an active attendee directly.
     const pwHash = await hash(PASSWORD);
     await seedUser(SUSPENDED, 'admin', 'Suspended', pwHash);
-    await seedUser(ATTENDEE, 'attendee', 'Active', pwHash);
+    await seedAttendee(ATTENDEE, pwHash);
   });
 
   afterAll(async () => {
@@ -135,6 +142,7 @@ describe('Sign-in hardening & audience separation (US-ACC-02/03/08/11, e2e)', ()
       email: ATTENDEE,
       password: PASSWORD,
       persona: 'attendee',
+      orgSlug: undefined, // attendees have no workspace (US-DISC-08)
     });
     expect(res.status).toBe(200);
     expect(
@@ -147,6 +155,7 @@ describe('Sign-in hardening & audience separation (US-ACC-02/03/08/11, e2e)', ()
       email: OWNER,
       password: PASSWORD,
       persona: 'attendee',
+      orgSlug: undefined,
     });
     expect(res.status).toBe(401);
   });
@@ -156,6 +165,7 @@ describe('Sign-in hardening & audience separation (US-ACC-02/03/08/11, e2e)', ()
       email: ATTENDEE,
       password: PASSWORD,
       persona: 'attendee',
+      orgSlug: undefined,
     });
     const attendeeToken = (res.body as { data: { accessToken: string } }).data
       .accessToken;
@@ -164,6 +174,18 @@ describe('Sign-in hardening & audience separation (US-ACC-02/03/08/11, e2e)', ()
       .set('Authorization', `Bearer ${attendeeToken}`);
     expect(admin.status).toBe(403);
   });
+
+  /** Attendee accounts live in the platform org (US-DISC-08). */
+  async function seedAttendee(email: string, pwHash: string): Promise<void> {
+    const platform = await pool.query<{ id: string }>(
+      `SELECT id FROM organizations WHERE slug = 'eventa'`,
+    );
+    await pool.query(
+      `INSERT INTO users (organization_id, name, email, persona, status, password_hash)
+       VALUES ($1, 'Seed', $2, 'attendee', 'Active', $3)`,
+      [Number(platform.rows[0].id), email, pwHash],
+    );
+  }
 
   async function seedUser(
     email: string,
@@ -184,5 +206,12 @@ async function cleanup(pool: Pool): Promise<void> {
     `DELETE FROM audit_events WHERE organization_id IN
        (SELECT id FROM organizations WHERE slug LIKE 'signin-co%')`,
   );
+  // The attendee user lives in the shared platform org — remove it by email.
+  // LIKE catches this run's user and any earlier run's leftovers.
+  await pool.query(
+    `DELETE FROM outbox_events WHERE aggregate_id IN
+       (SELECT id::text FROM users WHERE email LIKE '%@signin-e2e.test')`,
+  );
+  await pool.query(`DELETE FROM users WHERE email LIKE '%@signin-e2e.test'`);
   await pool.query(`DELETE FROM organizations WHERE slug LIKE 'signin-co%'`);
 }

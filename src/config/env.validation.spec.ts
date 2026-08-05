@@ -47,4 +47,50 @@ describe('validateEnv', () => {
       /NODE_ENV/,
     );
   });
+
+  describe('payments (US-DISC-05)', () => {
+    it('defaults to the fake provider, so nothing charges a card by accident', () => {
+      const env = validateEnv(base);
+      expect(env.PAYMENT_PROVIDER).toBe('fake');
+      expect(env.PROMPTPAY_EXPIRY_SECONDS).toBe(900);
+    });
+
+    it('refuses to boot on the real provider with no secret key', () => {
+      expect(() =>
+        validateEnv({
+          ...base,
+          PAYMENT_PROVIDER: 'stripe',
+          STRIPE_WEBHOOK_SECRET: 'whsec_test',
+        }),
+      ).toThrow(/STRIPE_SECRET_KEY/);
+    });
+
+    it('refuses to boot on the real provider with no webhook secret', () => {
+      // Without it every webhook would have to be trusted unverified.
+      expect(() =>
+        validateEnv({
+          ...base,
+          PAYMENT_PROVIDER: 'stripe',
+          STRIPE_SECRET_KEY: 'sk_test',
+        }),
+      ).toThrow(/STRIPE_WEBHOOK_SECRET/);
+    });
+
+    it('accepts the real provider once both secrets are present', () => {
+      const env = validateEnv({
+        ...base,
+        PAYMENT_PROVIDER: 'stripe',
+        STRIPE_SECRET_KEY: 'sk_test',
+        STRIPE_WEBHOOK_SECRET: 'whsec_test',
+      });
+      expect(env.PAYMENT_PROVIDER).toBe('stripe');
+    });
+
+    it('coerces the PromptPay window from a string', () => {
+      expect(
+        validateEnv({ ...base, PROMPTPAY_EXPIRY_SECONDS: '600' })
+          .PROMPTPAY_EXPIRY_SECONDS,
+      ).toBe(600);
+    });
+  });
 });

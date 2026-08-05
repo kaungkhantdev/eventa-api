@@ -11,12 +11,11 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-import { admissionTypeEnum, ticketStatusEnum } from '../../../db/schema';
-import type { AdmissionType, TicketStatus } from '../ticketing.types';
+import { MAX_SEATS_PER_BOOKING } from '../../../common/booking/booking.limits';
+import { admissionTypeEnum } from '../../../db/schema';
+import type { AdmissionType } from '../ticketing.types';
 
 const ADMISSION: readonly AdmissionType[] = admissionTypeEnum.enumValues;
-const STATUSES: readonly TicketStatus[] = ticketStatusEnum.enumValues;
-const MAX_PER_ORDER = 8;
 
 export class CreateTicketDto {
   @ApiProperty({ example: 'VIP', minLength: 1, maxLength: 60 })
@@ -50,22 +49,21 @@ export class CreateTicketDto {
   @IsIn(ADMISSION)
   admissionType?: AdmissionType;
 
-  @ApiPropertyOptional({ enum: STATUSES })
-  @IsOptional()
-  @IsIn(STATUSES)
-  status?: TicketStatus;
-
   @ApiPropertyOptional({ example: 1, minimum: 1 })
   @IsOptional()
   @IsInt()
   @Min(1)
   minPerOrder?: number;
 
-  @ApiPropertyOptional({ example: 8, minimum: 1, maximum: MAX_PER_ORDER })
+  @ApiPropertyOptional({
+    example: 8,
+    minimum: 1,
+    maximum: MAX_SEATS_PER_BOOKING,
+  })
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(MAX_PER_ORDER)
+  @Max(MAX_SEATS_PER_BOOKING)
   maxPerOrder?: number;
 
   @ApiPropertyOptional({ format: 'date-time' })

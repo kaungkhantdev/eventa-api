@@ -125,6 +125,33 @@ export class RegistrationStatsRepository {
   }
 
   /** Distinct confirmed attendees for the event (broadcast recipient count). */
+  /**
+   * Confirmed admissions per event — the "128 going" on an anonymous Discover
+   * card (US-DISC-01). Deliberately NOT tenant-scoped, because a Discover visitor
+   * has no tenant and the grid spans every workspace. Safe by construction: it
+   * takes event ids the caller already holds and returns nothing but a count —
+   * no attendee, order, or money detail leaves this method.
+   */
+  async goingCounts(eventIds: string[]): Promise<Map<string, number>> {
+    const ids = [...new Set(eventIds)];
+    if (ids.length === 0) return new Map();
+    const rows = await this.db
+      .select({
+        eventId: orders.eventId,
+        going: sql<number>`coalesce(sum(${orders.seats}), 0)::int`,
+      })
+      .from(orders)
+      .where(
+        and(
+          inArray(orders.eventId, ids),
+          eq(orders.status, CONFIRMED),
+          isNull(orders.deletedAt),
+        ),
+      )
+      .groupBy(orders.eventId);
+    return new Map(rows.map((r) => [r.eventId, r.going]));
+  }
+
   async attendeeCount(
     organizationId: number,
     eventId: string,

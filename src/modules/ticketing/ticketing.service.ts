@@ -1,15 +1,21 @@
 import { Injectable } from '@nestjs/common';
+import { MAX_SEATS_PER_BOOKING } from '../../common/booking/booking.limits';
 import { DomainException } from '../../common/errors/domain.exception';
+import { Clock } from '../../common/time/clock';
 import { pickDefined } from '../../common/util/pick-defined';
 import type { EventActor } from '../events/events.types';
 import { EventsService } from '../events/events.service';
 import { TicketResponseDto } from './dto/ticket-response.dto';
+import { CheckoutActivityPort } from './ports/checkout-activity.port';
 import { toTicketResponse } from './ticketing.mapper';
+import { TicketingPolicy } from './ticketing.policy';
 import { TicketingRepository } from './ticketing.repository';
 import type {
   CreateTicketInput,
   NewTicketValues,
   TicketRow,
+  DeleteTicketResult,
+  TicketStatus,
   UpdateTicketInput,
 } from './ticketing.types';
 
@@ -19,7 +25,6 @@ const UPDATABLE_KEYS: (keyof NewTicketValues & keyof UpdateTicketInput)[] = [
   'priceSatang',
   'total',
   'admissionType',
-  'status',
   'minPerOrder',
   'maxPerOrder',
   'salesStartAt',
@@ -32,6 +37,9 @@ export class TicketingService {
   constructor(
     private readonly repo: TicketingRepository,
     private readonly events: EventsService,
+    private readonly policy: TicketingPolicy,
+    private readonly clock: Clock,
+    private readonly checkout: CheckoutActivityPort,
   ) {}
 
   async createTicket(
@@ -44,19 +52,34 @@ export class TicketingService {
     await this.assertNameFree(actor.organizationId, eventId, name);
 
     const isFree = input.isFree ?? false;
+    const priceSatang = isFree ? 0 : (input.priceSatang ?? 0);
+    const total = input.total ?? 0;
+    const minPerOrder = input.minPerOrder ?? 1;
+    const maxPerOrder = input.maxPerOrder ?? MAX_SEATS_PER_BOOKING;
+    const salesStartAt = input.salesStartAt ?? null;
+    const salesEndAt = input.salesEndAt ?? null;
+
+    this.policy.assertWholeBaht(priceSatang);
+    this.policy.assertSalesWindow(salesStartAt, salesEndAt);
+    this.policy.assertPerOrderBounds(minPerOrder, maxPerOrder, total);
+
     const values: NewTicketValues = {
       organizationId: actor.organizationId,
       eventId,
       name,
       isFree,
-      priceSatang: isFree ? 0 : (input.priceSatang ?? 0),
-      total: input.total ?? 0,
+      priceSatang,
+      total,
       admissionType: input.admissionType ?? 'general_admission',
-      status: input.status ?? 'scheduled',
-      minPerOrder: input.minPerOrder ?? 1,
-      maxPerOrder: input.maxPerOrder ?? 8,
-      salesStartAt: input.salesStartAt ?? null,
-      salesEndAt: input.salesEndAt ?? null,
+      // Availability is derived, never taken from the client (US-TKT-01).
+      status: this.policy.resolveStatus(
+        { status: 'scheduled', sold: 0, total, salesStartAt, salesEndAt },
+        this.clock.now(),
+      ),
+      minPerOrder,
+      maxPerOrder,
+      salesStartAt,
+      salesEndAt,
     };
     return this.respond(actor.organizationId, await this.repo.insert(values));
   }
@@ -81,40 +104,133 @@ export class TicketingService {
     if (input.version !== undefined && input.version !== ticket.version) {
       throw this.stale();
     }
-    if (input.total !== undefined && input.total < ticket.sold) {
-      throw DomainException.validation(
-        `Cannot set the quantity (${input.total}) below the ${ticket.sold} already sold.`,
-      );
-    }
-    if (input.name !== undefined) {
-      await this.assertNameFree(
-        actor.organizationId,
-        eventId,
-        input.name.trim(),
-        ticketId,
-      );
-    }
+    this.policy.assertChangeAllowedAfterSales(ticket, input);
+    await this.assertRenameAllowed(
+      actor.organizationId,
+      eventId,
+      ticketId,
+      input,
+    );
+
+    const merged = this.merge(ticket, input);
+    this.policy.assertQuantityNotBelowSold(merged.total, ticket.sold);
+    this.policy.assertWholeBaht(merged.priceSatang);
+    this.policy.assertSalesWindow(merged.salesStartAt, merged.salesEndAt);
+    this.policy.assertPerOrderBounds(
+      merged.minPerOrder,
+      merged.maxPerOrder,
+      merged.total,
+    );
+
     const updated = await this.repo.update(
       actor.organizationId,
       ticketId,
-      this.buildValues(input),
+      {
+        ...this.buildValues(input),
+        // Re-derive availability from the values as they will be (US-TKT-02/03).
+        status: this.policy.resolveStatus(merged, this.clock.now()),
+      },
       ticket.version,
     );
     if (!updated) throw this.stale();
     return this.respond(actor.organizationId, updated);
   }
 
+  /** Pause selling on demand — it stops even inside its sales window (US-TKT-03). */
+  async pauseTicket(
+    actor: EventActor,
+    eventId: string,
+    ticketId: string,
+  ): Promise<TicketResponseDto> {
+    const ticket = await this.load(actor.organizationId, eventId, ticketId);
+    return this.setStatus(actor.organizationId, ticket, 'paused');
+  }
+
+  /**
+   * Resume selling. A tier whose window has already closed cannot come back
+   * without a new end date — resuming it would promise a sale we must refuse.
+   */
+  async resumeTicket(
+    actor: EventActor,
+    eventId: string,
+    ticketId: string,
+  ): Promise<TicketResponseDto> {
+    const ticket = await this.load(actor.organizationId, eventId, ticketId);
+    const now = this.clock.now();
+    if (ticket.salesEndAt && ticket.salesEndAt.getTime() < now.getTime()) {
+      throw DomainException.conflict(
+        'Sales for this ticket type have already ended — extend the sales end date first.',
+      );
+    }
+    // Resolve from a non-paused baseline so it lands on sale, scheduled or sold out.
+    const status = this.policy.resolveStatus(
+      { ...ticket, status: 'onsale' },
+      now,
+    );
+    return this.setStatus(actor.organizationId, ticket, status);
+  }
+
+  private async setStatus(
+    organizationId: number,
+    ticket: TicketRow,
+    status: TicketStatus,
+  ): Promise<TicketResponseDto> {
+    const updated = await this.repo.update(
+      organizationId,
+      ticket.id,
+      { status },
+      ticket.version,
+    );
+    if (!updated) throw this.stale();
+    return this.respond(organizationId, updated);
+  }
+
+  /** The tier as it will be once `input` is applied — what the rules judge. */
+  private merge(ticket: TicketRow, input: UpdateTicketInput) {
+    return {
+      status: ticket.status,
+      sold: ticket.sold,
+      total: input.total ?? ticket.total,
+      priceSatang: input.isFree ? 0 : (input.priceSatang ?? ticket.priceSatang),
+      minPerOrder: input.minPerOrder ?? ticket.minPerOrder,
+      maxPerOrder: input.maxPerOrder ?? ticket.maxPerOrder,
+      salesStartAt:
+        input.salesStartAt !== undefined
+          ? input.salesStartAt
+          : ticket.salesStartAt,
+      salesEndAt:
+        input.salesEndAt !== undefined ? input.salesEndAt : ticket.salesEndAt,
+    };
+  }
+
+  private async assertRenameAllowed(
+    organizationId: number,
+    eventId: string,
+    ticketId: string,
+    input: UpdateTicketInput,
+  ): Promise<void> {
+    if (input.name === undefined) return;
+    await this.assertNameFree(
+      organizationId,
+      eventId,
+      input.name.trim(),
+      ticketId,
+    );
+  }
+
+  /**
+   * Remove a tier created by mistake, or retire one that has already sold
+   * (US-TKT-05). A tier that never sold is erased; one with sales is soft-deleted
+   * so it leaves the active list and stops selling while every issued ticket
+   * still resolves to it. Nothing is refunded or cancelled here — those are
+   * finance actions, taken deliberately and separately.
+   */
   async deleteTicket(
     actor: EventActor,
     eventId: string,
     ticketId: string,
-  ): Promise<void> {
+  ): Promise<DeleteTicketResult> {
     const ticket = await this.load(actor.organizationId, eventId, ticketId);
-    if (ticket.sold > 0) {
-      throw DomainException.conflict(
-        "This ticket type has sales and can't be removed. Close it instead.",
-      );
-    }
     const remaining = await this.repo.countActive(
       actor.organizationId,
       eventId,
@@ -124,7 +240,17 @@ export class TicketingService {
         'An event must keep at least one ticket type — this is the last one.',
       );
     }
+    if (await this.checkout.hasActiveHolds(actor.organizationId, ticketId)) {
+      throw DomainException.conflict(
+        'Someone is checking out with this ticket type — pause it and try again shortly.',
+      );
+    }
+    if (ticket.sold === 0) {
+      await this.repo.hardDelete(actor.organizationId, ticketId);
+      return { outcome: 'removed' };
+    }
     await this.repo.softDelete(actor.organizationId, ticketId);
+    return { outcome: 'retired' };
   }
 
   /** Copy the source event's tiers onto a new event: 0 sold, sales window cleared. */

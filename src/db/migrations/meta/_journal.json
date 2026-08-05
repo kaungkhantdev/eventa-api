@@ -148,6 +148,55 @@
       "when": 1785566188528,
       "tag": "0020_rls_public_pages",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1785585122343,
+      "tag": "0021_promotions",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1785585133696,
+      "tag": "0022_rls_promotions",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1785738330317,
+      "tag": "0023_discover_search",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1785745597303,
+      "tag": "0024_saved_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1785747731602,
+      "tag": "0025_order_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1785847618327,
+      "tag": "0026_platform_org",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1785849917829,
+      "tag": "0027_attendee_profile_settings",
+      "breakpoints": true
     }
   ]
 }

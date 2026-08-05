@@ -1,8 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { MAX_SEATS_PER_BOOKING } from '../../common/booking/booking.limits';
 import { Clock } from '../../common/time/clock';
 import { DomainException } from '../../common/errors/domain.exception';
 import type { Env } from '../../config/env.validation';
+import { TicketEligibilityPort } from './ports/ticket-eligibility.port';
 import { SeatHoldRepository } from './seat-hold.repository';
 import type {
   HoldQuantityInput,
@@ -10,16 +12,18 @@ import type {
   SeatHoldActor,
   SeatHoldRow,
 } from './seat-hold.types';
+import { TicketEligibilityPolicy } from './ticket-eligibility.policy';
 
-/** A single booking may hold between 1 and this many seats/units (entities.md ck_orders_seats). */
-const MAX_SEATS_PER_BOOKING = 8;
 const MS_PER_SECOND = 1000;
 
 /**
  * The checkout seat-hold engine: reserve inventory for a buyer while they check
  * out, release it, and expire it. Concurrency-safe holds (one active hold per
  * seat; GA capacity never oversold) are enforced in the repository transaction;
- * this service owns the booking rules (1–8 per booking) and the TTL.
+ * this service owns the booking rules (1–8 per booking) and the TTL, and gates
+ * every reservation through the per-tier eligibility policy (on sale, inside the
+ * sales window, within per-order bounds) before the engine runs — so a closed
+ * window refuses a purchase even when the badge still reads "On sale" (US-TKT-03).
  */
 @Injectable()
 export class SeatHoldService {
@@ -29,6 +33,8 @@ export class SeatHoldService {
     private readonly repo: SeatHoldRepository,
     private readonly clock: Clock,
     config: ConfigService<Env, true>,
+    private readonly eligibility: TicketEligibilityPort,
+    private readonly eligibilityPolicy: TicketEligibilityPolicy,
   ) {
     this.ttlSeconds = config.getOrThrow('HOLD_TTL_SECONDS', { infer: true });
   }
@@ -41,6 +47,12 @@ export class SeatHoldService {
     const seatIds = [...new Set(input.seatIds)];
     this.assertBookingSize(seatIds.length);
     const now = this.clock.now();
+    await this.assertSeatTiersOnSale(
+      actor.organizationId,
+      input.eventId,
+      seatIds,
+      now,
+    );
     const result = await this.repo.holdSeats(
       actor.organizationId,
       input.eventId,
@@ -65,6 +77,17 @@ export class SeatHoldService {
   ): Promise<SeatHoldRow> {
     this.assertBookingSize(input.quantity);
     const now = this.clock.now();
+    const info = await this.eligibility.getEligibility(
+      actor.organizationId,
+      input.eventId,
+      input.ticketTypeId,
+    );
+    if (!info) {
+      throw DomainException.notFound(
+        'That ticket type is not available for this event.',
+      );
+    }
+    this.eligibilityPolicy.assertPurchasable(info, input.quantity, now);
     const result = await this.repo.holdQuantity(
       actor.organizationId,
       input.eventId,
@@ -98,6 +121,37 @@ export class SeatHoldService {
       throw DomainException.validation(
         `Choose between 1 and ${MAX_SEATS_PER_BOOKING} seats per booking.`,
       );
+    }
+  }
+
+  /**
+   * Every tier backing the requested seats must be on sale (per-order bounds are
+   * enforced per line item at order composition). Seats with no tier skip it.
+   */
+  private async assertSeatTiersOnSale(
+    organizationId: number,
+    eventId: string,
+    seatIds: number[],
+    now: Date,
+  ): Promise<void> {
+    const tierIds = await this.repo.ticketTypeIdsForSeats(
+      organizationId,
+      eventId,
+      seatIds,
+    );
+    if (tierIds.length === 0) return;
+    const byId = await this.eligibility.getEligibilityByIds(
+      organizationId,
+      tierIds,
+    );
+    for (const tierId of tierIds) {
+      const info = byId.get(tierId);
+      if (!info) {
+        throw DomainException.conflict(
+          'One of those seats is no longer available for sale.',
+        );
+      }
+      this.eligibilityPolicy.assertOnSale(info, now);
     }
   }
 

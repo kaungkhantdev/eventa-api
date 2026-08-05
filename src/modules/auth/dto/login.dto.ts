@@ -22,10 +22,15 @@ export class LoginDto {
   @MaxLength(200)
   password!: string;
 
-  @ApiProperty({ example: 'acme', description: 'Workspace slug' })
+  @ApiPropertyOptional({
+    example: 'acme',
+    description:
+      'The organizer workspace. Required for organizer sign-in; refused for attendees, who have one platform-wide realm (US-DISC-08).',
+  })
+  @IsOptional()
   @IsString()
   @Matches(/^[a-z0-9-]+$/)
-  orgSlug!: string;
+  orgSlug?: string;
 
   @ApiPropertyOptional({ enum: ['admin', 'attendee'], default: 'admin' })
   @IsOptional()

@@ -1,8 +1,12 @@
+import { templateIdEnum } from '../../db/schema';
 import type { PublicPage } from '../public-pages/public-pages.types';
+
+/** The designs on offer — derived from the `template_id` enum, never re-typed. */
+export type TemplateId = (typeof templateIdEnum.enumValues)[number];
 
 /** The page settings an organizer controls (US-PAGE-10). */
 export interface UpdatePageInput {
-  template?: string;
+  template?: TemplateId;
   slug?: string;
   accentColor?: string;
   agendaTitle?: string | null;

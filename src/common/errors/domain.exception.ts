@@ -25,6 +25,15 @@ export class DomainException extends HttpException {
     );
   }
 
+  static unauthorized(message = 'Unauthorized', details?: unknown) {
+    return new DomainException(
+      ErrorCode.UNAUTHORIZED,
+      message,
+      HttpStatus.UNAUTHORIZED,
+      details,
+    );
+  }
+
   static forbidden(message = 'Forbidden', details?: unknown) {
     return new DomainException(
       ErrorCode.FORBIDDEN,

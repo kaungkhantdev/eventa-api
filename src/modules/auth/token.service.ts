@@ -10,6 +10,7 @@ import type {
   PasswordResetClaims,
   Persona,
   RefreshTokenClaims,
+  TwoFactorChallengeClaims,
 } from './auth.types';
 
 /** Workspace invites are valid for 7 days. */
@@ -20,6 +21,8 @@ const EMAIL_VERIFICATION_TTL_SECONDS = 24 * 60 * 60;
 const EMAIL_CHANGE_TTL_SECONDS = 24 * 60 * 60;
 /** A password-reset link is valid for 1 hour. */
 const PASSWORD_RESET_TTL_SECONDS = 60 * 60;
+/** The window between a correct password and its 2FA code (US-ACC-05). */
+const TWO_FACTOR_CHALLENGE_TTL_SECONDS = 5 * 60;
 
 export interface TokenSubject {
   userId: string;
@@ -115,6 +118,42 @@ export class TokenService {
 
   verifyInvite(token: string): Promise<InviteTokenClaims> {
     return this.jwt.verifyAsync<InviteTokenClaims>(token);
+  }
+
+  get twoFactorChallengeTtlSeconds(): number {
+    return TWO_FACTOR_CHALLENGE_TTL_SECONDS;
+  }
+
+  signTwoFactorChallenge(s: {
+    userId: string;
+    organizationId: number;
+    persona: Persona;
+    rememberMe: boolean;
+  }): Promise<string> {
+    const claims: TwoFactorChallengeClaims = {
+      sub: s.userId,
+      org: s.organizationId,
+      persona: s.persona,
+      rem: s.rememberMe,
+      typ: 'twofa',
+    };
+    return this.jwt.signAsync(claims, {
+      expiresIn: TWO_FACTOR_CHALLENGE_TTL_SECONDS,
+    });
+  }
+
+  /**
+   * The `typ` check matters here: without it any other of our HS256 tokens (an
+   * access token, an invite) would satisfy this verify and skip the code.
+   */
+  async verifyTwoFactorChallenge(
+    token: string,
+  ): Promise<TwoFactorChallengeClaims> {
+    const claims = await this.jwt.verifyAsync<TwoFactorChallengeClaims>(token);
+    if (claims.typ !== 'twofa') {
+      throw new Error('Not a two-factor challenge token');
+    }
+    return claims;
   }
 
   signEmailVerification(s: EmailVerificationSubject): Promise<string> {

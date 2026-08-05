@@ -6,6 +6,8 @@ import {
   eq,
   gte,
   ilike,
+  inArray,
+  isNotNull,
   isNull,
   like,
   lt,
@@ -16,6 +18,7 @@ import {
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { categories, events, organizations } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
+import type { CheckoutEvent } from '../checkout/checkout.types';
 import type {
   EventBucketCounts,
   EventRow,
@@ -25,10 +28,112 @@ import type {
   NewEventValues,
 } from './events.types';
 
+/** Statuses whose event is live to the public — a draft or cancelled one is not. */
+const LIVE_STATUSES = ['planned', 'upcoming', 'live'] as const;
+/** Only a public event is buyable by an anonymous visitor. */
+const PUBLIC_VISIBILITY = 'public';
+
 /** Data access for the Events context. All reads/writes are tenant-scoped (RLS). */
 @Injectable()
 export class EventsRepository {
   constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+
+  /**
+   * Which workspace owns this event — backs `EventOrgLookupPort`. Deliberately
+   * NOT tenant-scoped: it is what establishes the tenant for an anonymous
+   * checkout, and it can only ever return the event's own organization.
+   */
+  async organizationIdFor(eventId: string): Promise<number | null> {
+    const [row] = await this.db
+      .select({ organizationId: events.organizationId })
+      .from(events)
+      .where(and(eq(events.id, eventId), isNull(events.deletedAt)))
+      .limit(1);
+    return row?.organizationId ?? null;
+  }
+
+  /**
+   * The event an anonymous checkout is buying into — backs `CheckoutEventPort`.
+   * Deliberately NOT tenant-scoped, for the same reason as `organizationIdFor`:
+   * a buyer has no tenant, and this is what establishes one. Only a PUBLISHED,
+   * publicly-visible, live event resolves, so this doubles as the authorization
+   * check — a draft or private event is simply not found.
+   */
+  async findPublishedForCheckout(
+    by: { slug: string } | { id: string },
+  ): Promise<CheckoutEvent | null> {
+    const [row] = await this.db
+      .select({
+        id: events.id,
+        organizationId: events.organizationId,
+        slug: events.slug,
+        name: events.name,
+        startAt: events.startAt,
+        endAt: events.endAt,
+        timezone: events.timezone,
+        isOnline: events.isOnline,
+        onlineNote: events.onlineNote,
+        venueName: events.venueName,
+        venueAddress: events.venueAddress,
+        city: events.city,
+        coverImage: events.coverImage,
+        organizerName: events.organizerName,
+        seatingMode: events.seatingMode,
+      })
+      .from(events)
+      .where(
+        and(
+          'slug' in by ? eq(events.slug, by.slug) : eq(events.id, by.id),
+          eq(events.visibility, PUBLIC_VISIBILITY),
+          isNotNull(events.publishedAt),
+          inArray(events.status, [...LIVE_STATUSES]),
+          isNull(events.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  /** Names for the given events (tenant-scoped) — backs `EventLookupPort`. */
+  async briefsByIds(
+    organizationId: number,
+    eventIds: string[],
+  ): Promise<{ id: string; name: string }[]> {
+    const ids = [...new Set(eventIds)];
+    if (ids.length === 0) return [];
+    return withTenant(this.db, organizationId, (tx) =>
+      tx
+        .select({ id: events.id, name: events.name })
+        .from(events)
+        .where(
+          and(
+            eq(events.organizationId, organizationId),
+            inArray(events.id, ids),
+            isNull(events.deletedAt),
+          ),
+        ),
+    );
+  }
+
+  /** Ids of live events whose name matches `search` — backs `EventLookupPort`. */
+  async idsMatchingName(
+    organizationId: number,
+    search: string,
+  ): Promise<string[]> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({ id: events.id })
+        .from(events)
+        .where(
+          and(
+            eq(events.organizationId, organizationId),
+            ilike(events.name, `%${search}%`),
+            isNull(events.deletedAt),
+          ),
+        );
+      return rows.map((r) => r.id);
+    });
+  }
 
   /** Slugs in this org that begin with `base` — used to pick a free, unique slug. */
   async existingSlugs(organizationId: number, base: string): Promise<string[]> {

@@ -56,6 +56,7 @@ describe('AuthService', () => {
   let tokens: jest.Mocked<TokenService>;
   let outbox: jest.Mocked<OutboxPort>;
   let signup: jest.Mocked<SignupService>;
+  let throttle: jest.Mocked<LoginThrottleService>;
   let service: AuthService;
 
   beforeEach(() => {
@@ -91,11 +92,11 @@ describe('AuthService', () => {
     outbox = {
       enqueue: jest.fn().mockResolvedValue(undefined),
     };
-    const throttle = {
+    throttle = {
       assertNotLocked: jest.fn().mockResolvedValue(undefined),
       recordFailure: jest.fn().mockResolvedValue(undefined),
       recordSuccess: jest.fn().mockResolvedValue(undefined),
-    } as unknown as LoginThrottleService;
+    } as unknown as jest.Mocked<LoginThrottleService>;
     signup = {
       resendVerification: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<SignupService>;
@@ -165,6 +166,9 @@ describe('AuthService', () => {
 
       const result = await service.login(input);
 
+      // No challenge here — 2FA is off for this account.
+      if ('twoFactorRequired' in result)
+        throw new Error('unexpected challenge');
       expect(result.accessToken).toBe('access.jwt');
       expect(result.refreshToken).toBe('refresh.jwt');
       expect(result.expiresIn).toBe(900);
@@ -188,6 +192,98 @@ describe('AuthService', () => {
       expect(event.payload).toMatchObject({ userId: 'u1', device: 'jest' });
       expect(repo.recordAudit).not.toHaveBeenCalledWith(
         expect.objectContaining({ type: 'signin' }),
+      );
+    });
+  });
+
+  // US-ACC-05: with 2FA on, a correct password earns a challenge, not a session.
+  describe('login — the two-factor challenge', () => {
+    beforeEach(() => {
+      users.findLoginUser.mockResolvedValue({
+        user: userRow({ twoFactorEnabled: true }),
+        org,
+      });
+      passwords.verify.mockResolvedValue(true);
+      tokens.signTwoFactorChallenge = jest
+        .fn()
+        .mockResolvedValue('challenge.jwt');
+      Object.defineProperty(tokens, 'twoFactorChallengeTtlSeconds', {
+        value: 300,
+      });
+    });
+
+    it('answers with a challenge and opens NO session', async () => {
+      const result = await service.login(input);
+      expect(result).toEqual({
+        twoFactorRequired: true,
+        challengeToken: 'challenge.jwt',
+        expiresIn: 300,
+      });
+      expect(repo.createSession).not.toHaveBeenCalled();
+      expect(tokens.signAccess).not.toHaveBeenCalled();
+      expect(outbox.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('carries remember-me into the challenge for the second step', async () => {
+      await service.login({ ...input, rememberMe: true });
+      expect(tokens.signTwoFactorChallenge).toHaveBeenCalledWith(
+        expect.objectContaining({ rememberMe: true }),
+      );
+    });
+
+    it('still refuses a wrong password before any challenge exists', async () => {
+      passwords.verify.mockResolvedValue(false);
+      await expect(service.login(input)).rejects.toMatchObject({
+        code: 'UNAUTHORIZED',
+      });
+      expect(tokens.signTwoFactorChallenge).not.toHaveBeenCalled();
+    });
+  });
+
+  // US-DISC-08: attendees live in ONE platform workspace; organizers name theirs.
+  describe('login — resolving the workspace by persona', () => {
+    beforeEach(() => {
+      users.findLoginUser.mockResolvedValue({
+        user: userRow({ persona: 'attendee' }),
+        org,
+      });
+      passwords.verify.mockResolvedValue(true);
+    });
+
+    it('signs an attendee into the platform workspace with no orgSlug at all', async () => {
+      await service.login({
+        ...input,
+        orgSlug: undefined,
+        persona: 'attendee',
+      });
+      expect(users.findLoginUser).toHaveBeenCalledWith(
+        'eventa',
+        input.email,
+        'attendee',
+      );
+    });
+
+    it('refuses an attendee login that names a workspace', async () => {
+      await expect(
+        service.login({ ...input, orgSlug: 'acme', persona: 'attendee' }),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      expect(users.findLoginUser).not.toHaveBeenCalled();
+    });
+
+    it('still requires the workspace slug for an organizer login', async () => {
+      await expect(
+        service.login({ ...input, orgSlug: undefined }),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      expect(users.findLoginUser).not.toHaveBeenCalled();
+    });
+
+    it('throttles attendee attempts against the platform realm', async () => {
+      users.findLoginUser.mockResolvedValue(null);
+      await service
+        .login({ ...input, orgSlug: undefined, persona: 'attendee' })
+        .catch(() => undefined);
+      expect(throttle.assertNotLocked).toHaveBeenCalledWith(
+        `eventa|attendee|${input.email}`,
       );
     });
   });

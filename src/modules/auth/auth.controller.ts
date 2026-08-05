@@ -61,7 +61,15 @@ export class AuthController {
       device,
       ip: req.ip ?? null,
     });
+    if ('twoFactorRequired' in result) {
+      return {
+        twoFactorRequired: true,
+        challengeToken: result.challengeToken,
+        expiresIn: result.expiresIn,
+      };
+    }
     return {
+      twoFactorRequired: false,
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
       tokenType: BEARER,

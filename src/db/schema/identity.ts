@@ -2,6 +2,8 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
+  char,
+  date,
   index,
   jsonb,
   pgTable,
@@ -45,6 +47,12 @@ export const users = pgTable(
     phone: text(),
     /** Per-user override of the org timezone; IANA name (US-SET-01). */
     timezone: text(),
+    /** Attendee-profile fields (US-DISC-11); unused for the admin persona. */
+    city: text(),
+    dateOfBirth: date(),
+    bio: text(),
+    /** Display-only currency preference (US-DISC-12); charges settle in THB. */
+    displayCurrency: char({ length: 3 }),
     /**
      * A requested new email awaiting confirmation (US-SET-01). The current `email`
      * keeps working for sign-in until the link is opened, then this is promoted.

@@ -29,6 +29,7 @@ interface Ticket {
   netSatang: number;
   vatSatang: number;
   total: number;
+  status: string;
 }
 
 describe('Ticket types (e2e — US-EVT-06)', () => {
@@ -147,6 +148,291 @@ describe('Ticket types (e2e — US-EVT-06)', () => {
     expect(res.status).toBe(422);
   });
 
+  it('US-TKT-01: a future sales start is Scheduled, an open window is On sale', async () => {
+    const jwt = await token(ADMIN, ORG.slug);
+    const later = await createTicket(jwt, {
+      name: 'Early access',
+      priceSatang: 50000,
+      total: 100,
+      salesStartAt: '2030-01-01T00:00:00Z',
+    });
+    expect((later.body as Success<Ticket>).data.status).toBe('scheduled');
+
+    const now = await createTicket(jwt, {
+      name: 'Doors open',
+      priceSatang: 50000,
+      total: 100,
+      salesStartAt: '2020-01-01T00:00:00Z',
+    });
+    expect((now.body as Success<Ticket>).data.status).toBe('onsale');
+  });
+
+  it('US-TKT-01: refuses a sales end before the start, and an oversized per-order limit', async () => {
+    const jwt = await token(ADMIN, ORG.slug);
+    const backwards = await createTicket(jwt, {
+      name: 'Backwards',
+      total: 10,
+      salesStartAt: '2030-02-01T00:00:00Z',
+      salesEndAt: '2030-01-01T00:00:00Z',
+    });
+    expect(backwards.status).toBe(422);
+
+    const tooMany = await createTicket(jwt, {
+      name: 'Too generous',
+      total: 5,
+      maxPerOrder: 8,
+    });
+    expect(tooMany.status).toBe(422);
+  });
+
+  it('US-TKT-02: price is frozen once a seat has sold, but capacity may still grow', async () => {
+    const jwt = await token(ADMIN, ORG.slug);
+    const created = await createTicket(jwt, {
+      name: 'Locked tier',
+      priceSatang: 100000,
+      total: 100,
+    });
+    const id = (created.body as Success<Ticket>).data.id;
+    await pool.query(
+      `UPDATE ticket_types SET sold = 640, total = 700 WHERE id = $1`,
+      [id],
+    );
+
+    const patch = (body: Record<string, unknown>) =>
+      request(server)
+        .patch(`/api/v1/events/${eventId}/tickets/${id}`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send(body);
+
+    const repriced = await patch({ priceSatang: 50000 });
+    expect(repriced.status).toBe(409);
+    expect((repriced.body as { message: string }).message).toMatch(
+      /new ticket type/i,
+    );
+    expect((await patch({ isFree: true })).status).toBe(409);
+
+    // …and the money never moved.
+    const { rows } = await pool.query<{ price_satang: string }>(
+      `SELECT price_satang FROM ticket_types WHERE id = $1`,
+      [id],
+    );
+    expect(Number(rows[0].price_satang)).toBe(100000);
+
+    const grown = await patch({ total: 900 });
+    expect(grown.status).toBe(200);
+    expect((grown.body as Success<Ticket>).data.status).toBe('onsale');
+  });
+
+  it('US-TKT-02: raising capacity brings a sold-out tier back On sale', async () => {
+    const jwt = await token(ADMIN, ORG.slug);
+    const created = await createTicket(jwt, {
+      name: 'Sold out tier',
+      total: 10,
+    });
+    const id = (created.body as Success<Ticket>).data.id;
+    await pool.query(
+      `UPDATE ticket_types SET sold = 10, status = 'soldout' WHERE id = $1`,
+      [id],
+    );
+    const res = await request(server)
+      .patch(`/api/v1/events/${eventId}/tickets/${id}`)
+      .set('Authorization', `Bearer ${jwt}`)
+      .send({ total: 25 });
+    expect((res.body as Success<Ticket>).data.status).toBe('onsale');
+  });
+
+  it('US-TKT-03: pause stops sales inside the window, resume brings them back', async () => {
+    const jwt = await token(ADMIN, ORG.slug);
+    const created = await createTicket(jwt, {
+      name: 'Pausable',
+      priceSatang: 20000,
+      total: 50,
+      salesStartAt: '2020-01-01T00:00:00Z',
+    });
+    const id = (created.body as Success<Ticket>).data.id;
+    const call = (action: string) =>
+      request(server)
+        .post(`/api/v1/events/${eventId}/tickets/${id}/${action}`)
+        .set('Authorization', `Bearer ${jwt}`);
+
+    const paused = await call('pause');
+    expect(paused.status).toBe(200);
+    expect((paused.body as Success<Ticket>).data.status).toBe('paused');
+
+    // a paused tier survives an unrelated edit — only Resume lifts it
+    const edited = await request(server)
+      .patch(`/api/v1/events/${eventId}/tickets/${id}`)
+      .set('Authorization', `Bearer ${jwt}`)
+      .send({ name: 'Pausable (renamed)' });
+    expect((edited.body as Success<Ticket>).data.status).toBe('paused');
+
+    const resumed = await call('resume');
+    expect((resumed.body as Success<Ticket>).data.status).toBe('onsale');
+  });
+
+  it('US-TKT-03: a tier whose window has closed cannot be resumed', async () => {
+    const jwt = await token(ADMIN, ORG.slug);
+    const created = await createTicket(jwt, {
+      name: 'Closed window',
+      total: 20,
+    });
+    const id = (created.body as Success<Ticket>).data.id;
+    await pool.query(
+      `UPDATE ticket_types SET status = 'paused', sales_end_at = now() - interval '1 day' WHERE id = $1`,
+      [id],
+    );
+    const res = await request(server)
+      .post(`/api/v1/events/${eventId}/tickets/${id}/resume`)
+      .set('Authorization', `Bearer ${jwt}`);
+    expect(res.status).toBe(409);
+    expect((res.body as { message: string }).message).toMatch(/end date/i);
+  });
+
+  describe('US-TKT-04: cross-event inventory', () => {
+    const inventory = (jwt: string, qs = '') =>
+      request(server)
+        .get(`/api/v1/tickets${qs}`)
+        .set('Authorization', `Bearer ${jwt}`);
+
+    it('searches by tier name, case-insensitively', async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      await createTicket(jwt, { name: 'Jazz pass', total: 40 });
+      const res = await inventory(jwt, '?search=JAZZ');
+      expect(res.status).toBe(200);
+      const names = (res.body as Success<Ticket[]>).data.map((t) => t.name);
+      expect(names).toContain('Jazz pass');
+    });
+
+    it('finds tiers by the name of the event they belong to', async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      const res = await inventory(jwt, '?search=Ticketed');
+      const rows = (res.body as Success<{ eventName: string }[]>).data;
+      expect(rows.length).toBeGreaterThan(0);
+      // every hit belongs to the matched event, not to a same-named tier
+      expect(rows.every((r) => r.eventName === 'Ticketed Event')).toBe(true);
+    });
+
+    it('shows sales progress and the event name on each row', async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      const res = await inventory(jwt, '?limit=100');
+      const row = (
+        res.body as Success<
+          { name: string; sold: number; total: number; eventName: string }[]
+        >
+      ).data.find((r) => r.name === 'Jazz pass');
+      expect(row).toMatchObject({
+        sold: 0,
+        total: 40,
+        eventName: 'Ticketed Event',
+      });
+    });
+
+    it('filters by status and the tab counts agree with the list', async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      const counts = await inventory(jwt, '/counts');
+      const soldout = (counts.body as Success<Record<string, number>>).data
+        .soldout;
+
+      const filtered = await inventory(jwt, '?status=soldout&limit=100');
+      const body = filtered.body as Success<Ticket[]> & {
+        meta: { total: number };
+      };
+      expect(body.data.every((t) => t.status === 'soldout')).toBe(true);
+      expect(body.meta.total).toBe(soldout);
+    });
+
+    it('returns an empty page when nothing matches', async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      const res = await inventory(jwt, '?search=no-such-ticket-anywhere');
+      const body = res.body as Success<Ticket[]> & { meta: { total: number } };
+      expect(body.data).toEqual([]);
+      expect(body.meta.total).toBe(0);
+    });
+
+    it('never shows another tenant’s tiers', async () => {
+      const other = await token(ADMIN2, ORG2.slug);
+      const res = await inventory(other, '?limit=100');
+      const names = (res.body as Success<Ticket[]>).data.map((t) => t.name);
+      expect(names).not.toContain('Jazz pass');
+    });
+  });
+
+  describe('US-TKT-06: share a ticket link and QR', () => {
+    let shareTicketId: string;
+
+    beforeAll(async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      const created = await createTicket(jwt, {
+        name: 'Poster tier',
+        priceSatang: 30000,
+        total: 60,
+      });
+      shareTicketId = (created.body as Success<Ticket>).data.id;
+    });
+
+    const share = (jwt: string, path = '') =>
+      request(server)
+        .get(`/api/v1/events/${eventId}/tickets/${shareTicketId}/share${path}`)
+        .set('Authorization', `Bearer ${jwt}`);
+
+    it('gives a registration link that preselects the tier, and a matching QR', async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      const res = await share(jwt);
+      expect(res.status).toBe(200);
+      const body = (
+        res.body as Success<{
+          registrationUrl: string;
+          qrSvg: string;
+          qrEncodes: string;
+          ticketName: string;
+        }>
+      ).data;
+      expect(body.registrationUrl).toContain(
+        `register?ticket=${shareTicketId}`,
+      );
+      expect(body.qrSvg).toContain('<svg');
+      expect(body.qrEncodes).toBe(body.registrationUrl);
+      expect(body.ticketName).toBe('Poster tier');
+    });
+
+    it('prompts to publish first while the event is a draft', async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      const body = (
+        (await share(jwt)).body as Success<{
+          isPublished: boolean;
+          warning: string | null;
+        }>
+      ).data;
+      expect(body.isPublished).toBe(false);
+      expect(body.warning).toMatch(/publish/i);
+    });
+
+    it('downloads a printable QR as an SVG attachment', async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      const res = await share(jwt, '/qr.svg');
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toMatch(/image\/svg/);
+      expect(res.headers['content-disposition']).toMatch(/attachment/);
+      // supertest hands back a Buffer for image/svg+xml, not `text`
+      expect((res.body as Buffer).toString()).toContain('<svg');
+    });
+
+    it('404s for a tier that is not on this event', async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      const res = await request(server)
+        .get(
+          `/api/v1/events/${eventId}/tickets/00000000-0000-0000-0000-000000000000/share`,
+        )
+        .set('Authorization', `Bearer ${jwt}`);
+      expect(res.status).toBe(404);
+    });
+
+    it('forbids a user without evCreate', async () => {
+      const jwt = await token(LIMITED, ORG.slug);
+      expect((await share(jwt)).status).toBe(403);
+    });
+  });
+
   it('forbids adding a ticket to another tenant’s event (404)', async () => {
     const jwt = await token(ADMIN, ORG.slug);
     const res = await request(server)
@@ -161,17 +447,78 @@ describe('Ticket types (e2e — US-EVT-06)', () => {
     expect((await createTicket(jwt, { name: 'Nope' })).status).toBe(403);
   });
 
-  it('refuses to delete a tier that has sales (409)', async () => {
+  it('US-TKT-05: a tier that never sold is removed completely', async () => {
     const jwt = await token(ADMIN, ORG.slug);
-    const created = await createTicket(jwt, { name: 'Sold Out', total: 100 });
+    const created = await createTicket(jwt, { name: 'Mistake', total: 100 });
     const ticketId = (created.body as Success<Ticket>).data.id;
-    await pool.query(`UPDATE ticket_types SET sold = 4 WHERE id = $1`, [
+
+    const res = await request(server)
+      .delete(`/api/v1/events/${eventId}/tickets/${ticketId}`)
+      .set('Authorization', `Bearer ${jwt}`);
+    expect(res.status).toBe(200);
+    expect((res.body as Success<{ outcome: string }>).data.outcome).toBe(
+      'removed',
+    );
+    const { rows } = await pool.query(
+      `SELECT id FROM ticket_types WHERE id = $1`,
+      [ticketId],
+    );
+    expect(rows).toHaveLength(0); // gone, not hidden
+  });
+
+  it('US-TKT-05: a tier that has sold is retired — the holders keep their tickets', async () => {
+    const jwt = await token(ADMIN, ORG.slug);
+    const created = await createTicket(jwt, { name: 'Sold Out', total: 300 });
+    const ticketId = (created.body as Success<Ticket>).data.id;
+    await pool.query(`UPDATE ticket_types SET sold = 210 WHERE id = $1`, [
       ticketId,
     ]);
-    await request(server)
+
+    const res = await request(server)
       .delete(`/api/v1/events/${eventId}/tickets/${ticketId}`)
-      .set('Authorization', `Bearer ${jwt}`)
-      .expect(409);
+      .set('Authorization', `Bearer ${jwt}`);
+    expect(res.status).toBe(200);
+    expect((res.body as Success<{ outcome: string }>).data.outcome).toBe(
+      'retired',
+    );
+
+    // the row survives (so issued tickets still resolve) but leaves the active list
+    const { rows } = await pool.query<{
+      deleted_at: Date | null;
+      sold: number;
+    }>(`SELECT deleted_at, sold FROM ticket_types WHERE id = $1`, [ticketId]);
+    expect(rows[0].deleted_at).not.toBeNull();
+    expect(Number(rows[0].sold)).toBe(210); // nothing was refunded or cancelled
+
+    const list = await request(server)
+      .get(`/api/v1/events/${eventId}/tickets`)
+      .set('Authorization', `Bearer ${jwt}`);
+    const names = (list.body as Success<Ticket[]>).data.map((t) => t.name);
+    expect(names).not.toContain('Sold Out');
+  });
+
+  it('US-TKT-05: refuses while a checkout is in progress', async () => {
+    const jwt = await token(ADMIN, ORG.slug);
+    const created = await createTicket(jwt, {
+      name: 'Mid-checkout',
+      total: 50,
+    });
+    const ticketId = (created.body as Success<Ticket>).data.id;
+    const { rows } = await pool.query<{ organization_id: string }>(
+      `SELECT organization_id FROM ticket_types WHERE id = $1`,
+      [ticketId],
+    );
+    await pool.query(
+      `INSERT INTO seat_holds (organization_id, event_id, ticket_type_id, quantity, status, expires_at)
+       VALUES ($1, $2, $3, 2, 'active', now() + interval '10 minutes')`,
+      [rows[0].organization_id, eventId, ticketId],
+    );
+
+    const res = await request(server)
+      .delete(`/api/v1/events/${eventId}/tickets/${ticketId}`)
+      .set('Authorization', `Bearer ${jwt}`);
+    expect(res.status).toBe(409);
+    expect((res.body as { message: string }).message).toMatch(/pause/i);
   });
 
   it('refuses to delete the last remaining tier but allows others', async () => {

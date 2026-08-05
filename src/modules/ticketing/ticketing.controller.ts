@@ -10,7 +10,12 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiForbiddenResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiForbiddenResponse,
+  ApiOkResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 import { ApiErrorDto } from '../../common/errors/error-envelope';
 import { ApiData, ApiList } from '../../common/http/api-data.decorator';
@@ -25,7 +30,11 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { TicketResponseDto } from './dto/ticket-response.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TicketingService } from './ticketing.service';
-import type { CreateTicketInput, UpdateTicketInput } from './ticketing.types';
+import type {
+  CreateTicketInput,
+  DeleteTicketResult,
+  UpdateTicketInput,
+} from './ticketing.types';
 
 @ApiTags('tickets')
 @ApiBearerAuth()
@@ -81,15 +90,45 @@ export class TicketingController {
     );
   }
 
+  @Post(':ticketId/pause')
+  @RequirePermissions(Permission.evCreate)
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Ticket sales paused.')
+  @ApiData(TicketResponseDto)
+  pause(
+    @CurrentAuth() auth: AuthContext,
+    @Param('eventId') eventId: string,
+    @Param('ticketId') ticketId: string,
+  ): Promise<TicketResponseDto> {
+    return this.tickets.pauseTicket(actorOf(auth), eventId, ticketId);
+  }
+
+  @Post(':ticketId/resume')
+  @RequirePermissions(Permission.evCreate)
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Ticket sales resumed.')
+  @ApiData(TicketResponseDto)
+  resume(
+    @CurrentAuth() auth: AuthContext,
+    @Param('eventId') eventId: string,
+    @Param('ticketId') ticketId: string,
+  ): Promise<TicketResponseDto> {
+    return this.tickets.resumeTicket(actorOf(auth), eventId, ticketId);
+  }
+
   @Delete(':ticketId')
   @RequirePermissions(Permission.evCreate)
   @HttpCode(HttpStatus.OK)
   @ResponseMessage('Ticket type removed.')
+  @ApiOkResponse({
+    description:
+      '`removed` when it never sold, `retired` when holders keep their tickets',
+  })
   remove(
     @CurrentAuth() auth: AuthContext,
     @Param('eventId') eventId: string,
     @Param('ticketId') ticketId: string,
-  ): Promise<void> {
+  ): Promise<DeleteTicketResult> {
     return this.tickets.deleteTicket(actorOf(auth), eventId, ticketId);
   }
 }

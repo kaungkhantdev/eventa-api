@@ -18,6 +18,10 @@ const UPDATABLE_KEYS = [
   'timezone',
   'locale',
   'avatarUrl',
+  'city',
+  'dateOfBirth',
+  'bio',
+  'displayCurrency',
 ] as const satisfies readonly (keyof UpdateProfileInput)[];
 
 /**
@@ -170,5 +174,9 @@ function toProfileResponse(row: ProfileRow): ProfileResponseDto {
     timezone: row.timezone,
     locale: row.locale,
     avatarUrl: row.avatarUrl,
+    city: row.city,
+    dateOfBirth: row.dateOfBirth,
+    bio: row.bio,
+    displayCurrency: row.displayCurrency,
   };
 }

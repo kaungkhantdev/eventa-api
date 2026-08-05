@@ -1,0 +1,165 @@
+import { Injectable } from '@nestjs/common';
+import { DomainException } from '../../common/errors/domain.exception';
+import { Clock } from '../../common/time/clock';
+import { CheckoutService, type PricedSelection } from './checkout.service';
+import {
+  CheckoutRepository,
+  type OrderRow,
+  type PlaceOrderInput,
+  type TicketRow,
+} from './checkout.repository';
+import { registrationConfirmedEvent } from './events/registration-confirmed.event';
+import { generateOrderReference, generateQrToken } from './order-reference';
+import type { ConfirmOrderDto } from './dto/confirm-order.dto';
+import type { OrderPlacedDto } from './dto/order-placed.dto';
+
+/** How many fresh references to try before admitting defeat (32^8 collisions). */
+const REFERENCE_ATTEMPTS = 3;
+const UNIQUE_VIOLATION = '23505';
+
+/**
+ * Placing the registration (US-DISC-06): one order, one ticket per admission,
+ * exactly once.
+ *
+ * The summary is re-quoted here rather than taken from the request, so what is
+ * charged is what the tier and the code are worth at this instant — not what the
+ * page showed some minutes ago. Everything then happens inside
+ * `CheckoutRepository.placeOrder`'s single transaction, which is also where the
+ * confirmation event is written, so an attendee can never end up with a ticket
+ * and no email or an email and no ticket.
+ *
+ * A free order confirms immediately and its tickets are issued. A paid one is
+ * placed as `pending` with its seats still held, and the tickets are minted when
+ * the payment settles (US-DISC-05) — so nobody holds a QR for something they
+ * have not paid for.
+ */
+@Injectable()
+export class CheckoutOrderService {
+  constructor(
+    private readonly checkout: CheckoutService,
+    private readonly repo: CheckoutRepository,
+    private readonly clock: Clock,
+  ) {}
+
+  async confirm(input: ConfirmOrderDto): Promise<OrderPlacedDto> {
+    // Re-priced here, never taken from the request: what is charged is what the
+    // tier and the code are worth now, not what the page showed ten minutes ago.
+    const priced = await this.checkout.priceSelection({
+      ...input,
+      buyerEmail: input.buyer.email,
+    });
+    const placed = await this.place(input, priced);
+    return this.toResponse(placed.order, placed.tickets, priced);
+  }
+
+  private async place(
+    input: ConfirmOrderDto,
+    priced: PricedSelection,
+  ): Promise<{ order: OrderRow; tickets: TicketRow[] }> {
+    const { summary, event } = priced;
+    const now = this.clock.now();
+    // Nothing owed → the registration is complete the moment it is placed.
+    const issueTickets = !summary.paymentRequired;
+    const base: Omit<PlaceOrderInput, 'reference'> = {
+      organizationId: event.organizationId,
+      eventId: event.id,
+      idempotencyKey: input.idempotencyKey,
+      buyer: input.buyer,
+      ticketTypeId: summary.ticketTypeId,
+      ticketTypeName: summary.ticketTypeName,
+      quantity: summary.quantity,
+      seatIds: summary.seatIds,
+      holdIds: input.holdIds,
+      unitPriceSatang: summary.unitPriceSatang,
+      totals: summary,
+      discountCodeId: priced.discountCodeId,
+      issueTickets,
+      qrTokens: issueTickets
+        ? Array.from({ length: summary.quantity }, () => generateQrToken())
+        : [],
+      buildEvent: (order, issued) =>
+        issueTickets
+          ? registrationConfirmedEvent({
+              organizationId: event.organizationId,
+              orderId: order.id,
+              reference: order.reference,
+              eventId: event.id,
+              buyerEmail: order.buyerEmail,
+              buyerName: order.buyerName,
+              buyerPhone: order.buyerPhone,
+              ticketCount: issued.length,
+              totalSatang: order.totalSatang,
+              vatSatang: order.vatAmountSatang,
+              currency: order.currency,
+              isOnline: event.isOnline,
+              paid: order.totalSatang > 0,
+              occurredAt: now.toISOString(),
+            })
+          : null,
+      now,
+    };
+    return this.withFreshReference(base);
+  }
+
+  /**
+   * References are random, so a collision is astronomically unlikely but not
+   * impossible; `uq_orders_org_reference` catches it and we simply try another.
+   * Note this retries ONLY on the reference — the idempotency key is untouched,
+   * so a retry still resolves to the one order this buyer meant to place.
+   */
+  private async withFreshReference(
+    base: Omit<PlaceOrderInput, 'reference'>,
+  ): Promise<{ order: OrderRow; tickets: TicketRow[] }> {
+    for (let attempt = 1; attempt <= REFERENCE_ATTEMPTS; attempt += 1) {
+      try {
+        return await this.repo.placeOrder({
+          ...base,
+          reference: generateOrderReference(),
+        });
+      } catch (error) {
+        if (!isReferenceCollision(error) || attempt === REFERENCE_ATTEMPTS) {
+          throw error;
+        }
+      }
+    }
+    throw DomainException.conflict(
+      "We couldn't complete your booking. Please try again.",
+    );
+  }
+
+  private toResponse(
+    order: OrderRow,
+    issued: TicketRow[],
+    priced: PricedSelection,
+  ): OrderPlacedDto {
+    const { summary, event } = priced;
+    return {
+      orderId: order.id,
+      reference: order.reference,
+      status: order.status,
+      paymentStatus: order.paymentStatus,
+      eventName: event.name,
+      buyerEmail: order.buyerEmail,
+      totalSatang: order.totalSatang,
+      vatSatang: order.vatAmountSatang,
+      summary,
+      tickets: issued.map((ticket) => ({
+        id: ticket.id,
+        qrToken: ticket.qrToken,
+        holderName: ticket.holderName,
+        ticketLabel: ticket.ticketLabel,
+        status: ticket.status,
+      })),
+      // Only a fully-placed, paid-up order has anything to show yet.
+      paymentRequired: summary.paymentRequired,
+    };
+  }
+}
+
+/** A duplicate `reference` — the one collision worth retrying blind. */
+function isReferenceCollision(error: unknown): boolean {
+  const code = (error as { code?: string } | null)?.code;
+  const constraint = (error as { constraint_name?: string } | null)
+    ?.constraint_name;
+  return code === UNIQUE_VIOLATION && constraint === 'uq_orders_org_reference';
+}

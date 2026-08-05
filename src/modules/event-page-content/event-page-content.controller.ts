@@ -41,7 +41,11 @@ export class EventPageContentController {
     @Param('id') id: string,
     @Body() dto: SetHighlightsDto,
   ): Promise<HighlightView[]> {
-    return this.content.setHighlights(auth, id, dto.highlights);
+    return this.content.setHighlights(
+      auth,
+      id,
+      dto.highlights.map((h) => ({ text: h.text, icon: h.icon ?? null })),
+    );
   }
 
   @Get('faqs')
