@@ -30,7 +30,7 @@ The build plan is **not in this repo** — it lives in the sibling SDLC docs at 
 these before adding anything:
 - [`../eventa-docs/05-development/development-guide.md`](../eventa-docs/05-development/development-guide.md) — how to build *this* repo (layout, conventions, the feature playbook). **Primary reference.**
 - [`../eventa-docs/04-architecture/software-architecture.md`](../eventa-docs/04-architecture/software-architecture.md) — the SAD (modular monolith, outbox, checkout consistency, ADRs).
-- [`../eventa-docs/04-architecture/entities.md`](../eventa-docs/04-architecture/entities.md) + `erd.md` — the data-model **source of truth** (47 tables). **This repo owns the DB schema & migrations.**
+- [`../eventa-docs/04-architecture/entities.md`](../eventa-docs/04-architecture/entities.md) + `erd.md` — the data-model **source of truth**: 53 tables as the **target** model, of which **40 are built** here. **This repo owns the DB schema & migrations**, so the committed `pgTable` definitions — not the catalogue — are the inventory of what exists.
 - [`../eventa-docs/01-requirements-and-features/functional-requirements.md`](../eventa-docs/01-requirements-and-features/functional-requirements.md) — the product backlog; a `US-*` story's acceptance criteria become your tests ([test cases](../eventa-docs/06-testing/test-cases.md)).
 
 Polyrepo siblings: `../eventa-web` (React front-end, consumes this API's `openapi.json`), `../eventa-worker`
