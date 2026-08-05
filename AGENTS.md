@@ -15,12 +15,16 @@ request context, correlation-id middleware, `DomainException` + global error-env
 structured logging), the `/api/v1` global prefix + `ValidationPipe`, Swagger/`openapi.json`, a
 `/api/v1/health/{live,ready}` probe pair, and a `docker-compose.yml` for Postgres/Redis/RabbitMQ.
 Installed stack: `drizzle-orm`/`pg`, `@nestjs/config`, `@nestjs/swagger`, `class-validator`/`-transformer`,
-`zod`, `nestjs-pino`, `@nestjs/passport`+`passport-jwt`, `@node-rs/argon2`, `amqplib`. **Built so far:** the
-full identity/organization/platform **schema** (14 tables + RLS migrations) in `src/db/schema`; the
-**identity** module (JWT auth — login/refresh/me/logout via passport-jwt) and **platform** module
-(transactional **outbox**); and the **outbox relay** (`src/relay.ts` → `RelayModule`) that publishes
-`outbox_events` to RabbitMQ (consumed by `../eventa-worker`). More domain modules (events, ticketing,
-registration, …) are still to come — translate `entities.md` one bounded context at a time.
+`zod`, `nestjs-pino`, `@nestjs/passport`+`passport-jwt`, `@node-rs/argon2`, `amqplib`. **Built so far
+(E1–E6):** the **schema & migrations** (identity/organization/platform, events, ticketing/discounts,
+registration/payments — 0001…0027) in `src/db/schema`; the **identity family** (JWT auth with 2FA-enforced
+sign-in, signup, password, sessions, social); **workspace** (access/RBAC, organization, settings, audit);
+the **event family** (`events` + `event-*`, `public-pages`); **ticketing** (`ticketing`, `ticket-sharing`,
+`discounts`); the **attendee surface** (`discover`, `saved-events`, `checkout`, `payments`,
+`attendee-tickets`, `attendee-payments`, `account-deletion`); and the **outbox relay** (`src/relay.ts` →
+`RelayModule`) that publishes `outbox_events` to RabbitMQ (consumed by `../eventa-worker`). Still to come:
+check-in (E8), messaging (E7), finance/refunds (E9), … — translate `entities.md` one bounded context at a
+time. (US-DISC-13 ratings are deferred until after E8 — recorded in the functional requirements.)
 
 The build plan is **not in this repo** — it lives in the sibling SDLC docs at **`../eventa-docs`**. Read
 these before adding anything:
@@ -29,8 +33,8 @@ these before adding anything:
 - [`../eventa-docs/04-architecture/entities.md`](../eventa-docs/04-architecture/entities.md) + `erd.md` — the data-model **source of truth** (47 tables). **This repo owns the DB schema & migrations.**
 - [`../eventa-docs/01-requirements-and-features/functional-requirements.md`](../eventa-docs/01-requirements-and-features/functional-requirements.md) — the product backlog; a `US-*` story's acceptance criteria become your tests ([test cases](../eventa-docs/06-testing/test-cases.md)).
 
-Polyrepo siblings: `../eventa-web` (React front-end, consumes this API's `openapi.json`), `eventa-worker`
-(RabbitMQ consumers — not created yet), `eventa-infra` (Terraform/Helm/Argo CD).
+Polyrepo siblings: `../eventa-web` (React front-end, consumes this API's `openapi.json`), `../eventa-worker`
+(RabbitMQ consumers of the outbox events), `eventa-infra` (Terraform/Helm/Argo CD).
 
 **Framework docs:** NestJS — https://docs.nestjs.com/ (consult it for module/provider/DI, pipes/guards/
 interceptors, and testing patterns rather than guessing).
@@ -117,7 +121,9 @@ the development guide when implementing:
   `event-*` sub-domains (`event-categories`, `event-program`, `event-seating`, `event-sharing`,
   `event-monitoring`, `event-duplication`, `event-page`, `event-page-content`) · `public-pages` ·
   `ticketing` · `ticket-sharing` · `discounts` (promotions & redemption) · `registration` ·
-  `registration-stats` · `platform` (outbox/idempotency/audit/jobs). Tree: `src/db/`,
+  `registration-stats` · `discover` (anonymous cross-tenant browse/search) · `saved-events` · `checkout`
+  (order placement — the money path) · `payments` (provider seam + webhooks) · `attendee-tickets` ·
+  `attendee-payments` · `account-deletion` · `platform` (outbox/idempotency/audit/jobs). Tree: `src/db/`,
   `src/modules/<name>/`, `src/common/` (`guards/`, `decorators/`, `interceptors/`, `filters/`, `http/`,
   `util/`, tenancy), plus `src/relay.ts` (the outbox publisher) and a generated `openapi.json`.
 - **Cross-cutting code lives in `src/common/`, never in a domain module.** A guard, decorator, pipe or
@@ -220,11 +226,17 @@ inside `events/`, and it became a runtime DI failure the moment it moved out.)*
 its own `ports/` folder; the **owner** implements it as an adapter and binds it
 (`{ provide: EventStatsPort, useClass: RegistrationStatsAdapter }`). So Events reads registration numbers
 without importing Registration's tables. Use `forwardRef` **only** for a genuine bidirectional dependency
-(auth↔access, auth↔auth-signup, auth↔auth-password, events↔ticketing, ticketing↔registration) — not to
-paper over a bad boundary. Ports in play: `TicketAvailabilityPort` · `EventStatsPort` · `TicketSalesPort` ·
+(auth↔access, auth↔auth-signup, auth↔auth-password, auth↔auth-social, auth↔users, events↔ticketing,
+ticketing↔registration) — not to paper over a bad boundary. Ports in play: `TicketAvailabilityPort` ·
+`EventStatsPort` · `TicketSalesPort` ·
 `TicketEligibilityPort` (Registration asks Ticketing "may this tier be sold right now?") ·
 `CheckoutActivityPort` (Ticketing asks Registration "is anyone mid-checkout?") · `EventLookupPort` ·
-`EventOrgLookupPort` (Discounts resolves an anonymous checkout's tenant from the event, never the caller).
+`EventOrgLookupPort` (Discounts resolves an anonymous checkout's tenant from the event, never the caller) ·
+`EventAttendancePort` (Discover asks RegistrationStats how full an event is) · `CheckoutEventPort` ·
+`TicketCatalogPort` · `SeatMapPort` (Checkout reads the event, its tiers and its seats through their
+owners) · `OrderPaymentPort` (Payments settles "paid + ticketed" atomically through Checkout's
+transaction). Provider seams (infrastructure behind an abstract class, not cross-context reads):
+`SocialVerifierPort` (OAuth token verification) · `PaymentProviderPort` (the PSP adapter — PCI SAQ-A).
 
 **5. Register it in `app.module.ts`** and write the module docstring: what it owns, what it depends on, and
 why any `forwardRef` exists.
