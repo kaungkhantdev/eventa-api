@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { DomainException } from '../../common/errors/domain.exception';
+import type { Env } from '../../config/env.validation';
 import { Clock } from '../../common/time/clock';
 import { CheckoutService, type PricedSelection } from './checkout.service';
 import {
@@ -10,6 +12,7 @@ import {
 } from './checkout.repository';
 import { registrationConfirmedEvent } from './events/registration-confirmed.event';
 import { generateOrderReference, generateQrToken } from './order-reference';
+import { ticketsUrlFor } from './ticket-links';
 import type { ConfirmOrderDto } from './dto/confirm-order.dto';
 import type { OrderPlacedDto } from './dto/order-placed.dto';
 
@@ -35,11 +38,16 @@ const UNIQUE_VIOLATION = '23505';
  */
 @Injectable()
 export class CheckoutOrderService {
+  private readonly publicWebUrl: string;
+
   constructor(
     private readonly checkout: CheckoutService,
     private readonly repo: CheckoutRepository,
     private readonly clock: Clock,
-  ) {}
+    config: ConfigService<Env, true>,
+  ) {
+    this.publicWebUrl = config.getOrThrow('PUBLIC_WEB_URL', { infer: true });
+  }
 
   async confirm(input: ConfirmOrderDto): Promise<OrderPlacedDto> {
     // Re-priced here, never taken from the request: what is charged is what the
@@ -93,6 +101,7 @@ export class CheckoutOrderService {
               currency: order.currency,
               isOnline: event.isOnline,
               paid: order.totalSatang > 0,
+              ticketsUrl: ticketsUrlFor(this.publicWebUrl, order.id),
               occurredAt: now.toISOString(),
             })
           : null,

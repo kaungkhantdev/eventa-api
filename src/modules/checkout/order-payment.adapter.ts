@@ -11,7 +11,10 @@ import { CheckoutRepository, type OrderRow } from './checkout.repository';
 import { registrationConfirmedEvent } from './events/registration-confirmed.event';
 import { refundRequiredEvent } from './events/refund-required.event';
 import { generateQrToken } from './order-reference';
+import { ConfigService } from '@nestjs/config';
+import type { Env } from '../../config/env.validation';
 import { CheckoutEventPort } from './ports/checkout-event.port';
+import { ticketsUrlFor } from './ticket-links';
 
 /**
  * Checkout's implementation of the Payments-owned order port (US-DISC-05).
@@ -21,12 +24,16 @@ import { CheckoutEventPort } from './ports/checkout-event.port';
  */
 @Injectable()
 export class OrderPaymentAdapter extends OrderPaymentPort {
+  private readonly publicWebUrl: string;
+
   constructor(
     private readonly repo: CheckoutRepository,
     private readonly events: CheckoutEventPort,
     private readonly clock: Clock,
+    config: ConfigService<Env, true>,
   ) {
     super();
+    this.publicWebUrl = config.getOrThrow('PUBLIC_WEB_URL', { infer: true });
   }
 
   async findPayable(orderId: string): Promise<PayableOrder | null> {
@@ -134,6 +141,7 @@ export class OrderPaymentAdapter extends OrderPaymentPort {
       currency: order.currency,
       isOnline,
       paid: true,
+      ticketsUrl: ticketsUrlFor(this.publicWebUrl, order.id),
       occurredAt: now.toISOString(),
     });
   }

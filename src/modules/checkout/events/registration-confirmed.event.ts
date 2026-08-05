@@ -20,6 +20,12 @@ export interface RegistrationConfirmedInput {
   isOnline: boolean;
   /** True once money changed hands — a free RSVP gets no VAT receipt. */
   paid: boolean;
+  /**
+   * ABSOLUTE link to the buyer's tickets. Built here, from `PUBLIC_WEB_URL`,
+   * exactly as `verifyUrl`/`resetUrl` are — the worker has no notion of the
+   * web origin, and a relative path is inert in an email client.
+   */
+  ticketsUrl: string;
   occurredAt: string;
 }
 
@@ -59,6 +65,7 @@ export function registrationConfirmedEvent(
       currency: input.currency,
       isOnline: input.isOnline,
       paid: input.paid,
+      ticketsUrl: input.ticketsUrl,
       occurredAt: input.occurredAt,
     },
   };
