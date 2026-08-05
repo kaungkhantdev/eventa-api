@@ -1,6 +1,5 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { DomainException } from '../../common/errors/domain.exception';
-import { ErrorCode } from '../../common/errors/error-codes';
 import { AuthService, type LoginResult } from '../auth/auth.service';
 import type { TwoFactorChallengeClaims } from '../auth/auth.types';
 import { LoginThrottleService } from '../auth/login-throttle.service';
@@ -22,15 +21,6 @@ const EXPIRED_MESSAGE =
   'Your sign-in challenge expired — please sign in again.';
 const BAD_CODE_MESSAGE =
   "That code didn't work. Try the next one, or a recovery code.";
-
-/** 401 in this codebase is the plain constructor — there is no factory for it. */
-function unauthorized(message: string): DomainException {
-  return new DomainException(
-    ErrorCode.UNAUTHORIZED,
-    message,
-    HttpStatus.UNAUTHORIZED,
-  );
-}
 
 /**
  * The second step of a two-factor sign-in (US-ACC-05 / US-DISC-12): the
@@ -72,7 +62,7 @@ export class TwoFactorSignInService {
     try {
       return await this.tokens.verifyTwoFactorChallenge(token);
     } catch {
-      throw unauthorized(EXPIRED_MESSAGE);
+      throw DomainException.unauthorized(EXPIRED_MESSAGE);
     }
   }
 
@@ -83,7 +73,7 @@ export class TwoFactorSignInService {
       found.user.organizationId !== claims.org ||
       found.user.persona !== claims.persona
     ) {
-      throw unauthorized(EXPIRED_MESSAGE);
+      throw DomainException.unauthorized(EXPIRED_MESSAGE);
     }
     if (found.user.status !== 'Active') {
       throw DomainException.forbidden('This account cannot sign in.');
@@ -98,7 +88,7 @@ export class TwoFactorSignInService {
     const ok = await this.twoFactor.verify(claims.org, claims.sub, code);
     if (!ok) {
       await this.throttle.recordFailure(throttleId(claims.sub));
-      throw unauthorized(BAD_CODE_MESSAGE);
+      throw DomainException.unauthorized(BAD_CODE_MESSAGE);
     }
     await this.throttle.recordSuccess(throttleId(claims.sub));
   }

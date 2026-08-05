@@ -27,6 +27,7 @@ import { EventProgramModule } from './modules/event-program/event-program.module
 import { EventSeatingModule } from './modules/event-seating/event-seating.module';
 import { EventSharingModule } from './modules/event-sharing/event-sharing.module';
 import { AccessModule } from './modules/access/access.module';
+import { AccountDeletionModule } from './modules/account-deletion/account-deletion.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { AuthPasswordModule } from './modules/auth-password/auth-password.module';
 import { AttendeePaymentsModule } from './modules/attendee-payments/attendee-payments.module';
@@ -68,6 +69,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     AuthTwoFactorModule,
     AuditModule,
     AccessModule,
+    AccountDeletionModule,
     OrganizationModule,
     NotificationPreferencesModule,
     PaymentSettingsModule,
