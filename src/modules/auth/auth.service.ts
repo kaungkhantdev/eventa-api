@@ -42,6 +42,16 @@ export interface LoginResult {
   user: MeResponseDto;
 }
 
+/** Password checked out, but a code is required before any session exists. */
+export interface TwoFactorChallenge {
+  twoFactorRequired: true;
+  challengeToken: string;
+  /** How long the code prompt is valid, seconds. */
+  expiresIn: number;
+}
+
+export type LoginOutcome = LoginResult | TwoFactorChallenge;
+
 export interface AcceptInviteResult {
   userId: string;
   email: string;
@@ -96,7 +106,7 @@ export class AuthService {
     private readonly signup: SignupService,
   ) {}
 
-  async login(input: LoginInput): Promise<LoginResult> {
+  async login(input: LoginInput): Promise<LoginOutcome> {
     const resolved: ResolvedLoginInput = {
       ...input,
       orgSlug: resolveRealm(input),
@@ -105,7 +115,29 @@ export class AuthService {
     await this.throttle.assertNotLocked(throttleId);
     const found = await this.authenticateThrottled(resolved, throttleId);
     await this.assertEligible(found);
+    // A correct password is necessary but not sufficient (US-ACC-05): with 2FA
+    // on, no session exists until the code checks out — the challenge token is
+    // the only thing the password earns.
+    if (found.user.twoFactorEnabled) {
+      return this.issueTwoFactorChallenge(found, input);
+    }
     return this.startSession(found, input);
+  }
+
+  private async issueTwoFactorChallenge(
+    found: LoginUser,
+    input: LoginInput,
+  ): Promise<TwoFactorChallenge> {
+    return {
+      twoFactorRequired: true,
+      challengeToken: await this.tokens.signTwoFactorChallenge({
+        userId: found.user.id,
+        organizationId: found.org.id,
+        persona: found.user.persona,
+        rememberMe: input.rememberMe ?? false,
+      }),
+      expiresIn: this.tokens.twoFactorChallengeTtlSeconds,
+    };
   }
 
   /**

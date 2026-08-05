@@ -166,6 +166,9 @@ describe('AuthService', () => {
 
       const result = await service.login(input);
 
+      // No challenge here — 2FA is off for this account.
+      if ('twoFactorRequired' in result)
+        throw new Error('unexpected challenge');
       expect(result.accessToken).toBe('access.jwt');
       expect(result.refreshToken).toBe('refresh.jwt');
       expect(result.expiresIn).toBe(900);
@@ -190,6 +193,50 @@ describe('AuthService', () => {
       expect(repo.recordAudit).not.toHaveBeenCalledWith(
         expect.objectContaining({ type: 'signin' }),
       );
+    });
+  });
+
+  // US-ACC-05: with 2FA on, a correct password earns a challenge, not a session.
+  describe('login — the two-factor challenge', () => {
+    beforeEach(() => {
+      users.findLoginUser.mockResolvedValue({
+        user: userRow({ twoFactorEnabled: true }),
+        org,
+      });
+      passwords.verify.mockResolvedValue(true);
+      tokens.signTwoFactorChallenge = jest
+        .fn()
+        .mockResolvedValue('challenge.jwt');
+      Object.defineProperty(tokens, 'twoFactorChallengeTtlSeconds', {
+        value: 300,
+      });
+    });
+
+    it('answers with a challenge and opens NO session', async () => {
+      const result = await service.login(input);
+      expect(result).toEqual({
+        twoFactorRequired: true,
+        challengeToken: 'challenge.jwt',
+        expiresIn: 300,
+      });
+      expect(repo.createSession).not.toHaveBeenCalled();
+      expect(tokens.signAccess).not.toHaveBeenCalled();
+      expect(outbox.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('carries remember-me into the challenge for the second step', async () => {
+      await service.login({ ...input, rememberMe: true });
+      expect(tokens.signTwoFactorChallenge).toHaveBeenCalledWith(
+        expect.objectContaining({ rememberMe: true }),
+      );
+    });
+
+    it('still refuses a wrong password before any challenge exists', async () => {
+      passwords.verify.mockResolvedValue(false);
+      await expect(service.login(input)).rejects.toMatchObject({
+        code: 'UNAUTHORIZED',
+      });
+      expect(tokens.signTwoFactorChallenge).not.toHaveBeenCalled();
     });
   });
 

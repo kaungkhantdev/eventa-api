@@ -34,6 +34,20 @@ export interface RefreshTokenClaims extends BaseClaims {
   typ: 'refresh';
 }
 
+/**
+ * Claims of the short-lived token bridging password and code (US-ACC-05 /
+ * US-DISC-12). It proves "this person's password checked out moments ago" and
+ * nothing more — it opens no session and no API route.
+ */
+export interface TwoFactorChallengeClaims {
+  sub: string; // userId
+  org: number; // organizationId
+  persona: Persona;
+  /** Remember-me carried from the password step, honoured at completion. */
+  rem: boolean;
+  typ: 'twofa';
+}
+
 /** Claims of a workspace-invite token (accepted to set a password + activate). */
 export interface InviteTokenClaims {
   sub: string; // userId
