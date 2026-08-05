@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+/** Stripe's live-mode secret and restricted keys — real money moves on these. */
+const LIVE_STRIPE_KEY = /^(sk|rk)_live/;
+
 /**
  * Environment schema — the single source of truth for process config.
  * `validateEnv` runs at ConfigModule bootstrap; the app refuses to start on an invalid env.
@@ -88,6 +91,19 @@ export const envSchema = z
       message:
         'PAYMENT_PROVIDER=stripe requires STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET',
       path: ['PAYMENT_PROVIDER'],
+    },
+  )
+  // A live key outside production means a test run, a seed script or a local
+  // experiment can charge a real card. Test-mode keys are the only ones that
+  // belong anywhere but production.
+  .refine(
+    (env) =>
+      env.NODE_ENV === 'production' ||
+      !LIVE_STRIPE_KEY.test(env.STRIPE_SECRET_KEY ?? ''),
+    {
+      message:
+        'A live Stripe key (sk_live_/rk_live_) is only allowed when NODE_ENV=production — use a test-mode key from the Stripe dashboard.',
+      path: ['STRIPE_SECRET_KEY'],
     },
   );
 

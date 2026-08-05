@@ -92,5 +92,51 @@ describe('validateEnv', () => {
           .PROMPTPAY_EXPIRY_SECONDS,
       ).toBe(600);
     });
+
+    it('refuses a LIVE secret key outside production — a test run must not charge anyone', () => {
+      expect(() =>
+        validateEnv({
+          ...base,
+          NODE_ENV: 'development',
+          PAYMENT_PROVIDER: 'stripe',
+          STRIPE_SECRET_KEY: 'sk_live_realmoney',
+          STRIPE_WEBHOOK_SECRET: 'whsec_test',
+        }),
+      ).toThrow(/live/i);
+    });
+
+    it('refuses a live RESTRICTED key outside production too', () => {
+      expect(() =>
+        validateEnv({
+          ...base,
+          NODE_ENV: 'development',
+          PAYMENT_PROVIDER: 'stripe',
+          STRIPE_SECRET_KEY: 'rk_live_restricted',
+          STRIPE_WEBHOOK_SECRET: 'whsec_test',
+        }),
+      ).toThrow(/live/i);
+    });
+
+    it('accepts a live key in production', () => {
+      const env = validateEnv({
+        ...base,
+        NODE_ENV: 'production',
+        PAYMENT_PROVIDER: 'stripe',
+        STRIPE_SECRET_KEY: 'sk_live_realmoney',
+        STRIPE_WEBHOOK_SECRET: 'whsec_live',
+      });
+      expect(env.STRIPE_SECRET_KEY).toBe('sk_live_realmoney');
+    });
+
+    it('accepts a test key outside production', () => {
+      const env = validateEnv({
+        ...base,
+        NODE_ENV: 'test',
+        PAYMENT_PROVIDER: 'stripe',
+        STRIPE_SECRET_KEY: 'sk_test_abc123',
+        STRIPE_WEBHOOK_SECRET: 'whsec_test',
+      });
+      expect(env.PAYMENT_PROVIDER).toBe('stripe');
+    });
   });
 });

@@ -8,6 +8,7 @@ import { PaymentsRepository } from './payments.repository';
 import { PaymentsService } from './payments.service';
 import { PaymentProviderPort } from './ports/payment-provider.port';
 import { FakePaymentAdapter } from './providers/fake-payment.adapter';
+import { StripePaymentAdapter } from './providers/stripe-payment.adapter';
 
 /**
  * Payments (US-DISC-05): collect an order's total by card or PromptPay, and act
@@ -17,9 +18,8 @@ import { FakePaymentAdapter } from './providers/fake-payment.adapter';
  *
  * The provider sits behind `PaymentProviderPort` — the PCI SAQ-A boundary; see
  * the port's docstring. Selection is by `PAYMENT_PROVIDER`, defaulting to the
- * fake so nothing charges a card by accident. Choosing `stripe` fails at BOOT
- * until the Stripe adapter lands — a clear crash at startup beats a buyer
- * discovering it at the till.
+ * fake so nothing charges a card by accident; `stripe` needs both Stripe
+ * secrets, which the env schema enforces at boot rather than at the till.
  */
 @Module({
   imports: [CheckoutModule],
@@ -33,12 +33,9 @@ import { FakePaymentAdapter } from './providers/fake-payment.adapter';
         const provider = config.getOrThrow('PAYMENT_PROVIDER', {
           infer: true,
         });
-        if (provider === 'stripe') {
-          throw new Error(
-            'PAYMENT_PROVIDER=stripe is configured but the Stripe adapter is not built yet — set PAYMENT_PROVIDER=fake.',
-          );
-        }
-        return new FakePaymentAdapter(clock, config);
+        return provider === 'stripe'
+          ? new StripePaymentAdapter(clock, config)
+          : new FakePaymentAdapter(clock, config);
       },
       inject: [Clock, ConfigService],
     },
