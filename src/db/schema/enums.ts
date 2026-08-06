@@ -265,3 +265,20 @@ export const holdStatusEnum = pgEnum('hold_status', [
   'expired',
   'released',
 ]);
+
+// ── Finance (E9) ──────────────────────────────────────────────────────────
+export const invoiceStatusEnum = pgEnum('invoice_status', [
+  'issued',
+  'paid',
+  'overdue',
+  'void',
+]);
+
+export const payoutStatusEnum = pgEnum('payout_status', [
+  'scheduled',
+  'processing',
+  'paid',
+  'failed',
+]);
+
+export const taxStatusEnum = pgEnum('tax_status', ['upcoming', 'due', 'filed']);

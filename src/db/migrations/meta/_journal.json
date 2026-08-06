@@ -211,6 +211,20 @@
       "when": 1785918310007,
       "tag": "0029_message_templates_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1785986068272,
+      "tag": "0030_finance_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1785986091443,
+      "tag": "0031_finance_rls",
+      "breakpoints": true
     }
   ]
 }

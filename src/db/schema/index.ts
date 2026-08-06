@@ -16,5 +16,6 @@ export * from './promotions'; // discount_codes
 export * from './program'; // speakers, sessions, session_speakers
 export * from './seating'; // seat_maps, seats
 export * from './registration'; // attendees, orders, order_items, tickets, seat_assignments, seat_holds
-export * from './payments'; // payments, refunds
+export * from './payments'; // payments, refunds, webhook_events
+export * from './finance'; // invoices, payouts, payout_items, tax_periods
 export * from './attendee'; // saved_events — keyed by user, not by workspace
