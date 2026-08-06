@@ -87,7 +87,13 @@ describe('Saved events (e2e — US-DISC-03)', () => {
       .send({ eventIds });
 
   beforeEach(async () => {
-    await pool.query(`DELETE FROM saved_events`);
+    // Scoped to this suite's own attendees. An unqualified DELETE would wipe
+    // rows belonging to other suites the moment these stop running in band.
+    await pool.query(
+      `DELETE FROM saved_events WHERE user_id IN
+         (SELECT id FROM users WHERE email = ANY($1))`,
+      [[ANAN, MALEE]],
+    );
   });
 
   it('starts empty for an attendee who has saved nothing', async () => {
