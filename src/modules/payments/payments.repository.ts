@@ -14,6 +14,9 @@ import type { VerifiedWebhook } from './ports/payment-provider.port';
 export type PaymentRow = typeof payments.$inferSelect;
 export type RefundRow = typeof refunds.$inferSelect;
 
+/** Tax periods and invoice dates are the organizer's calendar day, not UTC's. */
+const BANGKOK = 'Asia/Bangkok';
+
 /** Everything one refund attempt writes (US-FIN-02). */
 export interface ClaimRefundInput {
   organizationId: number;
@@ -117,6 +120,45 @@ export class PaymentsRepository {
         .orderBy(desc(payments.paidAt))
         .limit(1);
       return row ?? null;
+    });
+  }
+
+  /**
+   * What the workspace actually collected each month of `year` (US-FIN-11),
+   * VAT-inclusive and net of refunds — grouped by the Bangkok month the MONEY
+   * MOVED in, not the month of the sale. A June ticket refunded in July belongs
+   * to July's return, because June's has already gone to the Revenue
+   * Department.
+   */
+  async takingsByMonth(
+    organizationId: number,
+    year: number,
+  ): Promise<{ year: number; month: number; grossSatang: number }[]> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const result = await tx.execute<{ month: number; gross: string }>(sql`
+        SELECT month, sum(gross)::bigint AS gross FROM (
+          SELECT date_part('month', paid_at AT TIME ZONE ${BANGKOK})::int AS month,
+                 amount_satang AS gross
+            FROM payments
+           WHERE organization_id = ${organizationId}
+             AND status IN ('paid', 'refunded')
+             AND paid_at IS NOT NULL
+             AND date_part('year', paid_at AT TIME ZONE ${BANGKOK})::int = ${year}
+          UNION ALL
+          SELECT date_part('month', issued_at AT TIME ZONE ${BANGKOK})::int AS month,
+                 -amount_satang AS gross
+            FROM refunds
+           WHERE organization_id = ${organizationId}
+             AND status = 'succeeded'
+             AND date_part('year', issued_at AT TIME ZONE ${BANGKOK})::int = ${year}
+        ) movements
+        GROUP BY month
+      `);
+      return result.rows.map((row) => ({
+        year,
+        month: Number(row.month),
+        grossSatang: Number(row.gross),
+      }));
     });
   }
 

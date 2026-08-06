@@ -5,7 +5,9 @@ import type { Env } from '../../config/env.validation';
 import { AccessModule } from '../access/access.module';
 import { CheckoutModule } from '../checkout/checkout.module';
 import { InvoicePaymentPort } from '../invoices/ports/invoice-payment.port';
+import { TaxableSalesPort } from '../tax-periods/ports/taxable-sales.port';
 import { InvoicePaymentAdapter } from './invoice-payment.adapter';
+import { TaxableSalesAdapter } from './taxable-sales.adapter';
 import { PaymentsController } from './payments.controller';
 import { FinanceController } from './finance.controller';
 import { PaymentsLedgerService } from './payments-ledger.service';
@@ -48,7 +50,8 @@ import { StripePaymentAdapter } from './providers/stripe-payment.adapter';
       inject: [Clock, ConfigService],
     },
     { provide: InvoicePaymentPort, useClass: InvoicePaymentAdapter },
+    { provide: TaxableSalesPort, useClass: TaxableSalesAdapter },
   ],
-  exports: [PaymentsService, InvoicePaymentPort],
+  exports: [PaymentsService, InvoicePaymentPort, TaxableSalesPort],
 })
 export class PaymentsModule {}
