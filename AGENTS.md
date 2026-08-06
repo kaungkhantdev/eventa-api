@@ -18,7 +18,7 @@ Installed stack: `drizzle-orm`/`pg`, `@nestjs/config`, `@nestjs/swagger`, `class
 `zod`, `nestjs-pino`, `@nestjs/passport`+`passport-jwt`, `@node-rs/argon2`, `amqplib`. **Built so far
 (E1–E6, plus E7's US-MSG-01 and part of E9):** the **schema & migrations**
 (identity/organization/platform, events, ticketing/discounts, registration/payments, messaging, finance —
-0001…0034) in `src/db/schema`; the **identity family** (JWT auth with 2FA-enforced
+0001…0036) in `src/db/schema`; the **identity family** (JWT auth with 2FA-enforced
 sign-in, signup, password, sessions, social); **workspace** (access/RBAC, organization, settings, audit);
 the **event family** (`events` + `event-*`, `public-pages`); **ticketing** (`ticketing`, `ticket-sharing`,
 `discounts`); the **attendee surface** (`discover`, `saved-events`, `checkout`, `payments`,
@@ -126,8 +126,9 @@ the development guide when implementing:
   `ticketing` · `ticket-sharing` · `discounts` (promotions & redemption) · `registration` ·
   `registration-stats` · `discover` (anonymous cross-tenant browse/search) · `saved-events` · `checkout`
   (order placement — the money path) · `payments` (provider seam + webhooks) · `attendee-tickets` ·
-  `attendee-payments` · `account-deletion` · `profile-photo` · `invoices` (Thai tax invoices — issue, age,
-  print, void) · `platform` (outbox/idempotency/audit/jobs). Tree: `src/db/`,
+  `attendee-payments` · `account-deletion` · `profile-photo` · the finance family (`invoices` — Thai tax
+  invoices, issue/age/print/void · `tax-periods` — the monthly VAT ledger and PP30 filing · `payouts` —
+  balances, settlement history and recovery) · `platform` (outbox/idempotency/audit/jobs). Tree: `src/db/`,
   `src/modules/<name>/`, `src/common/` (`guards/`, `decorators/`, `interceptors/`, `filters/`, `http/`,
   `util/`, tenancy), plus `src/relay.ts` (the outbox publisher) and a generated `openapi.json`.
 - **Cross-cutting code lives in `src/common/`, never in a domain module.** A guard, decorator, pipe or
@@ -240,9 +241,12 @@ ticketing↔registration) — not to paper over a bad boundary. Ports in play: `
 `TicketCatalogPort` · `SeatMapPort` (Checkout reads the event, its tiers and its seats through their
 owners) · `OrderPaymentPort` (Payments settles "paid + ticketed" atomically through Checkout's
 transaction) · `InvoiceOrderPort` (Invoices bills an order Checkout owns) · `InvoicePaymentPort`
-(Invoices learns how and when that order settled, from Payments). Provider seams (infrastructure behind an
-abstract class, not cross-context reads): `SocialVerifierPort` (OAuth token verification) ·
-`PaymentProviderPort` (the PSP adapter — PCI SAQ-A) · `ObjectStoragePort` (S3 for profile photos).
+(Invoices learns how and when that order settled, from Payments) · `TaxableSalesPort` (the VAT ledger asks
+Payments what was collected each month) · `SettledFundsPort` (Payouts asks Payments what has settled) ·
+`PayoutAccountPort` (Payouts asks PaymentSettings whether a payout account is connected). Provider seams
+(infrastructure behind an abstract class, not cross-context reads): `SocialVerifierPort` (OAuth token
+verification) · `PaymentProviderPort` (the PSP adapter — PCI SAQ-A; also carries the payout settings link
+and payout retry) · `ObjectStoragePort` (S3 for profile photos).
 
 **5. Register it in `app.module.ts`** and write the module docstring: what it owns, what it depends on, and
 why any `forwardRef` exists.

@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   Param,
@@ -10,6 +11,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiConflictResponse, ApiTags } from '@nestjs/swagger';
+import { CSV_MIME } from '../../common/csv/csv';
+import { SkipResponseEnvelope } from '../../common/decorators/skip-envelope.decorator';
 import { ApiPage } from '../../common/http/api-data.decorator';
 import type { Paginated } from '../../common/http/paginated';
 import { CurrentAuth } from '../../common/decorators/current-auth.decorator';
@@ -64,6 +67,24 @@ export class FinanceController {
     // `meta`, not a property on the page: the envelope interceptor rebuilds the
     // response from `items` + `meta`, so anything else assigned is dropped.
     return page.withMeta({ counts });
+  }
+
+  /** The ledger as filtered, as a file — not an envelope (US-FIN-13). */
+  @Get('export.csv')
+  @ApiBearerAuth()
+  @RequirePermissions(Permission.finView)
+  @SkipResponseEnvelope()
+  @Header('Content-Type', CSV_MIME)
+  @Header('Content-Disposition', 'attachment; filename="payments.csv"')
+  @ApiConflictResponse({
+    description: 'Nothing matches these filters',
+    type: ApiErrorDto,
+  })
+  exportCsv(
+    @CurrentAuth() auth: AuthContext,
+    @Query() query: ListPaymentsDto,
+  ): Promise<string> {
+    return this.ledger.exportCsv(auth, { ...query });
   }
 
   @Post(':id/refund')

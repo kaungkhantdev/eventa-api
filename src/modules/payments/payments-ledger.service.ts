@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import { type CsvValue, toCsv } from '../../common/csv/csv';
+import { DomainException } from '../../common/errors/domain.exception';
 import { Paginated } from '../../common/http/paginated';
+import { satangToBaht } from '../../common/money/baht';
 import type { AuthContext } from '../auth/auth.types';
 import type {
   LedgerFilters,
@@ -11,6 +14,20 @@ import type { LedgerEntryDto } from './dto/list-payments.dto';
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 20;
+/** A hard ceiling on one export, so a huge workspace cannot exhaust memory. */
+const EXPORT_LIMIT = 10_000;
+const NOTHING_TO_EXPORT =
+  'There is nothing to export — no payments match these filters.';
+const EXPORT_HEADER = [
+  'date',
+  'transaction',
+  'payer',
+  'event',
+  'method',
+  'status',
+  'amount_baht',
+  'currency',
+];
 
 /** Why an action is unavailable, in the words the story asks for. */
 const NO_COMPLETED_CHARGE = 'No completed charge yet.';
@@ -61,6 +78,41 @@ export class PaymentsLedgerService {
       counts,
     };
   }
+
+  /**
+   * The ledger EXACTLY as filtered on screen (US-FIN-13) — every matching row,
+   * not the current page: an accountant reconciles the whole selection, and a
+   * file that silently stopped at 20 rows would be worse than no file.
+   */
+  async exportCsv(
+    auth: AuthContext,
+    query: Record<string, unknown>,
+  ): Promise<string> {
+    const filters = toFilters(query);
+    const { items } = await this.repo.listLedger(auth.organizationId, {
+      ...filters,
+      page: 1,
+      limit: EXPORT_LIMIT,
+    });
+    if (items.length === 0) {
+      throw DomainException.conflict(NOTHING_TO_EXPORT);
+    }
+    return toCsv(EXPORT_HEADER, items.map(toCsvRow));
+  }
+}
+
+/** One line per payment; the amount is VAT-inclusive, as the ledger shows it. */
+function toCsvRow(row: LedgerRow): CsvValue[] {
+  return [
+    (row.paidAt ?? row.createdAt).toISOString(),
+    row.txn,
+    row.payerName,
+    row.eventName,
+    row.method,
+    row.status,
+    satangToBaht(row.amountSatang),
+    row.currency,
+  ];
 }
 
 function toFilters(query: Record<string, unknown>): LedgerFilters {

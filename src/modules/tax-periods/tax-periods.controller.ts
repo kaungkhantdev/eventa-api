@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   Param,
@@ -11,12 +12,14 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiConflictResponse, ApiTags } from '@nestjs/swagger';
+import { CSV_MIME } from '../../common/csv/csv';
 import { CurrentAuth } from '../../common/decorators/current-auth.decorator';
 import {
   Permission,
   RequirePermissions,
 } from '../../common/decorators/require-permissions.decorator';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
+import { SkipResponseEnvelope } from '../../common/decorators/skip-envelope.decorator';
 import { ApiErrorDto } from '../../common/errors/error-envelope';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
@@ -62,6 +65,26 @@ export class TaxPeriodsController {
       periods: rows.map(toTaxPeriod),
       headlines: toVatHeadlines(headlines),
     };
+  }
+
+  /** The VAT ledger as scoped, as a file — not an envelope (US-FIN-13). */
+  @Get('export.csv')
+  @RequirePermissions(Permission.finView)
+  @SkipResponseEnvelope()
+  @Header('Content-Type', CSV_MIME)
+  @Header('Content-Disposition', 'attachment; filename="vat-periods.csv"')
+  @ApiConflictResponse({
+    description: 'Nothing matches these filters',
+    type: ApiErrorDto,
+  })
+  exportCsv(
+    @CurrentAuth() auth: AuthContext,
+    @Query() query: ListTaxPeriodsDto,
+  ): Promise<string> {
+    return this.periods.exportCsv(auth, {
+      year: query.year,
+      status: query.status,
+    });
   }
 
   @Post(':year/:month/file')

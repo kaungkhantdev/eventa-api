@@ -17,6 +17,7 @@ import {
   ApiNotFoundResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { CSV_MIME } from '../../common/csv/csv';
 import { CurrentAuth } from '../../common/decorators/current-auth.decorator';
 import {
   Permission,
@@ -84,6 +85,23 @@ export class InvoicesController {
     @Body() dto: IssueInvoiceDto,
   ): Promise<unknown> {
     return this.invoices.issue(auth, { orderId: dto.orderId });
+  }
+
+  /** The ledger as filtered, as a file — not an envelope (US-FIN-13). */
+  @Get('export.csv')
+  @RequirePermissions(Permission.finView)
+  @SkipResponseEnvelope()
+  @Header('Content-Type', CSV_MIME)
+  @Header('Content-Disposition', 'attachment; filename="invoices.csv"')
+  @ApiConflictResponse({
+    description: 'Nothing matches these filters',
+    type: ApiErrorDto,
+  })
+  exportCsv(
+    @CurrentAuth() auth: AuthContext,
+    @Query() query: ListInvoicesDto,
+  ): Promise<string> {
+    return this.ledger.exportCsv(auth, { ...query });
   }
 
   @Get(':id')

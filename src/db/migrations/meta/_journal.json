@@ -246,6 +246,20 @@
       "when": 1785988660252,
       "tag": "0034_finance_audit_and_permission",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1785992303506,
+      "tag": "0035_payout_failure_reason",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1785996047240,
+      "tag": "0036_payout_audit_type",
+      "breakpoints": true
     }
   ]
 }

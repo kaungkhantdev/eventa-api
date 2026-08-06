@@ -92,6 +92,10 @@ export const payouts = pgTable(
     /** Masked descriptor only — this service never stores an account number. */
     bankAccount: text().notNull(),
     status: payoutStatusEnum().notNull().default('scheduled'),
+    /** Why the bank rejected it — what the organizer must act on (US-FIN-04). */
+    failureReason: text(),
+    /** The provider's reference for the transfer, replaced on a retry. */
+    gatewayRef: text(),
     periodCovered: text(),
     eventId: uuid().references(() => events.id, { onDelete: 'set null' }),
     requestedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),

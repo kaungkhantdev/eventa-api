@@ -5,8 +5,10 @@ import type { Env } from '../../config/env.validation';
 import { AccessModule } from '../access/access.module';
 import { CheckoutModule } from '../checkout/checkout.module';
 import { InvoicePaymentPort } from '../invoices/ports/invoice-payment.port';
+import { SettledFundsPort } from '../payouts/ports/settled-funds.port';
 import { TaxableSalesPort } from '../tax-periods/ports/taxable-sales.port';
 import { InvoicePaymentAdapter } from './invoice-payment.adapter';
+import { SettledFundsAdapter } from './settled-funds.adapter';
 import { TaxableSalesAdapter } from './taxable-sales.adapter';
 import { PaymentsController } from './payments.controller';
 import { FinanceController } from './finance.controller';
@@ -51,7 +53,16 @@ import { StripePaymentAdapter } from './providers/stripe-payment.adapter';
     },
     { provide: InvoicePaymentPort, useClass: InvoicePaymentAdapter },
     { provide: TaxableSalesPort, useClass: TaxableSalesAdapter },
+    { provide: SettledFundsPort, useClass: SettledFundsAdapter },
   ],
-  exports: [PaymentsService, InvoicePaymentPort, TaxableSalesPort],
+  exports: [
+    PaymentsService,
+    InvoicePaymentPort,
+    TaxableSalesPort,
+    SettledFundsPort,
+    // Payouts shares the provider seam: the hosted settings link and the
+    // re-submitted transfer both go through the same adapter.
+    PaymentProviderPort,
+  ],
 })
 export class PaymentsModule {}

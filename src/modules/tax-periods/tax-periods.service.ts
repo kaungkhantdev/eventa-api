@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
+import { type CsvValue, toCsv } from '../../common/csv/csv';
 import { DomainException } from '../../common/errors/domain.exception';
+import { satangToBaht } from '../../common/money/baht';
 import { Clock } from '../../common/time/clock';
 import type { AuthContext } from '../auth/auth.types';
 import { bangkokToday } from '../invoices/invoice-ageing';
@@ -35,6 +37,37 @@ const NOT_DUE =
   'Only a period that has ended can be filed — this one is still running.';
 const ALREADY_FILED = 'This period has already been filed.';
 const BAD_MONTH = 'Month must be between 1 and 12.';
+const NOTHING_TO_EXPORT =
+  'There is nothing to export — no periods match these filters.';
+const EXPORT_HEADER = [
+  'period',
+  'year',
+  'due_at',
+  'taxable_sales_baht',
+  'vat_collected_baht',
+  'vat_remitted_baht',
+  'vat_payable_baht',
+  'withholding_baht',
+  'status',
+  'filed_at',
+  'late',
+];
+
+function toCsvRow(row: TaxPeriodRow): CsvValue[] {
+  return [
+    row.period,
+    row.year,
+    row.dueAt,
+    satangToBaht(row.salesSatang),
+    satangToBaht(row.vatSatang),
+    satangToBaht(row.remittedSatang),
+    satangToBaht(row.vatSatang - row.remittedSatang),
+    satangToBaht(row.whtSatang),
+    row.status,
+    row.filedAt?.toISOString() ?? null,
+    row.late ? 'yes' : 'no',
+  ];
+}
 
 /**
  * The monthly VAT ledger (US-FIN-11) and recording a PP30 filing (US-FIN-12).
@@ -92,6 +125,17 @@ export class TaxPeriodsService {
     };
     await this.repo.recordFiling(auth.organizationId, filed);
     return this.toRow(input.year, input.month, filed, bangkokToday(now));
+  }
+
+  /**
+   * The VAT ledger exactly as scoped on screen (US-FIN-13), with figures that
+   * reconcile: VAT is 7% of the taxable base, and payable is collected minus
+   * remitted on every row.
+   */
+  async exportCsv(auth: AuthContext, query: ListPeriodsQuery): Promise<string> {
+    const { rows } = await this.list(auth, query);
+    if (rows.length === 0) throw DomainException.conflict(NOTHING_TO_EXPORT);
+    return toCsv(EXPORT_HEADER, rows.map(toCsvRow));
   }
 
   /** Every month of the year, filed ones frozen and the rest computed. */

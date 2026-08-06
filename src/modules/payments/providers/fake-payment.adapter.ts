@@ -9,6 +9,8 @@ import {
   type StartPaymentInput,
   type RefundPaymentInput,
   type RefundedPayment,
+  type RetriedPayout,
+  type RetryPayoutInput,
   type StartedPayment,
   type VerifiedWebhook,
 } from '../ports/payment-provider.port';
@@ -78,6 +80,23 @@ export class FakePaymentAdapter extends PaymentProviderPort {
   verifyWebhook(rawBody: Buffer, signature: string): VerifiedWebhook {
     this.assertSignature(rawBody, signature);
     return parseEvent(rawBody);
+  }
+
+  /** A stand-in dashboard URL; null mirrors "no account connected yet". */
+  payoutSettingsLink(accountId: string | null): Promise<string | null> {
+    if (!accountId) return Promise.resolve(null);
+    return Promise.resolve(
+      `https://fake-provider.test/express/${accountId}/payouts`,
+    );
+  }
+
+  /** Stable per reference, so a double-tapped retry yields one transfer. */
+  retryPayout(input: RetryPayoutInput): Promise<RetriedPayout> {
+    return Promise.resolve({
+      payoutRef: `fake_po_${digest(input.reference).slice(0, 24)}`,
+      status: 'processing',
+      failureReason: null,
+    });
   }
 
   /**

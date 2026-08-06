@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import { type CsvValue, toCsv } from '../../common/csv/csv';
 import { DomainException } from '../../common/errors/domain.exception';
 import { Paginated } from '../../common/http/paginated';
+import { satangToBaht } from '../../common/money/baht';
 import { Clock } from '../../common/time/clock';
 import type { AuthContext } from '../auth/auth.types';
 import {
@@ -10,11 +12,33 @@ import {
   type InvoiceEntryDto,
   MAX_LIMIT,
 } from './dto/list-invoices.dto';
-import { bangkokToday } from './invoice-ageing';
+import { ageInvoice, bangkokToday } from './invoice-ageing';
 import { renderInvoiceSvg } from './invoice.svg';
 import { toInvoiceDetail, toInvoiceEntry } from './invoices.mapper';
 import { InvoicesRepository } from './invoices.repository';
-import type { InvoiceFilters } from './invoices.types';
+import type { InvoiceFilters, InvoiceRow } from './invoices.types';
+
+/** A hard ceiling on one export, so a huge workspace cannot exhaust memory. */
+const EXPORT_LIMIT = 10_000;
+const NOTHING_TO_EXPORT =
+  'There is nothing to export — no invoices match these filters.';
+const EXPORT_HEADER = [
+  'invoice_number',
+  'issued_at',
+  'due_at',
+  'days_until_due',
+  'buyer_name',
+  'buyer_email',
+  'event',
+  'order_reference',
+  'subtotal_baht',
+  'vat_baht',
+  'total_baht',
+  'currency',
+  'status',
+  'paid_via',
+  'paid_on',
+];
 
 export interface ListInvoicesQuery {
   page?: number;
@@ -92,4 +116,49 @@ export class InvoicesLedgerService {
     if (!row) throw DomainException.notFound('Invoice not found.');
     return renderInvoiceSvg(row);
   }
+
+  /**
+   * The ledger EXACTLY as filtered on screen, with subtotal and VAT columns
+   * that reconcile to the amount (US-FIN-13). Every matching invoice, not the
+   * current page.
+   */
+  async exportCsv(
+    auth: AuthContext,
+    query: ListInvoicesQuery,
+  ): Promise<string> {
+    const today = bangkokToday(this.clock.now());
+    const { items } = await this.repo.page(
+      auth.organizationId,
+      { ...query, page: 1, limit: EXPORT_LIMIT },
+      today,
+    );
+    if (items.length === 0) {
+      throw DomainException.conflict(NOTHING_TO_EXPORT);
+    }
+    return toCsv(
+      EXPORT_HEADER,
+      items.map((row) => toCsvRow(row, today)),
+    );
+  }
+}
+
+function toCsvRow(row: InvoiceRow, today: string): CsvValue[] {
+  const { status, daysUntilDue } = ageInvoice(row.status, row.dueAt, today);
+  return [
+    row.number,
+    row.issuedAt,
+    row.dueAt,
+    daysUntilDue,
+    row.buyerName,
+    row.buyerEmail,
+    row.eventName,
+    row.orderReference,
+    satangToBaht(row.subtotalSatang),
+    satangToBaht(row.vatAmountSatang),
+    satangToBaht(row.amountSatang),
+    row.currency,
+    status,
+    row.paidVia,
+    row.paidOn,
+  ];
 }

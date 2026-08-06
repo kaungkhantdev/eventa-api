@@ -77,6 +77,7 @@ export const auditTypeEnum = pgEnum('audit_type', [
   'revoke',
   // Finance (E9) — appended; enum values are add-only.
   'invoice',
+  'payout',
 ]);
 
 export const webhookStatusEnum = pgEnum('webhook_status', [

@@ -162,6 +162,28 @@ export class PaymentsRepository {
     });
   }
 
+  /**
+   * Everything ever collected, net of refunds (US-FIN-03) — the ceiling on what
+   * can be paid out. Both halves are summed in one statement so a refund
+   * landing between two queries cannot make the balance briefly overstate.
+   */
+  async lifetimeNetTakings(organizationId: number): Promise<number> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const result = await tx.execute<{ net: string }>(sql`
+        SELECT coalesce(sum(gross), 0)::bigint AS net FROM (
+          SELECT amount_satang AS gross FROM payments
+           WHERE organization_id = ${organizationId}
+             AND status IN ('paid', 'refunded')
+          UNION ALL
+          SELECT -amount_satang AS gross FROM refunds
+           WHERE organization_id = ${organizationId}
+             AND status = 'succeeded'
+        ) movements
+      `);
+      return Number(result.rows[0]?.net ?? 0);
+    });
+  }
+
   /** What the buyer's card statement shows (US-SET-10); from the workspace row. */
   async orgStatementDescriptor(organizationId: number): Promise<string | null> {
     return withTenant(this.db, organizationId, async (tx) => {

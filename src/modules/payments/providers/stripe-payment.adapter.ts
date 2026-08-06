@@ -10,6 +10,8 @@ import {
   type StartPaymentInput,
   type RefundPaymentInput,
   type RefundedPayment,
+  type RetriedPayout,
+  type RetryPayoutInput,
   type StartedPayment,
   type VerifiedWebhook,
 } from '../ports/payment-provider.port';
@@ -121,6 +123,51 @@ export class StripePaymentAdapter extends PaymentProviderPort {
   verifyWebhook(rawBody: Buffer, signature: string): VerifiedWebhook {
     const event = this.constructEvent(rawBody, signature);
     return toVerifiedWebhook(event);
+  }
+
+  /**
+   * A single-use login link onto the connected account's Express dashboard,
+   * where the organizer manages bank details, schedule and tax forms
+   * (US-FIN-05). This is what keeps bank data out of Eventa entirely: Stripe
+   * collects and shows it, we only hold the `acct_…` reference.
+   */
+  async payoutSettingsLink(accountId: string | null): Promise<string | null> {
+    if (!accountId) return null;
+    const link = await this.stripe.accounts.createLoginLink(accountId);
+    return link.url;
+  }
+
+  /**
+   * Stripe has no "retry" verb — a failed payout is recovered by creating a
+   * fresh one for the same money. `idempotencyKey` is OUR payout reference, so
+   * a double-tapped Retry produces one transfer, and the caller updates the
+   * existing row rather than inserting a second payout.
+   */
+  async retryPayout(input: RetryPayoutInput): Promise<RetriedPayout> {
+    try {
+      const payout = await this.stripe.payouts.create(
+        {
+          amount: input.amountSatang,
+          currency: input.currency.toLowerCase(),
+          metadata: { eventa_reference: input.reference },
+        },
+        {
+          idempotencyKey: `payout-retry:${input.reference}`,
+          ...(input.accountId ? { stripeAccount: input.accountId } : {}),
+        },
+      );
+      return {
+        payoutRef: payout.id,
+        status: payout.status === 'failed' ? 'failed' : 'processing',
+        failureReason: payout.failure_message ?? null,
+      };
+    } catch (error) {
+      // A rejected payout is an outcome the organizer must see, not a 500 —
+      // insufficient balance and a closed bank account both land here.
+      const reason =
+        error instanceof Stripe.errors.StripeError ? error.message : null;
+      return { payoutRef: '', status: 'failed', failureReason: reason };
+    }
   }
 
   private params(input: StartPaymentInput): Stripe.PaymentIntentCreateParams {
