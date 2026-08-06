@@ -11,6 +11,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { createdAt, idPk, updatedAt, version } from './_columns';
+import { citext } from './_types';
 import {
   invoiceStatusEnum,
   payoutStatusEnum,
@@ -21,6 +22,7 @@ import { events } from './events';
 import { organizations } from './organizations';
 import { orders } from './registration';
 import { payments } from './payments';
+import { users } from './identity';
 
 /**
  * A tax invoice for an order (US-FIN-06/07/08/10). Thai VAT invoices are legal
@@ -43,6 +45,11 @@ export const invoices = pgTable(
       .notNull()
       .references(() => events.id, { onDelete: 'restrict' }),
     buyerName: text().notNull(),
+    /**
+     * Snapshotted at issue, not read through to the order: a tax invoice must
+     * still show who it was billed to after the buyer edits their account.
+     */
+    buyerEmail: citext().notNull(),
     issuedAt: date().notNull(),
     /** Terms are 14 days from issue; what "overdue" is measured against. */
     dueAt: date().notNull(),
@@ -53,6 +60,10 @@ export const invoices = pgTable(
     status: invoiceStatusEnum().notNull().default('issued'),
     paidVia: paymentMethodEnum(),
     paidOn: date(),
+    /** Set when an Admin voids it (US-FIN-10); the number is still never reused. */
+    voidedAt: timestamp({ withTimezone: true }),
+    voidReason: text(),
+    voidedBy: uuid().references(() => users.id, { onDelete: 'set null' }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     version: version(),
@@ -62,6 +73,8 @@ export const invoices = pgTable(
     index('ix_invoices_order').on(t.orderId),
     index('ix_invoices_event').on(t.eventId),
     index('ix_invoices_status').on(t.organizationId, t.status),
+    // Ageing is judged on `due_at`, and the ledger sorts newest-issued first.
+    index('ix_invoices_due').on(t.organizationId, t.dueAt),
   ],
 );
 

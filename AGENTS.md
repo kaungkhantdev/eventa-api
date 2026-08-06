@@ -16,15 +16,18 @@ structured logging), the `/api/v1` global prefix + `ValidationPipe`, Swagger/`op
 `/api/v1/health/{live,ready}` probe pair, and a `docker-compose.yml` for Postgres/Redis/RabbitMQ.
 Installed stack: `drizzle-orm`/`pg`, `@nestjs/config`, `@nestjs/swagger`, `class-validator`/`-transformer`,
 `zod`, `nestjs-pino`, `@nestjs/passport`+`passport-jwt`, `@node-rs/argon2`, `amqplib`. **Built so far
-(E1–E6):** the **schema & migrations** (identity/organization/platform, events, ticketing/discounts,
-registration/payments — 0001…0027) in `src/db/schema`; the **identity family** (JWT auth with 2FA-enforced
+(E1–E6, plus E7's US-MSG-01 and part of E9):** the **schema & migrations**
+(identity/organization/platform, events, ticketing/discounts, registration/payments, messaging, finance —
+0001…0034) in `src/db/schema`; the **identity family** (JWT auth with 2FA-enforced
 sign-in, signup, password, sessions, social); **workspace** (access/RBAC, organization, settings, audit);
 the **event family** (`events` + `event-*`, `public-pages`); **ticketing** (`ticketing`, `ticket-sharing`,
 `discounts`); the **attendee surface** (`discover`, `saved-events`, `checkout`, `payments`,
-`attendee-tickets`, `attendee-payments`, `account-deletion`); and the **outbox relay** (`src/relay.ts` →
-`RelayModule`) that publishes `outbox_events` to RabbitMQ (consumed by `../eventa-worker`). Still to come:
-check-in (E8), messaging (E7), finance/refunds (E9), … — translate `entities.md` one bounded context at a
-time. (US-DISC-13 ratings are deferred until after E8 — recorded in the functional requirements.)
+`attendee-tickets`, `attendee-payments`, `account-deletion`); **finance** (the payments ledger + refunds in
+`payments`, and `invoices` — issue/age/print/void a Thai tax invoice); and the **outbox relay**
+(`src/relay.ts` → `RelayModule`) that publishes `outbox_events` to RabbitMQ (consumed by
+`../eventa-worker`). Still to come: the rest of finance (payouts, VAT periods, exports — E9), check-in
+(E8), the dashboard (E11), the rest of messaging (E7), … — translate `entities.md` one bounded context at
+a time. (US-DISC-13 ratings are deferred until after E8 — recorded in the functional requirements.)
 
 The build plan is **not in this repo** — it lives in the sibling SDLC docs at **`../eventa-docs`**. Read
 these before adding anything:
@@ -123,7 +126,8 @@ the development guide when implementing:
   `ticketing` · `ticket-sharing` · `discounts` (promotions & redemption) · `registration` ·
   `registration-stats` · `discover` (anonymous cross-tenant browse/search) · `saved-events` · `checkout`
   (order placement — the money path) · `payments` (provider seam + webhooks) · `attendee-tickets` ·
-  `attendee-payments` · `account-deletion` · `platform` (outbox/idempotency/audit/jobs). Tree: `src/db/`,
+  `attendee-payments` · `account-deletion` · `profile-photo` · `invoices` (Thai tax invoices — issue, age,
+  print, void) · `platform` (outbox/idempotency/audit/jobs). Tree: `src/db/`,
   `src/modules/<name>/`, `src/common/` (`guards/`, `decorators/`, `interceptors/`, `filters/`, `http/`,
   `util/`, tenancy), plus `src/relay.ts` (the outbox publisher) and a generated `openapi.json`.
 - **Cross-cutting code lives in `src/common/`, never in a domain module.** A guard, decorator, pipe or
@@ -235,8 +239,10 @@ ticketing↔registration) — not to paper over a bad boundary. Ports in play: `
 `EventAttendancePort` (Discover asks RegistrationStats how full an event is) · `CheckoutEventPort` ·
 `TicketCatalogPort` · `SeatMapPort` (Checkout reads the event, its tiers and its seats through their
 owners) · `OrderPaymentPort` (Payments settles "paid + ticketed" atomically through Checkout's
-transaction). Provider seams (infrastructure behind an abstract class, not cross-context reads):
-`SocialVerifierPort` (OAuth token verification) · `PaymentProviderPort` (the PSP adapter — PCI SAQ-A).
+transaction) · `InvoiceOrderPort` (Invoices bills an order Checkout owns) · `InvoicePaymentPort`
+(Invoices learns how and when that order settled, from Payments). Provider seams (infrastructure behind an
+abstract class, not cross-context reads): `SocialVerifierPort` (OAuth token verification) ·
+`PaymentProviderPort` (the PSP adapter — PCI SAQ-A) · `ObjectStoragePort` (S3 for profile photos).
 
 **5. Register it in `app.module.ts`** and write the module docstring: what it owns, what it depends on, and
 why any `forwardRef` exists.

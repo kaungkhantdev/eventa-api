@@ -90,6 +90,36 @@ export interface RecordAttemptInput {
 export class PaymentsRepository {
   constructor(@Inject(DRIZZLE) private readonly db: Database) {}
 
+  /**
+   * How and when an order's money landed (US-FIN-07) — the newest paid attempt,
+   * because a buyer who abandoned PromptPay and then paid by card has two rows
+   * and the invoice must name the one that actually settled. The date is the
+   * Bangkok calendar day, since that is the day the invoice prints.
+   */
+  async findSettlementForOrder(
+    organizationId: number,
+    orderId: string,
+  ): Promise<{ method: string; paidOn: string } | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({
+          method: payments.method,
+          paidOn: sql<string>`to_char(${payments.paidAt} AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')`,
+        })
+        .from(payments)
+        .where(
+          and(
+            eq(payments.organizationId, organizationId),
+            eq(payments.orderId, orderId),
+            eq(payments.status, 'paid'),
+          ),
+        )
+        .orderBy(desc(payments.paidAt))
+        .limit(1);
+      return row ?? null;
+    });
+  }
+
   /** What the buyer's card statement shows (US-SET-10); from the workspace row. */
   async orgStatementDescriptor(organizationId: number): Promise<string | null> {
     return withTenant(this.db, organizationId, async (tx) => {

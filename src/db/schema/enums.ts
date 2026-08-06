@@ -30,6 +30,9 @@ export const permissionKeyEnum = pgEnum('permission_key', [
   'finView',
   'finRefund',
   'finDiscount',
+  // Admin-tier finance control (US-FIN-14): void an invoice, move payout money,
+  // record a VAT filing. Appended — enum values are add-only.
+  'finManage',
   'setUsers',
   'setSettings',
   'setIntegrations',
@@ -72,6 +75,8 @@ export const auditTypeEnum = pgEnum('audit_type', [
   'fail',
   'apikey',
   'revoke',
+  // Finance (E9) — appended; enum values are add-only.
+  'invoice',
 ]);
 
 export const webhookStatusEnum = pgEnum('webhook_status', [

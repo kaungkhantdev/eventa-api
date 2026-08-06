@@ -18,6 +18,11 @@ export const PERMISSION_CATALOG: {
   { key: 'finView', group: 'Finance', label: 'View finances' },
   { key: 'finRefund', group: 'Finance', label: 'Issue refunds' },
   { key: 'finDiscount', group: 'Finance', label: 'Manage discounts' },
+  {
+    key: 'finManage',
+    group: 'Finance',
+    label: 'Void invoices, payouts & VAT filing',
+  },
   { key: 'setUsers', group: 'Settings', label: 'Manage team' },
   { key: 'setSettings', group: 'Settings', label: 'Manage settings' },
   { key: 'setIntegrations', group: 'Settings', label: 'Manage integrations' },

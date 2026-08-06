@@ -55,13 +55,15 @@ export class FinanceController {
   @ApiBearerAuth()
   @RequirePermissions(Permission.finView)
   @ResponseMessage('Payments retrieved.')
-  @ApiPage(LedgerEntryDto)
+  @ApiPage(LedgerEntryDto, HttpStatus.OK, { counts: LedgerCountsDto })
   async list(
     @CurrentAuth() auth: AuthContext,
     @Query() query: ListPaymentsDto,
-  ): Promise<Paginated<LedgerEntryDto> & { counts: LedgerCountsDto }> {
+  ): Promise<Paginated<LedgerEntryDto>> {
     const { page, counts } = await this.ledger.list(auth, { ...query });
-    return Object.assign(page, { counts });
+    // `meta`, not a property on the page: the envelope interceptor rebuilds the
+    // response from `items` + `meta`, so anything else assigned is dropped.
+    return page.withMeta({ counts });
   }
 
   @Post(':id/refund')

@@ -4,6 +4,8 @@ import { Clock } from '../../common/time/clock';
 import type { Env } from '../../config/env.validation';
 import { AccessModule } from '../access/access.module';
 import { CheckoutModule } from '../checkout/checkout.module';
+import { InvoicePaymentPort } from '../invoices/ports/invoice-payment.port';
+import { InvoicePaymentAdapter } from './invoice-payment.adapter';
 import { PaymentsController } from './payments.controller';
 import { FinanceController } from './finance.controller';
 import { PaymentsLedgerService } from './payments-ledger.service';
@@ -45,7 +47,8 @@ import { StripePaymentAdapter } from './providers/stripe-payment.adapter';
       },
       inject: [Clock, ConfigService],
     },
+    { provide: InvoicePaymentPort, useClass: InvoicePaymentAdapter },
   ],
-  exports: [PaymentsService],
+  exports: [PaymentsService, InvoicePaymentPort],
 })
 export class PaymentsModule {}

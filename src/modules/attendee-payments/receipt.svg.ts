@@ -1,4 +1,5 @@
 import { formatBaht } from '../../common/money/baht';
+import { escapeXml } from '../../common/xml/escape-xml';
 import type { ReceiptRow } from './attendee-payments.types';
 
 const WIDTH = 600;
@@ -68,14 +69,4 @@ function amount(
   const size = bold ? 20 : 16;
   return `<text x="${LEFT}" y="${y}" font-size="${size}"${weight} fill="#111111">${escapeXml(label)}</text>
   <text x="${RIGHT}" y="${y}" text-anchor="end" font-size="${size}"${weight} fill="#111111">${formatBaht(satang)}</text>`;
-}
-
-/** Every stored string is escaped — an organizer name is not markup. */
-function escapeXml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
 }

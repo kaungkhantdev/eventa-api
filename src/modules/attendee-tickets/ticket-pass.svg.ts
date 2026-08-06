@@ -1,3 +1,4 @@
+import { escapeXml } from '../../common/xml/escape-xml';
 import type { TicketPassDto } from './dto/my-events.dto';
 
 const WIDTH = 600;
@@ -58,14 +59,4 @@ function formatWhen(startAt: string, timezone: string): string {
     hour: '2-digit',
     minute: '2-digit',
   });
-}
-
-/** Every user-authored string is escaped — an event name is not markup. */
-function escapeXml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
 }

@@ -1,10 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, gt, inArray, isNotNull, isNull } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNotNull, isNull, ne } from 'drizzle-orm';
 import { DomainException } from '../../common/errors/domain.exception';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
   attendees,
   discountRedemptions,
+  events,
   orderItems,
   orders,
   organizations,
@@ -15,6 +16,7 @@ import {
   tickets,
 } from '../../db/schema';
 import { withTenant, type Tx } from '../../db/tenant';
+import type { BillableOrder } from '../invoices/ports/invoice-order.port';
 import { OutboxPort, type OutboxEventInput } from '../platform/outbox.port';
 import type { OrderTotals } from './checkout-pricing';
 
@@ -215,6 +217,49 @@ export class CheckoutRepository {
         )
         .limit(1);
       return row ?? null;
+    });
+  }
+
+  /**
+   * The order an invoice may be raised against (US-FIN-07), with the event name
+   * the invoice line item prints. Cancelled orders are excluded — there is
+   * nothing left to bill once the registration is undone.
+   */
+  async findBillableOrder(
+    organizationId: number,
+    orderId: string,
+  ): Promise<BillableOrder | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({
+          id: orders.id,
+          organizationId: orders.organizationId,
+          reference: orders.reference,
+          eventId: orders.eventId,
+          eventName: events.name,
+          buyerName: orders.buyerName,
+          buyerEmail: orders.buyerEmail,
+          totalSatang: orders.totalSatang,
+          vatAmountSatang: orders.vatAmountSatang,
+          currency: orders.currency,
+        })
+        .from(orders)
+        .innerJoin(events, eq(events.id, orders.eventId))
+        .where(
+          and(
+            eq(orders.id, orderId),
+            eq(orders.organizationId, organizationId),
+            ne(orders.status, 'cancelled'),
+          ),
+        )
+        .limit(1);
+      if (!row) return null;
+      return {
+        ...row,
+        organizationId: Number(row.organizationId),
+        totalSatang: Number(row.totalSatang),
+        vatAmountSatang: Number(row.vatAmountSatang),
+      };
     });
   }
 
