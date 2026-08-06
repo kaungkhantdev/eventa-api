@@ -121,6 +121,8 @@ function settlementBlocker(context: SettlementContext): string | null {
 /** An allocation of 0 means unlimited — mirrors `TicketingPolicy`. */
 const UNLIMITED = 0;
 const ACTIVE_HOLD = 'active';
+/** A ticket that still admits someone — the set a refund takes back. */
+const LIVE_TICKET_STATUSES = ['issued', 'checked_in'] as const;
 
 /**
  * Data access for the checkout, including THE money-path transaction
@@ -273,6 +275,52 @@ export class CheckoutRepository {
             eq(seatHolds.status, ACTIVE_HOLD),
           ),
         );
+    });
+  }
+
+  /**
+   * Give the inventory back after a refund (US-FIN-02): void the order's live
+   * tickets, release their seat assignments, and hand the tier's stock back.
+   * `recordRefund` runs inside the same transaction as all of it.
+   */
+  async refundOrder(
+    organizationId: number,
+    orderId: string,
+    recordRefund: (tx: Tx) => Promise<void>,
+    now: Date,
+  ): Promise<{ ticketsVoided: number; seatsReleased: number }> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const voided = await tx
+        .update(tickets)
+        .set({ status: 'refunded', updatedAt: now })
+        .where(
+          and(
+            eq(tickets.orderId, orderId),
+            eq(tickets.organizationId, organizationId),
+            inArray(tickets.status, LIVE_TICKET_STATUSES),
+          ),
+        )
+        .returning({ id: tickets.id });
+      const released = await tx
+        .update(seatAssignments)
+        .set({ releasedAt: now })
+        .where(
+          and(
+            eq(seatAssignments.organizationId, organizationId),
+            inArray(
+              seatAssignments.ticketId,
+              voided.map((t) => t.id),
+            ),
+            isNull(seatAssignments.releasedAt),
+          ),
+        )
+        .returning({ id: seatAssignments.id });
+      await tx
+        .update(orders)
+        .set({ status: 'cancelled', paymentStatus: 'refunded', updatedAt: now })
+        .where(eq(orders.id, orderId));
+      await recordRefund(tx);
+      return { ticketsVoided: voided.length, seatsReleased: released.length };
     });
   }
 

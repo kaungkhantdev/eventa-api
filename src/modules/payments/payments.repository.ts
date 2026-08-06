@@ -1,11 +1,37 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, ne } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
-import { organizations, payments, webhookEvents } from '../../db/schema';
+import {
+  organizations,
+  payments,
+  refunds,
+  webhookEvents,
+} from '../../db/schema';
 import { withTenant, type Tx } from '../../db/tenant';
 import type { VerifiedWebhook } from './ports/payment-provider.port';
 
 export type PaymentRow = typeof payments.$inferSelect;
+export type RefundRow = typeof refunds.$inferSelect;
+
+/** Everything one refund attempt writes (US-FIN-02). */
+export interface ClaimRefundInput {
+  organizationId: number;
+  paymentId: string;
+  orderId: string;
+  amountSatang: number;
+  currency: string;
+  issuedBy: string;
+  idempotencyKey: string;
+  now: Date;
+}
+
+/** Flip the ledger inside the caller's settlement transaction. */
+export interface MarkRefundedInput {
+  refundId: string;
+  paymentId: string;
+  gatewayRef: string;
+  now: Date;
+}
 
 /** Everything one payment attempt writes. Money is the order's, never the caller's. */
 export interface RecordAttemptInput {
@@ -186,6 +212,95 @@ export class PaymentsRepository {
       .update(payments)
       .set({ gatewayRef })
       .where(eq(payments.id, paymentId));
+  }
+
+  /** The payment an admin may refund — tenant-scoped, so another org's is invisible. */
+  async findPaymentForRefund(
+    organizationId: number,
+    paymentId: string,
+  ): Promise<PaymentRow | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(payments)
+        .where(
+          and(
+            eq(payments.id, paymentId),
+            eq(payments.organizationId, organizationId),
+          ),
+        )
+        .limit(1);
+      return row ?? null;
+    });
+  }
+
+  /**
+   * Reserve the right to refund. `uq_refunds_org_idem` is what makes this the
+   * decision point: the second caller loses the insert and gets the existing
+   * row back with `fresh: false`, so only one request ever reaches the provider.
+   */
+  async claimRefund(
+    input: ClaimRefundInput,
+  ): Promise<{ refund: RefundRow; fresh: boolean }> {
+    return withTenant(this.db, input.organizationId, async (tx) => {
+      const [inserted] = await tx
+        .insert(refunds)
+        .values({
+          organizationId: input.organizationId,
+          paymentId: input.paymentId,
+          orderId: input.orderId,
+          amountSatang: input.amountSatang,
+          currency: input.currency,
+          status: 'pending',
+          issuedBy: input.issuedBy,
+          issuedAt: input.now,
+          idempotencyKey: input.idempotencyKey,
+        })
+        .onConflictDoNothing()
+        .returning();
+      if (inserted) return { refund: inserted, fresh: true };
+      const [existing] = await tx
+        .select()
+        .from(refunds)
+        .where(
+          and(
+            eq(refunds.organizationId, input.organizationId),
+            eq(refunds.idempotencyKey, input.idempotencyKey),
+          ),
+        )
+        .limit(1);
+      return { refund: existing, fresh: false };
+    });
+  }
+
+  /** The money did not move — record why, and leave the ticket valid. */
+  async markRefundFailed(
+    refundId: string,
+    reason: string | null,
+  ): Promise<void> {
+    await this.db
+      .update(refunds)
+      .set({ status: 'failed', reason, updatedAt: new Date() })
+      .where(eq(refunds.id, refundId));
+  }
+
+  /**
+   * Flip refund AND payment inside the transaction that voids the tickets, so
+   * a refunded payment and a freed seat commit together or not at all.
+   */
+  async markRefundedIn(tx: Tx, input: MarkRefundedInput): Promise<void> {
+    await tx
+      .update(refunds)
+      .set({
+        status: 'succeeded',
+        gatewayRef: input.gatewayRef,
+        updatedAt: input.now,
+      })
+      .where(eq(refunds.id, input.refundId));
+    await tx
+      .update(payments)
+      .set({ status: 'refunded', updatedAt: input.now })
+      .where(eq(payments.id, input.paymentId));
   }
 
   /** Stamp the outcome, and attach the tenant once it is known. */

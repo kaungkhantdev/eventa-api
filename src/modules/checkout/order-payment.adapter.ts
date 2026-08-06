@@ -89,6 +89,19 @@ export class OrderPaymentAdapter extends OrderPaymentPort {
     });
   }
 
+  refundOrder(
+    organizationId: number,
+    orderId: string,
+    recordRefund: (tx: Tx) => Promise<void>,
+  ): Promise<{ ticketsVoided: number; seatsReleased: number }> {
+    return this.repo.refundOrder(
+      organizationId,
+      orderId,
+      recordRefund,
+      this.clock.now(),
+    );
+  }
+
   releaseHolds(organizationId: number, orderId: string): Promise<void> {
     return this.repo.releaseHoldsForOrder(organizationId, orderId);
   }

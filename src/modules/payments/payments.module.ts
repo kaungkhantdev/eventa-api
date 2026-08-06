@@ -2,8 +2,11 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Clock } from '../../common/time/clock';
 import type { Env } from '../../config/env.validation';
+import { AccessModule } from '../access/access.module';
 import { CheckoutModule } from '../checkout/checkout.module';
 import { PaymentsController } from './payments.controller';
+import { RefundsController } from './refunds.controller';
+import { RefundsService } from './refunds.service';
 import { PaymentsRepository } from './payments.repository';
 import { PaymentsService } from './payments.service';
 import { PaymentProviderPort } from './ports/payment-provider.port';
@@ -22,10 +25,11 @@ import { StripePaymentAdapter } from './providers/stripe-payment.adapter';
  * secrets, which the env schema enforces at boot rather than at the till.
  */
 @Module({
-  imports: [CheckoutModule],
-  controllers: [PaymentsController],
+  imports: [AccessModule, CheckoutModule],
+  controllers: [PaymentsController, RefundsController],
   providers: [
     PaymentsService,
+    RefundsService,
     PaymentsRepository,
     {
       provide: PaymentProviderPort,
