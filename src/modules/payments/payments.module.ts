@@ -2,8 +2,18 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Clock } from '../../common/time/clock';
 import type { Env } from '../../config/env.validation';
+import { AccessModule } from '../access/access.module';
 import { CheckoutModule } from '../checkout/checkout.module';
+import { InvoicePaymentPort } from '../invoices/ports/invoice-payment.port';
+import { SettledFundsPort } from '../payouts/ports/settled-funds.port';
+import { TaxableSalesPort } from '../tax-periods/ports/taxable-sales.port';
+import { InvoicePaymentAdapter } from './invoice-payment.adapter';
+import { SettledFundsAdapter } from './settled-funds.adapter';
+import { TaxableSalesAdapter } from './taxable-sales.adapter';
 import { PaymentsController } from './payments.controller';
+import { FinanceController } from './finance.controller';
+import { PaymentsLedgerService } from './payments-ledger.service';
+import { RefundsService } from './refunds.service';
 import { PaymentsRepository } from './payments.repository';
 import { PaymentsService } from './payments.service';
 import { PaymentProviderPort } from './ports/payment-provider.port';
@@ -22,10 +32,12 @@ import { StripePaymentAdapter } from './providers/stripe-payment.adapter';
  * secrets, which the env schema enforces at boot rather than at the till.
  */
 @Module({
-  imports: [CheckoutModule],
-  controllers: [PaymentsController],
+  imports: [AccessModule, CheckoutModule],
+  controllers: [PaymentsController, FinanceController],
   providers: [
     PaymentsService,
+    RefundsService,
+    PaymentsLedgerService,
     PaymentsRepository,
     {
       provide: PaymentProviderPort,
@@ -39,7 +51,18 @@ import { StripePaymentAdapter } from './providers/stripe-payment.adapter';
       },
       inject: [Clock, ConfigService],
     },
+    { provide: InvoicePaymentPort, useClass: InvoicePaymentAdapter },
+    { provide: TaxableSalesPort, useClass: TaxableSalesAdapter },
+    { provide: SettledFundsPort, useClass: SettledFundsAdapter },
   ],
-  exports: [PaymentsService],
+  exports: [
+    PaymentsService,
+    InvoicePaymentPort,
+    TaxableSalesPort,
+    SettledFundsPort,
+    // Payouts shares the provider seam: the hosted settings link and the
+    // re-submitted transfer both go through the same adapter.
+    PaymentProviderPort,
+  ],
 })
 export class PaymentsModule {}

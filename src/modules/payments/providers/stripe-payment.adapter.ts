@@ -8,6 +8,10 @@ import {
   PaymentProviderPort,
   type PaymentMethodChoice,
   type StartPaymentInput,
+  type RefundPaymentInput,
+  type RefundedPayment,
+  type RetriedPayout,
+  type RetryPayoutInput,
   type StartedPayment,
   type VerifiedWebhook,
 } from '../ports/payment-provider.port';
@@ -96,9 +100,74 @@ export class StripePaymentAdapter extends PaymentProviderPort {
     return this.toStartedPayment(intent, input.method);
   }
 
+  /**
+   * Full refund to the original method. `pending` is a real outcome rather than
+   * a failure — a PromptPay refund waits on the buyer's bank details, which
+   * Stripe collects by email, so the ledger records it and the webhook confirms.
+   */
+  async refund(input: RefundPaymentInput): Promise<RefundedPayment> {
+    const refund = await this.stripe.refunds.create(
+      { payment_intent: input.gatewayRef, amount: input.amountSatang },
+      {
+        idempotencyKey: input.idempotencyKey,
+        ...(input.accountId ? { stripeAccount: input.accountId } : {}),
+      },
+    );
+    return {
+      refundRef: refund.id,
+      status: toRefundStatus(refund.status),
+      failureReason: refund.failure_reason ?? null,
+    };
+  }
+
   verifyWebhook(rawBody: Buffer, signature: string): VerifiedWebhook {
     const event = this.constructEvent(rawBody, signature);
     return toVerifiedWebhook(event);
+  }
+
+  /**
+   * A single-use login link onto the connected account's Express dashboard,
+   * where the organizer manages bank details, schedule and tax forms
+   * (US-FIN-05). This is what keeps bank data out of Eventa entirely: Stripe
+   * collects and shows it, we only hold the `acct_…` reference.
+   */
+  async payoutSettingsLink(accountId: string | null): Promise<string | null> {
+    if (!accountId) return null;
+    const link = await this.stripe.accounts.createLoginLink(accountId);
+    return link.url;
+  }
+
+  /**
+   * Stripe has no "retry" verb — a failed payout is recovered by creating a
+   * fresh one for the same money. `idempotencyKey` is OUR payout reference, so
+   * a double-tapped Retry produces one transfer, and the caller updates the
+   * existing row rather than inserting a second payout.
+   */
+  async retryPayout(input: RetryPayoutInput): Promise<RetriedPayout> {
+    try {
+      const payout = await this.stripe.payouts.create(
+        {
+          amount: input.amountSatang,
+          currency: input.currency.toLowerCase(),
+          metadata: { eventa_reference: input.reference },
+        },
+        {
+          idempotencyKey: `payout-retry:${input.reference}`,
+          ...(input.accountId ? { stripeAccount: input.accountId } : {}),
+        },
+      );
+      return {
+        payoutRef: payout.id,
+        status: payout.status === 'failed' ? 'failed' : 'processing',
+        failureReason: payout.failure_message ?? null,
+      };
+    } catch (error) {
+      // A rejected payout is an outcome the organizer must see, not a 500 —
+      // insufficient balance and a closed bank account both land here.
+      const reason =
+        error instanceof Stripe.errors.StripeError ? error.message : null;
+      return { payoutRef: '', status: 'failed', failureReason: reason };
+    }
   }
 
   private params(input: StartPaymentInput): Stripe.PaymentIntentCreateParams {
@@ -226,6 +295,16 @@ function statementDescriptorSuffix(descriptor: string | null): string | null {
     .slice(0, MAX_SUFFIX_LENGTH)
     .trim();
   return latin.length >= MIN_SUFFIX_LENGTH ? latin : null;
+}
+
+/**
+ * Anything Stripe reports that is not plainly succeeded or in flight counts as
+ * failed. Guessing the other way would mark money as returned when it was not.
+ */
+function toRefundStatus(status: string | null): RefundedPayment['status'] {
+  if (status === 'succeeded') return 'succeeded';
+  if (status === 'pending') return 'pending';
+  return 'failed';
 }
 
 function toStartedStatus(

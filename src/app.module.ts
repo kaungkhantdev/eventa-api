@@ -40,7 +40,10 @@ import { AuthSignupModule } from './modules/auth-signup/auth-signup.module';
 import { AuthSocialModule } from './modules/auth-social/auth-social.module';
 import { UsersModule } from './modules/users/users.module';
 import { CheckoutModule } from './modules/checkout/checkout.module';
+import { InvoicesModule } from './modules/invoices/invoices.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { PayoutsModule } from './modules/payouts/payouts.module';
+import { TaxPeriodsModule } from './modules/tax-periods/tax-periods.module';
 import { DiscoverModule } from './modules/discover/discover.module';
 import { SavedEventsModule } from './modules/saved-events/saved-events.module';
 import { PublicPagesModule } from './modules/public-pages/public-pages.module';
@@ -96,6 +99,9 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     RegistrationStatsModule,
     CheckoutModule,
     PaymentsModule,
+    InvoicesModule,
+    TaxPeriodsModule,
+    PayoutsModule,
   ],
 })
 export class AppModule implements NestModule {

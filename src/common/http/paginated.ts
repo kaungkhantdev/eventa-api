@@ -38,7 +38,7 @@ export class PageMetaDto implements PageMeta {
 export class Paginated<T> {
   constructor(
     readonly items: T[],
-    readonly meta: PageMeta,
+    readonly meta: PageMeta & Record<string, unknown>,
   ) {}
 
   static of<T>(
@@ -56,5 +56,16 @@ export class Paginated<T> {
       hasNext: page < totalPages,
       hasPrevious: page > 1,
     });
+  }
+
+  /**
+   * Attach extra facts ABOUT the list — status-tab counts, totals — to `meta`.
+   *
+   * Use this rather than assigning onto the returned object: the interceptor
+   * rebuilds the envelope from `items` and `meta` alone, so any property hung
+   * on the instance is silently dropped on the way out.
+   */
+  withMeta(extra: Record<string, unknown>): Paginated<T> {
+    return new Paginated<T>(this.items, { ...this.meta, ...extra });
   }
 }

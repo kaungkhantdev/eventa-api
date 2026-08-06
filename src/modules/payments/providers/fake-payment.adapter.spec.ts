@@ -155,4 +155,29 @@ describe('FakePaymentAdapter (US-DISC-05)', () => {
       ).toThrow(DomainException);
     });
   });
+
+  describe('refund (US-FIN-02)', () => {
+    const input = {
+      gatewayRef: 'fake_pi_abc',
+      amountSatang: 210_000,
+      idempotencyKey: 'refund-1',
+      accountId: null,
+    };
+
+    it('gives a stable reference for a key, so a retry refunds once', async () => {
+      const first = await adapter().refund(input);
+      const second = await adapter().refund(input);
+      expect(first.refundRef).toBe(second.refundRef);
+      expect(first.status).toBe('succeeded');
+    });
+
+    it('gives different references to different refunds', async () => {
+      const a = await adapter().refund(input);
+      const b = await adapter().refund({
+        ...input,
+        idempotencyKey: 'refund-2',
+      });
+      expect(a.refundRef).not.toBe(b.refundRef);
+    });
+  });
 });

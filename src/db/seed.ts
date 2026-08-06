@@ -17,6 +17,10 @@
  */
 import { hash } from '@node-rs/argon2';
 import { Pool } from 'pg';
+import {
+  DEFAULT_ROLES,
+  PERMISSION_CATALOG,
+} from '../modules/access/workspace-defaults';
 import { LANDING_TEMPLATES } from '../modules/events/landing-templates';
 
 const ORG = { name: 'Acme', slug: 'acme' } as const;
@@ -30,47 +34,11 @@ const STAFF = {
   email: 'staff@acme.test',
   password: 'correct horse battery staple',
 } as const;
-// The full permission catalog (permission_key enum). The seeded Admin role is
-// granted all of them, so the admin account can create/publish events, etc.
-const PERMISSIONS = [
-  { key: 'evCreate', group: 'Events', label: 'Create & edit events' },
-  { key: 'evPublish', group: 'Events', label: 'Publish & unpublish events' },
-  { key: 'evSpeakers', group: 'Events', label: 'Manage speakers & program' },
-  { key: 'regView', group: 'Registrations', label: 'View registrations' },
-  { key: 'regCheckin', group: 'Registrations', label: 'Check in attendees' },
-  { key: 'regExport', group: 'Registrations', label: 'Export registrations' },
-  { key: 'finView', group: 'Finance', label: 'View finances' },
-  { key: 'finRefund', group: 'Finance', label: 'Issue refunds' },
-  { key: 'finDiscount', group: 'Finance', label: 'Manage discounts' },
-  { key: 'setUsers', group: 'Settings', label: 'Manage team' },
-  { key: 'setSettings', group: 'Settings', label: 'Manage settings' },
-  { key: 'setIntegrations', group: 'Settings', label: 'Manage integrations' },
-] as const;
-const ALL_KEYS = PERMISSIONS.map((p) => p.key);
-// Default role → permission matrix. These are just starting points — edit them at
-// runtime via PUT /roles/:id/permissions.
-const ROLES: { name: string; description: string; grants: string[] }[] = [
-  { name: 'Admin', description: 'Full access', grants: ALL_KEYS },
-  {
-    name: 'Organizer',
-    description: 'Events, program & registrations',
-    grants: [
-      'evCreate',
-      'evPublish',
-      'evSpeakers',
-      'regView',
-      'regCheckin',
-      'regExport',
-      'finView',
-      'finDiscount',
-    ],
-  },
-  {
-    name: 'Staff',
-    description: 'Check-in & registration view',
-    grants: ['regView', 'regCheckin'],
-  },
-];
+// The permission catalog and the default role matrix are the SAME ones a real
+// workspace is provisioned with — imported, never re-typed, so a seeded tenant
+// can never drift from what signup creates.
+const PERMISSIONS = PERMISSION_CATALOG;
+const ROLES = DEFAULT_ROLES;
 // A few workspace categories so the event `categoryId` path is testable.
 // (color values are the `category_color` enum; icon is a Hugeicons slug.)
 const CATEGORIES = [

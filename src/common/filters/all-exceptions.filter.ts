@@ -47,6 +47,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const res = host.switchToHttp().getResponse<Response>();
     const normalized = this.normalize(exception);
     this.log(normalized, exception);
+    // Declared explicitly, because a download route sets its own Content-Type
+    // with `@Header` before the handler ever runs — without this, a refused
+    // export would arrive as an error envelope labelled `text/csv`, which no
+    // client will parse and every browser will offer to save as a file.
+    res.type('application/json');
     res.status(normalized.statusCode).json({
       success: false,
       statusCode: normalized.statusCode,

@@ -66,6 +66,19 @@ export abstract class OrderPaymentPort {
    * and whose bank app scanned the old QR anyway). The registration stands; the
    * duplicate must go back, so a refund event is queued for the finance flow.
    */
+  /**
+   * The money went back — void the order's tickets and return their seats to
+   * availability (US-FIN-02). `recordRefund` runs INSIDE that transaction, so
+   * the refunded ledger and the freed seat commit together: a seat released
+   * without the refund recorded would be sold twice on the strength of a
+   * payment we still think is good.
+   */
+  abstract refundOrder(
+    organizationId: number,
+    orderId: string,
+    recordRefund: (tx: Tx) => Promise<void>,
+  ): Promise<{ ticketsVoided: number; seatsReleased: number }>;
+
   abstract queueRefund(
     organizationId: number,
     orderId: string,

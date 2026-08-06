@@ -30,6 +30,9 @@ export const permissionKeyEnum = pgEnum('permission_key', [
   'finView',
   'finRefund',
   'finDiscount',
+  // Admin-tier finance control (US-FIN-14): void an invoice, move payout money,
+  // record a VAT filing. Appended — enum values are add-only.
+  'finManage',
   'setUsers',
   'setSettings',
   'setIntegrations',
@@ -45,6 +48,9 @@ export const permissionGroupEnum = pgEnum('permission_group', [
 export const twoFactorMethodEnum = pgEnum('two_factor_method', ['totp']);
 
 export const apiKeyStatusEnum = pgEnum('api_key_status', ['active', 'revoked']);
+
+/** How an automated message reaches its recipient (E7). */
+export const messageChannelEnum = pgEnum('message_channel', ['email', 'sms']);
 
 export const notificationKindEnum = pgEnum('notification_kind', [
   'registration',
@@ -69,6 +75,9 @@ export const auditTypeEnum = pgEnum('audit_type', [
   'fail',
   'apikey',
   'revoke',
+  // Finance (E9) — appended; enum values are add-only.
+  'invoice',
+  'payout',
 ]);
 
 export const webhookStatusEnum = pgEnum('webhook_status', [
@@ -262,3 +271,20 @@ export const holdStatusEnum = pgEnum('hold_status', [
   'expired',
   'released',
 ]);
+
+// ── Finance (E9) ──────────────────────────────────────────────────────────
+export const invoiceStatusEnum = pgEnum('invoice_status', [
+  'issued',
+  'paid',
+  'overdue',
+  'void',
+]);
+
+export const payoutStatusEnum = pgEnum('payout_status', [
+  'scheduled',
+  'processing',
+  'paid',
+  'failed',
+]);
+
+export const taxStatusEnum = pgEnum('tax_status', ['upcoming', 'due', 'filed']);

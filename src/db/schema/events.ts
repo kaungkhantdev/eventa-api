@@ -15,6 +15,7 @@ import {
   eventBucketEnum,
   eventStatusEnum,
   eventTypeEnum,
+  localeEnum,
   seatingModeEnum,
   templateIdEnum,
   visibilityEnum,
@@ -93,6 +94,12 @@ export const events = pgTable(
     landingTemplateId: templateIdEnum().references(() => landingTemplates.id, {
       onDelete: 'set null',
     }),
+    /**
+     * The language this event's automated messages default to when the
+     * recipient has no preference of their own (US-MSG-01); null falls back to
+     * the workspace's `organizations.locale`.
+     */
+    locale: localeEnum(),
     publishedAt: timestamp({ withTimezone: true }),
     cancelledAt: timestamp({ withTimezone: true }),
     createdAt: createdAt(),

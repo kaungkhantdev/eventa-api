@@ -11,6 +11,14 @@ const PRICE_LOCALE = 'en-US';
  * Formatting only — what a price of zero should SAY ("Free", "RSVP") is the
  * calling module's word, not this function's.
  */
+/**
+ * Integer satang as a plain Baht NUMBER — for a spreadsheet column, where
+ * `฿2,100` is text an accountant cannot sum but `2100` is a figure they can.
+ */
+export function satangToBaht(satang: number): number {
+  return satang / SATANG_PER_BAHT;
+}
+
 export function formatBaht(satang: number): string {
   const baht = satang / SATANG_PER_BAHT;
   const fraction = Number.isInteger(baht) ? 0 : 2;

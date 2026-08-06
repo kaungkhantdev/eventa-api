@@ -58,13 +58,32 @@ export function ApiList<M extends Type<unknown>>(
  * Documents a paginated success envelope: `data` is an ARRAY of the model plus a
  * `meta` PageMeta block. Use on list endpoints that return `Paginated<T>` — the
  * openapi.json is the api↔web contract, so the array + meta must be accurate.
+ *
+ * `extraMeta` documents anything a route attaches with `Paginated.withMeta` —
+ * e.g. `{ counts: LedgerCountsDto }` for a ledger's status tabs. Without it the
+ * generated web client would never see those fields.
  */
 export function ApiPage<M extends Type<unknown>>(
   model: M,
   status: number = HttpStatus.OK,
+  extraMeta: Record<string, Type<unknown>> = {},
 ) {
+  const extras = Object.entries(extraMeta);
+  const meta = extras.length
+    ? {
+        allOf: [
+          { $ref: getSchemaPath(PageMetaDto) },
+          {
+            type: 'object',
+            properties: Object.fromEntries(
+              extras.map(([key, m]) => [key, { $ref: getSchemaPath(m) }]),
+            ),
+          },
+        ],
+      }
+    : { $ref: getSchemaPath(PageMetaDto) };
   return applyDecorators(
-    ApiExtraModels(model, PageMetaDto),
+    ApiExtraModels(model, PageMetaDto, ...Object.values(extraMeta)),
     ApiResponse({
       status,
       schema: {
@@ -73,7 +92,7 @@ export function ApiPage<M extends Type<unknown>>(
           statusCode: { type: 'number', example: status },
           message: { type: 'string' },
           data: { type: 'array', items: { $ref: getSchemaPath(model) } },
-          meta: { $ref: getSchemaPath(PageMetaDto) },
+          meta,
           timestamp: { type: 'string', format: 'date-time' },
         },
       },

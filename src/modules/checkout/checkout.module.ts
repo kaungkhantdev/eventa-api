@@ -4,8 +4,10 @@ import { PlatformModule } from '../platform/platform.module';
 import { EventsModule } from '../events/events.module';
 import { RegistrationModule } from '../registration/registration.module';
 import { TicketingModule } from '../ticketing/ticketing.module';
+import { InvoiceOrderPort } from '../invoices/ports/invoice-order.port';
 import { OrderPaymentPort } from '../payments/ports/order-payment.port';
 import { CheckoutController } from './checkout.controller';
+import { InvoiceOrderAdapter } from './invoice-order.adapter';
 import { OrderPaymentAdapter } from './order-payment.adapter';
 import { CheckoutOrderService } from './checkout-order.service';
 import { CheckoutPolicy } from './checkout.policy';
@@ -47,12 +49,14 @@ import { CheckoutViewService } from './checkout-view.service';
     CheckoutRepository,
     CheckoutPolicy,
     { provide: OrderPaymentPort, useClass: OrderPaymentAdapter },
+    { provide: InvoiceOrderPort, useClass: InvoiceOrderAdapter },
   ],
   exports: [
     CheckoutViewService,
     CheckoutService,
     CheckoutOrderService,
     OrderPaymentPort,
+    InvoiceOrderPort,
   ],
 })
 export class CheckoutModule {}

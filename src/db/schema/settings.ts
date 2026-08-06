@@ -9,7 +9,11 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { createdAt, idPk, updatedAt } from './_columns';
-import { apiKeyStatusEnum, notificationKindEnum } from './enums';
+import {
+  apiKeyStatusEnum,
+  messageChannelEnum,
+  notificationKindEnum,
+} from './enums';
 import { organizations } from './organizations';
 import { users } from './identity';
 
@@ -58,5 +62,52 @@ export const notificationPreferences = pgTable(
   (t) => [
     unique('uq_notif_prefs_user_category').on(t.userId, t.category),
     index('ix_notif_prefs_user').on(t.userId),
+  ],
+);
+
+/**
+ * One automated message an organizer controls (US-MSG-01/02): the
+ * registration confirmation, the payment receipt, the reminder, and so on,
+ * identified by a stable `slug`.
+ *
+ * Only `active` is honoured today — it is the kill switch the trigger checks
+ * before sending, and an ABSENT row means active, so a workspace that has
+ * never touched its settings still gets its confirmations. The wording columns
+ * exist because `entities.md` specifies them and US-MSG-02 will edit them; the
+ * worker renders built-in EN/TH copy until then.
+ *
+ * Scope is (organization, slug) — per workspace, per message kind. There is
+ * deliberately no `event_id`: neither the story nor the data model gives an
+ * organizer per-event control of an automated message.
+ */
+export const messageTemplates = pgTable(
+  'message_templates',
+  {
+    id: idPk(),
+    organizationId: bigint({ mode: 'number' })
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    /** Stable identifier, e.g. `registration-confirmation`. */
+    slug: text().notNull(),
+    title: text().notNull(),
+    description: text(),
+    /** Which channels this message may use; email-only for now. */
+    channels: messageChannelEnum().array().notNull().default(['email']),
+    /** The kill switch US-MSG-01 checks. */
+    active: boolean().notNull().default(true),
+    /** Merge tags the editor may offer (US-MSG-02). */
+    tags: text().array().notNull().default([]),
+    emailSubjectEn: text(),
+    emailSubjectTh: text(),
+    emailBodyEn: text(),
+    emailBodyTh: text(),
+    smsBodyEn: text(),
+    smsBodyTh: text(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    unique('uq_message_templates_org_slug').on(t.organizationId, t.slug),
+    index('ix_message_templates_org').on(t.organizationId),
   ],
 );

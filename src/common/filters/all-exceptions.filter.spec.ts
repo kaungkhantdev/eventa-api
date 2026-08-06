@@ -19,13 +19,20 @@ interface FailureBody {
 
 function mockHost(): {
   host: ArgumentsHost;
-  sent: () => { status: number; body: FailureBody };
+  sent: () => { status: number; body: FailureBody; contentType: string };
 } {
   let status = 0;
+  let contentType = '';
   let body: FailureBody | undefined;
   const res = {
     status: (s: number) => {
       status = s;
+      return res;
+    },
+    // A download route sets its own Content-Type before the handler runs, so
+    // the filter must restate it — the double records what it restated.
+    type: (t: string) => {
+      contentType = t;
       return res;
     },
     json: (b: FailureBody) => {
@@ -36,7 +43,7 @@ function mockHost(): {
   const host = {
     switchToHttp: () => ({ getResponse: <T>() => res as T }),
   } as unknown as ArgumentsHost;
-  return { host, sent: () => ({ status, body: body! }) };
+  return { host, sent: () => ({ status, body: body!, contentType }) };
 }
 
 describe('AllExceptionsFilter', () => {
@@ -55,6 +62,14 @@ describe('AllExceptionsFilter', () => {
       message: 'Event not found',
       timestamp: '2026-07-28T10:00:00.000Z',
     });
+  });
+
+  it('always declares JSON, even on a route that sets its own file type', () => {
+    // A `@Header('Content-Type', 'text/csv')` download route would otherwise
+    // send this envelope labelled as a CSV, which no client will parse.
+    const { host, sent } = mockHost();
+    filter.catch(DomainException.conflict('Nothing to export.'), host);
+    expect(sent().contentType).toBe('application/json');
   });
 
   it('maps a validation BadRequest to 400 with a structured errors[]', () => {

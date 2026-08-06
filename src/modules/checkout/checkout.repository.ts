@@ -1,10 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, gt, inArray, isNotNull, isNull } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNotNull, isNull, ne } from 'drizzle-orm';
 import { DomainException } from '../../common/errors/domain.exception';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
   attendees,
   discountRedemptions,
+  events,
   orderItems,
   orders,
   organizations,
@@ -15,6 +16,7 @@ import {
   tickets,
 } from '../../db/schema';
 import { withTenant, type Tx } from '../../db/tenant';
+import type { BillableOrder } from '../invoices/ports/invoice-order.port';
 import { OutboxPort, type OutboxEventInput } from '../platform/outbox.port';
 import type { OrderTotals } from './checkout-pricing';
 
@@ -121,6 +123,8 @@ function settlementBlocker(context: SettlementContext): string | null {
 /** An allocation of 0 means unlimited — mirrors `TicketingPolicy`. */
 const UNLIMITED = 0;
 const ACTIVE_HOLD = 'active';
+/** A ticket that still admits someone — the set a refund takes back. */
+const LIVE_TICKET_STATUSES = ['issued', 'checked_in'] as const;
 
 /**
  * Data access for the checkout, including THE money-path transaction
@@ -217,6 +221,49 @@ export class CheckoutRepository {
   }
 
   /**
+   * The order an invoice may be raised against (US-FIN-07), with the event name
+   * the invoice line item prints. Cancelled orders are excluded — there is
+   * nothing left to bill once the registration is undone.
+   */
+  async findBillableOrder(
+    organizationId: number,
+    orderId: string,
+  ): Promise<BillableOrder | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({
+          id: orders.id,
+          organizationId: orders.organizationId,
+          reference: orders.reference,
+          eventId: orders.eventId,
+          eventName: events.name,
+          buyerName: orders.buyerName,
+          buyerEmail: orders.buyerEmail,
+          totalSatang: orders.totalSatang,
+          vatAmountSatang: orders.vatAmountSatang,
+          currency: orders.currency,
+        })
+        .from(orders)
+        .innerJoin(events, eq(events.id, orders.eventId))
+        .where(
+          and(
+            eq(orders.id, orderId),
+            eq(orders.organizationId, organizationId),
+            ne(orders.status, 'cancelled'),
+          ),
+        )
+        .limit(1);
+      if (!row) return null;
+      return {
+        ...row,
+        organizationId: Number(row.organizationId),
+        totalSatang: Number(row.totalSatang),
+        vatAmountSatang: Number(row.vatAmountSatang),
+      };
+    });
+  }
+
+  /**
    * The money arrived — complete a pending paid order (US-DISC-05): issue one
    * ticket per admission, assign the held seats, bump `sold`, convert the holds,
    * flip the order to confirmed/paid, and queue the confirmation — with the
@@ -273,6 +320,52 @@ export class CheckoutRepository {
             eq(seatHolds.status, ACTIVE_HOLD),
           ),
         );
+    });
+  }
+
+  /**
+   * Give the inventory back after a refund (US-FIN-02): void the order's live
+   * tickets, release their seat assignments, and hand the tier's stock back.
+   * `recordRefund` runs inside the same transaction as all of it.
+   */
+  async refundOrder(
+    organizationId: number,
+    orderId: string,
+    recordRefund: (tx: Tx) => Promise<void>,
+    now: Date,
+  ): Promise<{ ticketsVoided: number; seatsReleased: number }> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const voided = await tx
+        .update(tickets)
+        .set({ status: 'refunded', updatedAt: now })
+        .where(
+          and(
+            eq(tickets.orderId, orderId),
+            eq(tickets.organizationId, organizationId),
+            inArray(tickets.status, LIVE_TICKET_STATUSES),
+          ),
+        )
+        .returning({ id: tickets.id });
+      const released = await tx
+        .update(seatAssignments)
+        .set({ releasedAt: now })
+        .where(
+          and(
+            eq(seatAssignments.organizationId, organizationId),
+            inArray(
+              seatAssignments.ticketId,
+              voided.map((t) => t.id),
+            ),
+            isNull(seatAssignments.releasedAt),
+          ),
+        )
+        .returning({ id: seatAssignments.id });
+      await tx
+        .update(orders)
+        .set({ status: 'cancelled', paymentStatus: 'refunded', updatedAt: now })
+        .where(eq(orders.id, orderId));
+      await recordRefund(tx);
+      return { ticketsVoided: voided.length, seatsReleased: released.length };
     });
   }
 

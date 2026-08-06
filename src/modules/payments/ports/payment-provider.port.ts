@@ -41,6 +41,45 @@ export interface StartedPayment {
   declineReason: string | null;
 }
 
+/** Give money back to the card or wallet it came from (US-FIN-02). */
+export interface RefundPaymentInput {
+  /** The provider's reference for the original charge (`gateway_ref`). */
+  gatewayRef: string;
+  amountSatang: number;
+  /** Exactly-once at the PROVIDER — a double-click must not refund twice. */
+  idempotencyKey: string;
+  /** The workspace's connected account; null = platform account. */
+  accountId: string | null;
+}
+
+/**
+ * The provider's answer. `pending` is a real outcome, not a failure: a
+ * PromptPay refund needs the buyer's bank details and settles later, so the
+ * ledger records it and the webhook confirms it.
+ */
+export interface RefundedPayment {
+  refundRef: string;
+  status: 'succeeded' | 'pending' | 'failed';
+  failureReason: string | null;
+}
+
+/** Re-submit a settlement the bank rejected (US-FIN-04). */
+export interface RetryPayoutInput {
+  /** OUR reference for the payout being recovered. */
+  reference: string;
+  amountSatang: number;
+  currency: string;
+  /** The workspace's connected account; null = platform account. */
+  accountId: string | null;
+}
+
+export interface RetriedPayout {
+  /** The provider's reference for the RE-submitted transfer. */
+  payoutRef: string;
+  status: 'processing' | 'failed';
+  failureReason: string | null;
+}
+
 /** What a verified provider callback turned out to mean. */
 export interface VerifiedWebhook {
   /** The PROVIDER's event id — what `webhook_events` dedupes on. */
@@ -79,4 +118,30 @@ export abstract class PaymentProviderPort {
    * was paid, and is the one input that could hand out tickets for free.
    */
   abstract verifyWebhook(rawBody: Buffer, signature: string): VerifiedWebhook;
+
+  /**
+   * Return a settled charge to its original method. Idempotent on the given
+   * key — the story requires that a double-submitted refund issues exactly one.
+   * Full refunds only in this release.
+   */
+  abstract refund(input: RefundPaymentInput): Promise<RefundedPayment>;
+
+  /**
+   * A one-time URL onto the provider's own hosted dashboard, where an Admin
+   * manages bank details, the payout schedule and tax forms (US-FIN-05).
+   *
+   * The link is how bank details stay OUT of this service: Eventa never sees an
+   * account number, only that a connected account exists. Returns null when the
+   * workspace has no connected account yet — the caller must guide them through
+   * connecting before there is anything to manage.
+   */
+  abstract payoutSettingsLink(accountId: string | null): Promise<string | null>;
+
+  /**
+   * Re-submit a failed payout to the same connected account (US-FIN-04). The
+   * provider issues a fresh transfer; the caller updates the EXISTING payout
+   * row rather than inserting a second one, so the organizer never sees a
+   * duplicate for money that only moved once.
+   */
+  abstract retryPayout(input: RetryPayoutInput): Promise<RetriedPayout>;
 }

@@ -197,6 +197,69 @@
       "when": 1785849917829,
       "tag": "0027_attendee_profile_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1785918280671,
+      "tag": "0028_message_templates",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1785918310007,
+      "tag": "0029_message_templates_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1785986068272,
+      "tag": "0030_finance_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1785986091443,
+      "tag": "0031_finance_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1785987324802,
+      "tag": "0032_invoice_buyer_email_and_void",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1785987341084,
+      "tag": "0033_one_live_invoice_per_order",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1785988660252,
+      "tag": "0034_finance_audit_and_permission",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1785992303506,
+      "tag": "0035_payout_failure_reason",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1785996047240,
+      "tag": "0036_payout_audit_type",
+      "breakpoints": true
     }
   ]
 }
