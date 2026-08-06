@@ -41,6 +41,28 @@ export interface StartedPayment {
   declineReason: string | null;
 }
 
+/** Give money back to the card or wallet it came from (US-FIN-02). */
+export interface RefundPaymentInput {
+  /** The provider's reference for the original charge (`gateway_ref`). */
+  gatewayRef: string;
+  amountSatang: number;
+  /** Exactly-once at the PROVIDER — a double-click must not refund twice. */
+  idempotencyKey: string;
+  /** The workspace's connected account; null = platform account. */
+  accountId: string | null;
+}
+
+/**
+ * The provider's answer. `pending` is a real outcome, not a failure: a
+ * PromptPay refund needs the buyer's bank details and settles later, so the
+ * ledger records it and the webhook confirms it.
+ */
+export interface RefundedPayment {
+  refundRef: string;
+  status: 'succeeded' | 'pending' | 'failed';
+  failureReason: string | null;
+}
+
 /** What a verified provider callback turned out to mean. */
 export interface VerifiedWebhook {
   /** The PROVIDER's event id — what `webhook_events` dedupes on. */
@@ -79,4 +101,11 @@ export abstract class PaymentProviderPort {
    * was paid, and is the one input that could hand out tickets for free.
    */
   abstract verifyWebhook(rawBody: Buffer, signature: string): VerifiedWebhook;
+
+  /**
+   * Return a settled charge to its original method. Idempotent on the given
+   * key — the story requires that a double-submitted refund issues exactly one.
+   * Full refunds only in this release.
+   */
+  abstract refund(input: RefundPaymentInput): Promise<RefundedPayment>;
 }

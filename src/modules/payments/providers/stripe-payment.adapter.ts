@@ -8,6 +8,8 @@ import {
   PaymentProviderPort,
   type PaymentMethodChoice,
   type StartPaymentInput,
+  type RefundPaymentInput,
+  type RefundedPayment,
   type StartedPayment,
   type VerifiedWebhook,
 } from '../ports/payment-provider.port';
@@ -94,6 +96,26 @@ export class StripePaymentAdapter extends PaymentProviderPort {
       requestOptions(input),
     );
     return this.toStartedPayment(intent, input.method);
+  }
+
+  /**
+   * Full refund to the original method. `pending` is a real outcome rather than
+   * a failure — a PromptPay refund waits on the buyer's bank details, which
+   * Stripe collects by email, so the ledger records it and the webhook confirms.
+   */
+  async refund(input: RefundPaymentInput): Promise<RefundedPayment> {
+    const refund = await this.stripe.refunds.create(
+      { payment_intent: input.gatewayRef, amount: input.amountSatang },
+      {
+        idempotencyKey: input.idempotencyKey,
+        ...(input.accountId ? { stripeAccount: input.accountId } : {}),
+      },
+    );
+    return {
+      refundRef: refund.id,
+      status: toRefundStatus(refund.status),
+      failureReason: refund.failure_reason ?? null,
+    };
   }
 
   verifyWebhook(rawBody: Buffer, signature: string): VerifiedWebhook {
@@ -226,6 +248,16 @@ function statementDescriptorSuffix(descriptor: string | null): string | null {
     .slice(0, MAX_SUFFIX_LENGTH)
     .trim();
   return latin.length >= MIN_SUFFIX_LENGTH ? latin : null;
+}
+
+/**
+ * Anything Stripe reports that is not plainly succeeded or in flight counts as
+ * failed. Guessing the other way would mark money as returned when it was not.
+ */
+function toRefundStatus(status: string | null): RefundedPayment['status'] {
+  if (status === 'succeeded') return 'succeeded';
+  if (status === 'pending') return 'pending';
+  return 'failed';
 }
 
 function toStartedStatus(

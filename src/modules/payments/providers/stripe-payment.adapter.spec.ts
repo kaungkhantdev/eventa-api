@@ -375,4 +375,77 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
       expect(adapter.verifyWebhook(raw, signature).type).toBe('ignored');
     });
   });
+
+  describe('refund (US-FIN-02)', () => {
+    function refundHarness(refund: Record<string, unknown> = {}) {
+      const create = jest.fn().mockResolvedValue({
+        id: 're_123',
+        status: 'succeeded',
+        failure_reason: null,
+        ...refund,
+      });
+      const client = {
+        refunds: { create },
+        webhooks: real.webhooks,
+      } as unknown as Stripe;
+      return {
+        adapter: new StripePaymentAdapter(clock, config(), client),
+        create,
+      };
+    }
+
+    const input = {
+      gatewayRef: 'pi_123',
+      amountSatang: 210_000,
+      idempotencyKey: 'refund-1',
+      accountId: null,
+    };
+
+    it('refunds the original intent, and says so on the idempotency key', async () => {
+      const { adapter, create } = refundHarness();
+      const result = await adapter.refund(input);
+      const [params, options] = create.mock.calls[0] as [
+        Stripe.RefundCreateParams,
+        Stripe.RequestOptions,
+      ];
+      expect(params.payment_intent).toBe('pi_123');
+      expect(params.amount).toBe(210_000);
+      expect(options.idempotencyKey).toBe('refund-1');
+      expect(result).toMatchObject({
+        refundRef: 're_123',
+        status: 'succeeded',
+      });
+    });
+
+    it('refunds on the workspace’s connected account when it has one', async () => {
+      const { adapter, create } = refundHarness();
+      await adapter.refund({ ...input, accountId: 'acct_123' });
+      const [, options] = create.mock.calls[0] as [
+        unknown,
+        Stripe.RequestOptions,
+      ];
+      expect(options.stripeAccount).toBe('acct_123');
+    });
+
+    it('reports a PromptPay refund awaiting the buyer’s bank details as pending', async () => {
+      // Not a failure: Stripe emails the buyer for an account and settles later.
+      const { adapter } = refundHarness({ status: 'pending' });
+      expect((await adapter.refund(input)).status).toBe('pending');
+    });
+
+    it('reports a failed refund with its reason rather than throwing', async () => {
+      const { adapter } = refundHarness({
+        status: 'failed',
+        failure_reason: 'expired_or_canceled_card',
+      });
+      const result = await adapter.refund(input);
+      expect(result.status).toBe('failed');
+      expect(result.failureReason).toBe('expired_or_canceled_card');
+    });
+
+    it('treats an unknown provider status as failed, never as money returned', async () => {
+      const { adapter } = refundHarness({ status: 'requires_action' });
+      expect((await adapter.refund(input)).status).toBe('failed');
+    });
+  });
 });

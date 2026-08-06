@@ -7,6 +7,8 @@ import type { Env } from '../../../config/env.validation';
 import {
   PaymentProviderPort,
   type StartPaymentInput,
+  type RefundPaymentInput,
+  type RefundedPayment,
   type StartedPayment,
   type VerifiedWebhook,
 } from '../ports/payment-provider.port';
@@ -62,6 +64,15 @@ export class FakePaymentAdapter extends PaymentProviderPort {
         ? this.promptPay(gatewayRef, input)
         : card(gatewayRef),
     );
+  }
+
+  /** Stable per key, so a double-submitted refund yields one reference. */
+  refund(input: RefundPaymentInput): Promise<RefundedPayment> {
+    return Promise.resolve({
+      refundRef: `fake_re_${digest(input.idempotencyKey).slice(0, 24)}`,
+      status: 'succeeded',
+      failureReason: null,
+    });
   }
 
   verifyWebhook(rawBody: Buffer, signature: string): VerifiedWebhook {
