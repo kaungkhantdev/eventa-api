@@ -5,7 +5,8 @@ import type { Env } from '../../config/env.validation';
 import { AccessModule } from '../access/access.module';
 import { CheckoutModule } from '../checkout/checkout.module';
 import { PaymentsController } from './payments.controller';
-import { RefundsController } from './refunds.controller';
+import { FinanceController } from './finance.controller';
+import { PaymentsLedgerService } from './payments-ledger.service';
 import { RefundsService } from './refunds.service';
 import { PaymentsRepository } from './payments.repository';
 import { PaymentsService } from './payments.service';
@@ -26,10 +27,11 @@ import { StripePaymentAdapter } from './providers/stripe-payment.adapter';
  */
 @Module({
   imports: [AccessModule, CheckoutModule],
-  controllers: [PaymentsController, RefundsController],
+  controllers: [PaymentsController, FinanceController],
   providers: [
     PaymentsService,
     RefundsService,
+    PaymentsLedgerService,
     PaymentsRepository,
     {
       provide: PaymentProviderPort,

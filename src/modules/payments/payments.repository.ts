@@ -1,7 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, ne } from 'drizzle-orm';
+import { and, desc, eq, ilike, ne, or, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
+  events,
   organizations,
   payments,
   refunds,
@@ -23,6 +24,36 @@ export interface ClaimRefundInput {
   issuedBy: string;
   idempotencyKey: string;
   now: Date;
+}
+
+/** How the finance ledger is narrowed (US-FIN-01). */
+export interface LedgerFilters {
+  page: number;
+  limit: number;
+  status?: PaymentRow['status'];
+  method?: string;
+  eventId?: string;
+  search?: string;
+}
+
+export interface LedgerRow {
+  id: string;
+  txn: string;
+  payerName: string;
+  eventName: string;
+  method: string;
+  amountSatang: number;
+  currency: string;
+  status: PaymentRow['status'];
+  paidAt: Date | null;
+  createdAt: Date;
+}
+
+export interface StatusCounts {
+  paid: number;
+  pending: number;
+  refunded: number;
+  failed: number;
 }
 
 /** Flip the ledger inside the caller's settlement transaction. */
@@ -303,6 +334,66 @@ export class PaymentsRepository {
       .where(eq(payments.id, input.paymentId));
   }
 
+  /** One page of the ledger, newest first (US-FIN-01). */
+  async listLedger(
+    organizationId: number,
+    filters: LedgerFilters,
+  ): Promise<{ items: LedgerRow[]; total: number }> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const where = ledgerWhere(organizationId, filters);
+      const [{ count }] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(payments)
+        .innerJoin(events, eq(events.id, payments.eventId))
+        .where(where);
+      const items = await tx
+        .select({
+          id: payments.id,
+          txn: payments.txn,
+          payerName: payments.payerName,
+          eventName: events.name,
+          method: payments.method,
+          amountSatang: payments.amountSatang,
+          currency: payments.currency,
+          status: payments.status,
+          paidAt: payments.paidAt,
+          createdAt: payments.createdAt,
+        })
+        .from(payments)
+        .innerJoin(events, eq(events.id, payments.eventId))
+        .where(where)
+        // Newest first; `created_at` breaks the tie for rows never paid.
+        .orderBy(desc(payments.paidAt), desc(payments.createdAt))
+        .limit(filters.limit)
+        .offset((filters.page - 1) * filters.limit);
+      return { items, total: count };
+    });
+  }
+
+  /**
+   * Live totals for the status tabs. One scan with FILTER clauses rather than
+   * four queries, so the four numbers describe the same instant — separate
+   * counts could disagree with each other while a webhook lands between them.
+   */
+  async countByStatus(
+    organizationId: number,
+    filters: Omit<LedgerFilters, 'status'>,
+  ): Promise<StatusCounts> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({
+          paid: sql<number>`count(*) FILTER (WHERE ${payments.status} = 'paid')::int`,
+          pending: sql<number>`count(*) FILTER (WHERE ${payments.status} = 'pending')::int`,
+          refunded: sql<number>`count(*) FILTER (WHERE ${payments.status} = 'refunded')::int`,
+          failed: sql<number>`count(*) FILTER (WHERE ${payments.status} = 'failed')::int`,
+        })
+        .from(payments)
+        .innerJoin(events, eq(events.id, payments.eventId))
+        .where(ledgerWhere(organizationId, filters));
+      return row;
+    });
+  }
+
   /** Stamp the outcome, and attach the tenant once it is known. */
   async markWebhookProcessed(
     providerEventId: string,
@@ -314,4 +405,26 @@ export class PaymentsRepository {
       .set({ status, processedAt: new Date(), organizationId })
       .where(eq(webhookEvents.providerEventId, providerEventId));
   }
+}
+
+/** Shared by the page and the counts, so the tabs describe what is listed. */
+function ledgerWhere(
+  organizationId: number,
+  filters: Omit<LedgerFilters, 'status'> & { status?: PaymentRow['status'] },
+) {
+  const search = filters.search?.trim();
+  return and(
+    eq(payments.organizationId, organizationId),
+    filters.status ? eq(payments.status, filters.status) : undefined,
+    filters.method
+      ? eq(payments.method, filters.method as PaymentRow['method'])
+      : undefined,
+    filters.eventId ? eq(payments.eventId, filters.eventId) : undefined,
+    search
+      ? or(
+          ilike(payments.payerName, `%${search}%`),
+          ilike(payments.txn, `%${search}%`),
+        )
+      : undefined,
+  );
 }
