@@ -8,21 +8,25 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiForbiddenResponse, ApiTags } from '@nestjs/swagger';
 import { ApiErrorDto } from '../../common/errors/error-envelope';
-import { ApiData, ApiList } from '../../common/http/api-data.decorator';
+import { ApiData, ApiPage } from '../../common/http/api-data.decorator';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 import type { AuthContext } from '../auth/auth.types';
 import { CurrentAuth } from '../../common/decorators/current-auth.decorator';
 import {
   Permission,
+  RequireAnyPermission,
   RequirePermissions,
 } from '../../common/decorators/require-permissions.decorator';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import type { EventActor } from '../events/events.types';
+import { Paginated } from '../../common/http/paginated';
 import { CreateSpeakerDto } from './dto/create-speaker.dto';
+import { ListSpeakersDto } from './dto/list-speakers.dto';
 import { SpeakerResponseDto } from './dto/speaker-response.dto';
 import { UpdateSpeakerDto } from './dto/update-speaker.dto';
 import { SpeakersService } from './speakers.service';
@@ -51,15 +55,21 @@ export class SpeakersController {
     return this.speakers.createSpeaker(actorOf(auth), eventId, dto);
   }
 
+  /**
+   * The directory (US-PROG-08). `evProgramView`, not `evSpeakers` — Staff
+   * browse read-only to support attendees on-site; the write routes below keep
+   * the manage permission, so read can be granted without granting edit.
+   */
   @Get()
-  @RequirePermissions(Permission.evSpeakers)
+  @RequireAnyPermission(Permission.evProgramView, Permission.evSpeakers)
   @ResponseMessage('Speakers retrieved.')
-  @ApiList(SpeakerResponseDto)
+  @ApiPage(SpeakerResponseDto)
   list(
     @CurrentAuth() auth: AuthContext,
     @Param('eventId') eventId: string,
-  ): Promise<SpeakerResponseDto[]> {
-    return this.speakers.listSpeakers(actorOf(auth), eventId);
+    @Query() query: ListSpeakersDto,
+  ): Promise<Paginated<SpeakerResponseDto>> {
+    return this.speakers.listSpeakers(actorOf(auth), eventId, { ...query });
   }
 
   @Patch(':id')
@@ -82,8 +92,14 @@ export class SpeakersController {
     @CurrentAuth() auth: AuthContext,
     @Param('eventId') eventId: string,
     @Param('id') id: string,
+    @Query('confirm') confirm?: string,
   ): Promise<void> {
-    return this.speakers.deleteSpeaker(actorOf(auth), eventId, id);
+    return this.speakers.deleteSpeaker(
+      actorOf(auth),
+      eventId,
+      id,
+      confirm === 'true',
+    );
   }
 }
 

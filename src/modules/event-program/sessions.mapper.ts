@@ -1,4 +1,5 @@
 import { SessionResponseDto } from './dto/session-response.dto';
+import { colourForType } from './session-palette';
 import type { SessionRow, SessionSpeakerRef } from './sessions.types';
 
 /** Map a `sessions` row (+ its speaker links + an optional warning) to the DTO. */
@@ -16,7 +17,9 @@ export function toSessionResponse(
     title: s.title,
     type: s.type,
     room: s.room,
-    color: s.color,
+    // Derived, never read from the row: the block's colour IS its type.
+    color: colourForType(s.type),
+    description: s.description,
     sortOrder: s.sortOrder,
     speakers,
     warning,

@@ -260,6 +260,41 @@
       "when": 1785996047240,
       "tag": "0036_payout_audit_type",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1786070303550,
+      "tag": "0037_program_palette_and_speaker_profile",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1786072449618,
+      "tag": "0038_program_view_permission",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1786076679085,
+      "tag": "0039_checkin_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1786076703264,
+      "tag": "0040_checkin_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1786077730480,
+      "tag": "0041_checkin_history_outlives_event",
+      "breakpoints": true
     }
   ]
 }

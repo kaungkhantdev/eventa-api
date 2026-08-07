@@ -2,8 +2,10 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsEmail,
   IsIn,
+  IsObject,
   IsOptional,
   IsString,
+  IsUrl,
   MaxLength,
   MinLength,
 } from 'class-validator';
@@ -58,4 +60,30 @@ export class CreateSpeakerDto {
   @IsOptional()
   @IsIn(TONES)
   tone?: SpeakerTone;
+
+  @ApiPropertyOptional({ maxLength: 2000 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  bio?: string;
+
+  @ApiPropertyOptional({ description: 'Absolute URL to a portrait image.' })
+  @IsOptional()
+  @IsUrl()
+  photoUrl?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUrl()
+  website?: string;
+
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: { type: 'string' },
+    description: 'Social profile links, keyed by network.',
+  })
+  @IsOptional()
+  @IsObject()
+  @IsUrl({}, { each: true })
+  socialLinks?: Record<string, string>;
 }

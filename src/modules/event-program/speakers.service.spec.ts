@@ -42,6 +42,7 @@ describe('SpeakersService', () => {
           Promise.resolve(speakerRow(v)),
         ),
       listByEvent: jest.fn().mockResolvedValue([]),
+      page: jest.fn().mockResolvedValue({ items: [], total: 0 }),
       findSpeaker: jest.fn().mockResolvedValue(speakerRow()),
       update: jest
         .fn()
@@ -49,6 +50,7 @@ describe('SpeakersService', () => {
           Promise.resolve(speakerRow({ ...v, version: 2 })),
         ),
       softDelete: jest.fn().mockResolvedValue(true),
+      sessionCounts: jest.fn().mockResolvedValue(new Map<string, number>()),
     } as unknown as jest.Mocked<SpeakersRepository>;
     events = {
       getEvent: jest.fn().mockResolvedValue({ id: eventId }),
@@ -121,17 +123,173 @@ describe('SpeakersService', () => {
 
   describe('deleteSpeaker', () => {
     it('soft-deletes an existing speaker', async () => {
-      await service.deleteSpeaker(actor, eventId, 'sp1');
+      await service.deleteSpeaker(actor, eventId, 'sp1', true);
       expect(repo.softDelete).toHaveBeenCalledWith(1, 'sp1');
+    });
+
+    it('refuses without an explicit confirm, warning about the unlinking', async () => {
+      const err = await service
+        .deleteSpeaker(actor, eventId, 'sp1')
+        .catch((e: unknown) => e as DomainException);
+      expect(err).toBeInstanceOf(DomainException);
+      expect(err.message).toMatch(/ALL of their sessions/i);
+      expect(err.message).toMatch(/cannot be undone/i);
+      expect(repo.softDelete).not.toHaveBeenCalled();
     });
 
     it('throws 404 when the speaker is absent', async () => {
       repo.findSpeaker.mockResolvedValue(null);
       const err = await service
-        .deleteSpeaker(actor, eventId, 'missing')
+        .deleteSpeaker(actor, eventId, 'missing', true)
         .catch((e: unknown) => e);
       expect((err as DomainException).getStatus()).toBe(404);
       expect(repo.softDelete).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('SpeakersService — session counts (US-PROG-02/04/08/09)', () => {
+  let repo: jest.Mocked<SpeakersRepository>;
+  let service: SpeakersService;
+
+  beforeEach(() => {
+    repo = {
+      insert: jest
+        .fn()
+        .mockImplementation((v: Partial<SpeakerRow>) =>
+          Promise.resolve(speakerRow(v)),
+        ),
+      page: jest.fn().mockResolvedValue({
+        items: [speakerRow({ id: 'sp1' }), speakerRow({ id: 'sp2' })],
+        total: 2,
+      }),
+      findSpeaker: jest.fn().mockResolvedValue(speakerRow({ id: 'sp1' })),
+      sessionCounts: jest.fn().mockResolvedValue(new Map([['sp1', 3]])),
+    } as unknown as jest.Mocked<SpeakersRepository>;
+    const events = {
+      getEvent: jest.fn().mockResolvedValue({ id: eventId }),
+    } as unknown as jest.Mocked<EventsService>;
+    service = new SpeakersService(repo, events);
+  });
+
+  it('reports how many sessions each speaker is booked into', async () => {
+    const { items } = await service.listSpeakers(actor, eventId);
+    const [first, second] = items;
+    expect(first.sessionCount).toBe(3);
+    // A speaker in nothing yet is 0, never undefined — the directory shows it.
+    expect(second.sessionCount).toBe(0);
+  });
+
+  it('asks for the counts of exactly the speakers it listed', async () => {
+    await service.listSpeakers(actor, eventId);
+    expect(repo.sessionCounts).toHaveBeenCalledWith(actor.organizationId, [
+      'sp1',
+      'sp2',
+    ]);
+  });
+
+  it('gives a brand-new speaker a count of zero', async () => {
+    const created = await service.createSpeaker(actor, eventId, {
+      name: 'Ada Lovelace',
+    });
+    expect(created.sessionCount).toBe(0);
+  });
+
+  it('does not query counts for an empty directory', async () => {
+    repo.page.mockResolvedValue({ items: [], total: 0 });
+    const page = await service.listSpeakers(actor, eventId);
+    expect(page.items).toEqual([]);
+    // An empty search is a page with no rows, never an error (US-PROG-08).
+    expect(page.meta.total).toBe(0);
+    expect(repo.sessionCounts).not.toHaveBeenCalled();
+  });
+
+  it('passes the search term and page through to the repository', async () => {
+    await service.listSpeakers(actor, eventId, { search: 'ada', page: 2 });
+    expect(repo.page).toHaveBeenCalledWith(
+      actor.organizationId,
+      eventId,
+      expect.objectContaining({ search: 'ada', page: 2 }),
+    );
+  });
+
+  it('reports the FILTERED total, so the count matches the list', async () => {
+    repo.page.mockResolvedValue({
+      items: [speakerRow({ id: 'sp1' })],
+      total: 1,
+    });
+    const page = await service.listSpeakers(actor, eventId, { search: 'ada' });
+    expect(page.meta.total).toBe(1);
+  });
+});
+
+describe('SpeakersService — one email per event (US-PROG-09/10)', () => {
+  let repo: jest.Mocked<SpeakersRepository>;
+  let service: SpeakersService;
+
+  beforeEach(() => {
+    repo = {
+      insert: jest
+        .fn()
+        .mockImplementation((v: Partial<SpeakerRow>) =>
+          Promise.resolve(speakerRow(v)),
+        ),
+      findSpeaker: jest.fn().mockResolvedValue(speakerRow()),
+      findByEmail: jest.fn().mockResolvedValue(null),
+      update: jest
+        .fn()
+        .mockImplementation((_o: number, _id: string, v: Partial<SpeakerRow>) =>
+          Promise.resolve(speakerRow({ ...v, version: 2 })),
+        ),
+      sessionCounts: jest.fn().mockResolvedValue(new Map<string, number>()),
+    } as unknown as jest.Mocked<SpeakersRepository>;
+    const events = {
+      getEvent: jest.fn().mockResolvedValue({ id: eventId }),
+    } as unknown as jest.Mocked<EventsService>;
+    service = new SpeakersService(repo, events);
+  });
+
+  it('refuses a second speaker with the same email', async () => {
+    repo.findByEmail.mockResolvedValue(speakerRow({ id: 'other' }));
+    await expect(
+      service.createSpeaker(actor, eventId, {
+        name: 'Ada',
+        email: 'ada@example.com',
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(repo.insert).not.toHaveBeenCalled();
+  });
+
+  it('allows a speaker with no email at all, however many', async () => {
+    // Most speakers are added without one; they must not collide.
+    await service.createSpeaker(actor, eventId, { name: 'Anon One' });
+    await service.createSpeaker(actor, eventId, { name: 'Anon Two' });
+    expect(repo.findByEmail).not.toHaveBeenCalled();
+    expect(repo.insert).toHaveBeenCalledTimes(2);
+  });
+
+  it('lets a speaker keep their own email when edited', async () => {
+    // The uniqueness check must exclude the row being edited, or every PATCH
+    // that resends the email would refuse itself.
+    await service.updateSpeaker(actor, eventId, 'sp1', {
+      email: 'ada@example.com',
+    });
+    expect(repo.findByEmail).toHaveBeenCalledWith(
+      actor.organizationId,
+      eventId,
+      'ada@example.com',
+      'sp1',
+    );
+    expect(repo.update).toHaveBeenCalled();
+  });
+
+  it('refuses an edit that takes another speaker’s email', async () => {
+    repo.findByEmail.mockResolvedValue(speakerRow({ id: 'other' }));
+    await expect(
+      service.updateSpeaker(actor, eventId, 'sp1', {
+        email: 'taken@example.com',
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(repo.update).not.toHaveBeenCalled();
   });
 });

@@ -24,6 +24,10 @@ export const permissionKeyEnum = pgEnum('permission_key', [
   'evCreate',
   'evPublish',
   'evSpeakers',
+  // Read-only agenda + speaker directory (US-PROG-01/08 notes): Staff support
+  // attendees on-site without being able to change the programme. Appended —
+  // enum values are add-only.
+  'evProgramView',
   'regView',
   'regCheckin',
   'regExport',
@@ -78,6 +82,8 @@ export const auditTypeEnum = pgEnum('audit_type', [
   // Finance (E9) — appended; enum values are add-only.
   'invoice',
   'payout',
+  // Check-in (E8): a manual admit and an undo are both auditable acts.
+  'checkin',
 ]);
 
 export const webhookStatusEnum = pgEnum('webhook_status', [
@@ -146,10 +152,18 @@ export const sessionTypeEnum = pgEnum('session_type', [
   'Break',
 ]);
 
+/**
+ * The agenda block palette. One value per `session_type`, because US-PROG-01
+ * asks for a type shown by a CONSISTENT colour — the mapping lives in
+ * `sessions.mapper.ts`, not in the caller's hands. `blue` and `slate` were
+ * appended (enum values are add-only) so all five types can be expressed.
+ */
 export const sessionColorEnum = pgEnum('session_color', [
   'green',
   'amber',
   'rose',
+  'blue',
+  'slate',
 ]);
 
 export const speakerToneEnum = pgEnum('speaker_tone', [
@@ -270,6 +284,25 @@ export const holdStatusEnum = pgEnum('hold_status', [
   'converted',
   'expired',
   'released',
+]);
+
+// ── Check-in (E8) ─────────────────────────────────────────────────────────
+
+/** How an attendee got through the door (US-REG-11/12/13). */
+export const checkInMethodEnum = pgEnum('check_in_method', [
+  'qr',
+  'manual',
+  /** Decoded from an uploaded photo when the camera could not be used. */
+  'upload',
+]);
+
+/** Why a scan was refused — the door needs to say which, not just "no". */
+export const scanOutcomeEnum = pgEnum('scan_outcome', [
+  'admitted',
+  'already_checked_in',
+  'invalid',
+  'wrong_event',
+  'cancelled',
 ]);
 
 // ── Finance (E9) ──────────────────────────────────────────────────────────

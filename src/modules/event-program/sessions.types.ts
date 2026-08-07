@@ -23,9 +23,11 @@ export interface CreateSessionInput {
   title: string;
   type: SessionType;
   room?: string;
-  color?: SessionColor;
+  description?: string;
   sortOrder?: number;
   speakerIds?: string[];
+  /** Re-submit with this after a speaker-clash refusal to assign them anyway. */
+  confirmSpeakerClash?: boolean;
 }
 
 /** Service input to edit a session (undefined = leave as-is). */
@@ -36,9 +38,20 @@ export interface UpdateSessionInput {
   title?: string;
   type?: SessionType;
   room?: string | null;
-  color?: SessionColor;
+  description?: string | null;
   sortOrder?: number;
   speakerIds?: string[];
+  /** Re-submit with this after a speaker-clash refusal to assign them anyway. */
+  confirmSpeakerClash?: boolean;
   /** Optimistic-concurrency token; when set, must match the current row. */
   version?: number;
+}
+
+/** A session a speaker is already booked into, for the US-PROG-05 clash check. */
+export interface SpeakerClashCandidate {
+  sessionId: string;
+  title: string;
+  startTime: string;
+  endTime: string | null;
+  speakerName: string;
 }

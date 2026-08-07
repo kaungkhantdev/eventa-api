@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
@@ -12,12 +13,10 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-import { sessionColorEnum, sessionTypeEnum } from '../../../db/schema';
-import type { SessionColor, SessionType } from '../sessions.types';
+import { sessionTypeEnum } from '../../../db/schema';
+import type { SessionType } from '../sessions.types';
 
 const TYPES: readonly SessionType[] = sessionTypeEnum.enumValues;
-const COLORS: readonly NonNullable<SessionColor>[] =
-  sessionColorEnum.enumValues;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
 const MAX_DAY = 60;
 
@@ -61,10 +60,11 @@ export class CreateSessionDto {
   @MaxLength(80)
   room?: string;
 
-  @ApiPropertyOptional({ enum: COLORS })
+  @ApiPropertyOptional({ maxLength: 2000, description: 'Agenda blurb.' })
   @IsOptional()
-  @IsIn(COLORS)
-  color?: NonNullable<SessionColor>;
+  @IsString()
+  @MaxLength(2000)
+  description?: string;
 
   @ApiPropertyOptional({ example: 0, minimum: 0 })
   @IsOptional()
@@ -81,4 +81,12 @@ export class CreateSessionDto {
   @IsArray()
   @IsUUID('4', { each: true })
   speakerIds?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Re-submit with true after a speaker-clash refusal to assign them anyway (US-PROG-05). A room clash can never be confirmed away.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  confirmSpeakerClash?: boolean;
 }

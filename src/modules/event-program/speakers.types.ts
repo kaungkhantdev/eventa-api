@@ -17,6 +17,10 @@ export interface CreateSpeakerInput {
   tag?: string;
   initials?: string;
   tone?: SpeakerTone;
+  bio?: string;
+  photoUrl?: string;
+  website?: string;
+  socialLinks?: Record<string, string>;
 }
 
 /** Service input to edit a speaker (undefined = leave as-is). */
@@ -29,6 +33,18 @@ export interface UpdateSpeakerInput {
   tag?: string | null;
   initials?: string | null;
   tone?: SpeakerTone;
+  bio?: string | null;
+  photoUrl?: string | null;
+  website?: string | null;
+  socialLinks?: Record<string, string> | null;
   /** Optimistic-concurrency token; when set, must match the current row. */
   version?: number;
+}
+
+/** How the speaker directory is narrowed (US-PROG-08). */
+export interface SpeakerFilters {
+  page: number;
+  limit: number;
+  /** Matches name, role or email. */
+  search?: string;
 }

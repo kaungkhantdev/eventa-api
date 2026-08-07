@@ -32,6 +32,9 @@ interface Session {
   startTime: string;
   endTime: string | null;
   room: string | null;
+  type: string;
+  color: string;
+  description: string | null;
   speakers: SessionSpeaker[];
   warning: string | null;
   version: number;
@@ -135,7 +138,7 @@ describe('Sessions / agenda (e2e — US-EVT-09)', () => {
     }).expect(422);
   });
 
-  it('warns (but still creates) when a same-room session overlaps', async () => {
+  it('BLOCKS a double-booked room, naming the room and the time (US-PROG-05)', async () => {
     const res = await addSession(adminJwt, {
       day: 1,
       startTime: '09:30',
@@ -144,13 +147,14 @@ describe('Sessions / agenda (e2e — US-EVT-09)', () => {
       type: 'Talk',
       room: 'Main Hall',
     });
-    expect(res.status).toBe(201);
-    expect((res.body as Success<Session>).data.warning).toMatch(
-      /Opening Keynote/,
-    );
+    expect(res.status).toBe(409);
+    const { message } = res.body as { message: string };
+    expect(message).toMatch(/Main Hall/);
+    expect(message).toMatch(/Opening Keynote/);
+    expect(message).toMatch(/09:00/);
   });
 
-  it('does not warn for the same time in a different room', async () => {
+  it('allows parallel tracks in a different room at the same time', async () => {
     const res = await addSession(adminJwt, {
       day: 1,
       startTime: '09:30',
@@ -159,7 +163,45 @@ describe('Sessions / agenda (e2e — US-EVT-09)', () => {
       type: 'Talk',
       room: 'Room B',
     });
+    expect(res.status).toBe(201);
     expect((res.body as Success<Session>).data.warning).toBeNull();
+  });
+
+  it('warns once about a double-booked speaker, then saves on confirm (US-PROG-05)', async () => {
+    const suda = await addSpeaker('Dr Suda');
+    const first = await addSession(adminJwt, {
+      day: 4,
+      startTime: '09:00',
+      endTime: '10:00',
+      title: 'Suda Keynote',
+      type: 'Keynote',
+      room: 'Hall A',
+      speakerIds: [suda],
+    });
+    expect(first.status).toBe(201);
+
+    // Same speaker, overlapping time, DIFFERENT room — a judgement call.
+    const overlapping = {
+      day: 4,
+      startTime: '09:30',
+      endTime: '10:30',
+      title: 'Suda Panel',
+      type: 'Panel',
+      room: 'Hall B',
+      speakerIds: [suda],
+    };
+    const refused = await addSession(adminJwt, overlapping);
+    expect(refused.status).toBe(409);
+    expect((refused.body as { message: string }).message).toMatch(/Dr Suda/);
+
+    const confirmed = await addSession(adminJwt, {
+      ...overlapping,
+      confirmSpeakerClash: true,
+    });
+    expect(confirmed.status).toBe(201);
+    expect((confirmed.body as Success<Session>).data.warning).toMatch(
+      /Dr Suda/,
+    );
   });
 
   it('links speakers and returns them; rejects a foreign speaker id', async () => {
@@ -219,9 +261,110 @@ describe('Sessions / agenda (e2e — US-EVT-09)', () => {
     });
     const id = (created.body as Success<Session>).data.id;
     await request(server)
-      .delete(`/api/v1/events/${eventId}/sessions/${id}`)
+      .delete(`/api/v1/events/${eventId}/sessions/${id}?confirm=true`)
       .set('Authorization', `Bearer ${adminJwt}`)
       .expect(200);
+  });
+
+  it('refuses to remove a session without an explicit confirm (US-PROG-04)', async () => {
+    const created = await addSession(adminJwt, {
+      day: 3,
+      startTime: '15:00',
+      title: 'Needs Confirming',
+      type: 'Talk',
+    });
+    const id = (created.body as Success<Session>).data.id;
+    const refused = await request(server)
+      .delete(`/api/v1/events/${eventId}/sessions/${id}`)
+      .set('Authorization', `Bearer ${adminJwt}`);
+    expect(refused.status).toBe(409);
+    expect((refused.body as { message: string }).message).toMatch(
+      /will NOT notify/i,
+    );
+    // …and it is still there.
+    const list = await request(server)
+      .get(`/api/v1/events/${eventId}/sessions`)
+      .set('Authorization', `Bearer ${adminJwt}`);
+    expect(
+      (list.body as Success<Session[]>).data.some((x) => x.id === id),
+    ).toBe(true);
+  });
+
+  it("a speaker's session count rises on assign and falls on remove (US-PROG-02/04)", async () => {
+    const grace = await addSpeaker('Grace Hopper');
+    const countFor = async (id: string): Promise<number> => {
+      const res = await request(server)
+        .get(`/api/v1/events/${eventId}/speakers`)
+        .set('Authorization', `Bearer ${adminJwt}`);
+      const rows = (res.body as Success<{ id: string; sessionCount: number }[]>)
+        .data;
+      return rows.find((s) => s.id === id)?.sessionCount ?? -1;
+    };
+
+    expect(await countFor(grace)).toBe(0);
+
+    const created = await addSession(adminJwt, {
+      day: 5,
+      startTime: '11:00',
+      endTime: '12:00',
+      title: 'Compilers',
+      type: 'Talk',
+      room: 'Hall C',
+      speakerIds: [grace],
+    });
+    expect(created.status).toBe(201);
+    expect(await countFor(grace)).toBe(1);
+
+    await request(server)
+      .delete(
+        `/api/v1/events/${eventId}/sessions/${(created.body as Success<Session>).data.id}?confirm=true`,
+      )
+      .set('Authorization', `Bearer ${adminJwt}`)
+      .expect(200);
+
+    // The speaker stays in the directory; only the count drops (US-PROG-04).
+    expect(await countFor(grace)).toBe(0);
+  });
+
+  it('colours every block from its type, consistently (US-PROG-01)', async () => {
+    const keynote = await addSession(adminJwt, {
+      day: 6,
+      startTime: '09:00',
+      endTime: '10:00',
+      title: 'Second Keynote',
+      type: 'Keynote',
+      room: 'Hall D',
+    });
+    const panel = await addSession(adminJwt, {
+      day: 6,
+      startTime: '10:00',
+      endTime: '11:00',
+      title: 'A Panel',
+      type: 'Panel',
+      room: 'Hall D',
+    });
+    expect((keynote.body as Success<Session>).data.color).toBe('blue');
+    expect((panel.body as Success<Session>).data.color).toBe('green');
+
+    // Colour is the server's to decide: sending one is refused outright rather
+    // than silently ignored, so eventa-web finds out immediately.
+    await addSession(adminJwt, {
+      day: 6,
+      startTime: '12:00',
+      endTime: '13:00',
+      title: 'Override attempt',
+      type: 'Talk',
+      color: 'rose',
+    }).expect(400);
+    // …and the very first Keynote in this suite gets the same blue.
+    const list = await request(server)
+      .get(`/api/v1/events/${eventId}/sessions`)
+      .set('Authorization', `Bearer ${adminJwt}`);
+    const keynotes = (list.body as Success<Session[]>).data.filter(
+      (x) => x.type === 'Keynote',
+    );
+    expect(keynotes.length).toBeGreaterThan(1);
+    expect(new Set(keynotes.map((k) => k.color))).toEqual(new Set(['blue']));
   });
 
   it("forbids adding a session to another tenant's event (404)", async () => {

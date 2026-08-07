@@ -8,9 +8,15 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiForbiddenResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiQuery,
+  ApiBearerAuth,
+  ApiForbiddenResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { ApiErrorDto } from '../../common/errors/error-envelope';
 import { ApiData, ApiList } from '../../common/http/api-data.decorator';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
@@ -18,6 +24,7 @@ import type { AuthContext } from '../auth/auth.types';
 import { CurrentAuth } from '../../common/decorators/current-auth.decorator';
 import {
   Permission,
+  RequireAnyPermission,
   RequirePermissions,
 } from '../../common/decorators/require-permissions.decorator';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
@@ -52,7 +59,8 @@ export class SessionsController {
   }
 
   @Get()
-  @RequirePermissions(Permission.evSpeakers)
+  // Read-only agenda: Staff support attendees on-site (US-PROG-01 note).
+  @RequireAnyPermission(Permission.evProgramView, Permission.evSpeakers)
   @ResponseMessage('Sessions retrieved.')
   @ApiList(SessionResponseDto)
   list(
@@ -75,15 +83,29 @@ export class SessionsController {
     return this.sessions.updateSession(actorOf(auth), eventId, id, dto);
   }
 
+  /** Requires `?confirm=true` — see `deleteSession` (US-PROG-04). */
   @Delete(':id')
   @RequirePermissions(Permission.evSpeakers)
   @ResponseMessage('Session removed.')
+  @ApiQuery({
+    name: 'confirm',
+    required: true,
+    schema: { type: 'boolean' },
+    description:
+      'Must be true. Removal does not notify attendees who bookmarked the session.',
+  })
   remove(
     @CurrentAuth() auth: AuthContext,
     @Param('eventId') eventId: string,
     @Param('id') id: string,
+    @Query('confirm') confirm?: string,
   ): Promise<void> {
-    return this.sessions.deleteSession(actorOf(auth), eventId, id);
+    return this.sessions.deleteSession(
+      actorOf(auth),
+      eventId,
+      id,
+      confirm === 'true',
+    );
   }
 }
 

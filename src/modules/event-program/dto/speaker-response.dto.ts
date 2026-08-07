@@ -3,8 +3,31 @@ import { speakerToneEnum } from '../../../db/schema';
 
 /** A speaker card (mapped from the `speakers` row — never raw). */
 export class SpeakerResponseDto {
+  @ApiProperty({
+    example: 3,
+    description: 'Live sessions this speaker is booked into (US-PROG-08).',
+  })
+  sessionCount!: number;
+
   @ApiProperty({ format: 'uuid' })
   id!: string;
+
+  @ApiProperty({ nullable: true, description: 'Speaker biography.' })
+  bio!: string | null;
+
+  @ApiProperty({ nullable: true, description: 'Absolute URL to a portrait.' })
+  photoUrl!: string | null;
+
+  @ApiProperty({ nullable: true })
+  website!: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    type: 'object',
+    additionalProperties: { type: 'string' },
+    example: { linkedin: 'https://linkedin.com/in/ada' },
+  })
+  socialLinks!: Record<string, string> | null;
 
   @ApiProperty({ format: 'uuid' })
   eventId!: string;
