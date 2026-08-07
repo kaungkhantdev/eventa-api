@@ -5,6 +5,8 @@ import type { EventActor } from '../events/events.types';
 import { EventsService } from '../events/events.service';
 import { SessionResponseDto } from './dto/session-response.dto';
 import { toSessionResponse } from './sessions.mapper';
+import { sessionChangedEvent } from './events/session-changed.event';
+import { shouldNotify } from './session-change';
 import { SessionsRepository } from './sessions.repository';
 import type {
   CreateSessionInput,
@@ -128,12 +130,24 @@ export class SessionsService {
         (await this.repo.currentSpeakerIds(actor.organizationId, sessionId)),
       input.confirmSpeakerClash ?? false,
     );
+    // Decided BEFORE the write, from the row as it stands: once the update has
+    // landed there is nothing left to compare the new values against.
+    const notify = shouldNotify(
+      session,
+      { ...session, ...values },
+      (await this.events.getEvent(actor, eventId)).status,
+      input.notifyAttendees,
+    );
     const updated = await this.repo.updateWithSpeakers(
       actor.organizationId,
       sessionId,
       values,
       session.version,
       speakerIds,
+      notify
+        ? (row) =>
+            this.changeNotice(actor.organizationId, eventId, session, row)
+        : undefined,
     );
     if (!updated) throw this.stale();
     return this.respond(actor.organizationId, eventId, updated, warning);
@@ -351,6 +365,29 @@ export class SessionsService {
     return session;
   }
 
+  /**
+   * The notice for a session that moved (US-PROG-03). Carries WHERE IT WAS as
+   * well as where it is now, so the message can say "Hall A → Hall B" rather
+   * than the useless "this session changed" — only the producer still knows the
+   * before.
+   */
+  private changeNotice(
+    organizationId: number,
+    eventId: string,
+    before: SessionRow,
+    after: SessionRow,
+  ) {
+    return sessionChangedEvent({
+      organizationId,
+      eventId,
+      sessionId: after.id,
+      title: after.title,
+      previous: snapshot(before),
+      current: snapshot(after),
+      occurredAt: new Date().toISOString(),
+    });
+  }
+
   private stale(): DomainException {
     return DomainException.conflict(
       'This session changed elsewhere. Reload and try again.',
@@ -367,4 +404,14 @@ export class SessionsService {
 function toSeconds(time: string): number {
   const [hours, minutes, seconds] = time.split(':');
   return Number(hours) * 3600 + Number(minutes) * 60 + Number(seconds ?? 0);
+}
+
+/** The when-and-where of a session, as the change notice reports it. */
+function snapshot(row: SessionRow) {
+  return {
+    day: row.day,
+    startTime: row.startTime,
+    endTime: row.endTime,
+    room: row.room,
+  };
 }
