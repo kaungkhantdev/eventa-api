@@ -7,6 +7,7 @@ import type {
   NewSessionValues,
   SessionRow,
   SessionSpeakerRef,
+  SpeakerClashCandidate,
 } from './sessions.types';
 
 /** Data access for agenda sessions + speaker links (Events & Program context). */
@@ -136,6 +137,58 @@ export class SessionsRepository {
             eq(sessions.organizationId, organizationId),
           ),
         );
+    });
+  }
+
+  /**
+   * Live sessions on the same day already featuring any of `speakerIds`
+   * (US-FIN-05's speaker-clash candidates). One row per session/speaker pair, so
+   * the caller can name who is double-booked and in what.
+   */
+  async speakerSessions(
+    organizationId: number,
+    eventId: string,
+    day: number,
+    speakerIds: string[],
+    excludeId?: string,
+  ): Promise<SpeakerClashCandidate[]> {
+    if (speakerIds.length === 0) return [];
+    return withTenant(this.db, organizationId, async (tx) =>
+      tx
+        .select({
+          sessionId: sessions.id,
+          title: sessions.title,
+          startTime: sessions.startTime,
+          endTime: sessions.endTime,
+          speakerName: speakers.name,
+        })
+        .from(sessionSpeakers)
+        .innerJoin(sessions, eq(sessions.id, sessionSpeakers.sessionId))
+        .innerJoin(speakers, eq(speakers.id, sessionSpeakers.speakerId))
+        .where(
+          and(
+            eq(sessions.organizationId, organizationId),
+            eq(sessions.eventId, eventId),
+            eq(sessions.day, day),
+            inArray(sessionSpeakers.speakerId, speakerIds),
+            isNull(sessions.deletedAt),
+            excludeId ? ne(sessions.id, excludeId) : undefined,
+          ),
+        ),
+    );
+  }
+
+  /** The speakers a session already has — used when a PATCH doesn't resend them. */
+  async currentSpeakerIds(
+    organizationId: number,
+    sessionId: string,
+  ): Promise<string[]> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({ speakerId: sessionSpeakers.speakerId })
+        .from(sessionSpeakers)
+        .where(eq(sessionSpeakers.sessionId, sessionId));
+      return rows.map((r) => r.speakerId);
     });
   }
 

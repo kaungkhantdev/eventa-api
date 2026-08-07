@@ -55,6 +55,8 @@ describe('SessionsService', () => {
         ),
       speakersFor: jest.fn().mockResolvedValue(new Map()),
       sameRoomSessions: jest.fn().mockResolvedValue([]),
+      speakerSessions: jest.fn().mockResolvedValue([]),
+      currentSpeakerIds: jest.fn().mockResolvedValue([]),
     } as unknown as jest.Mocked<SessionsRepository>;
     events = {
       getEvent: jest.fn().mockResolvedValue({ id: eventId }),
@@ -142,7 +144,9 @@ describe('SessionsService', () => {
       expect(repo.createWithSpeakers.mock.calls[0][1]).toEqual(['sp1', 'sp2']);
     });
 
-    it('warns (but does not block) when a same-room session overlaps', async () => {
+    it('BLOCKS a double-booked room, naming the room and the time', async () => {
+      // A room cannot hold two sessions at once — this is physics, not taste,
+      // so it is refused rather than warned about (US-PROG-05).
       repo.sameRoomSessions.mockResolvedValue([
         sessionRow({
           id: 'other',
@@ -151,19 +155,23 @@ describe('SessionsService', () => {
           endTime: '10:30:00',
         }),
       ]);
-      const res = await service.createSession(actor, eventId, {
-        day: 1,
-        startTime: '09:00',
-        endTime: '10:00',
-        title: 'Opening',
-        type: 'Keynote',
-        room: 'Main Hall',
-      });
-      expect(res.warning).toMatch(/Clashing Talk/);
-      expect(repo.createWithSpeakers).toHaveBeenCalledTimes(1); // not blocked
+      const err = await service
+        .createSession(actor, eventId, {
+          day: 1,
+          startTime: '09:00',
+          endTime: '10:00',
+          title: 'Opening',
+          type: 'Keynote',
+          room: 'Main Hall',
+        })
+        .catch((e: unknown) => e as DomainException);
+      expect(err).toBeInstanceOf(DomainException);
+      expect(err.message).toMatch(/Main Hall/);
+      expect(err.message).toMatch(/09:30/);
+      expect(repo.createWithSpeakers).not.toHaveBeenCalled();
     });
 
-    it('does not warn when the overlapping session is in a different room', async () => {
+    it('allows parallel tracks in different rooms at the same time', async () => {
       // Repo only returns same-room sessions; an empty result = no clash.
       repo.sameRoomSessions.mockResolvedValue([]);
       const res = await service.createSession(actor, eventId, {
@@ -175,9 +183,10 @@ describe('SessionsService', () => {
         room: 'Room B',
       });
       expect(res.warning).toBeNull();
+      expect(repo.createWithSpeakers).toHaveBeenCalledTimes(1);
     });
 
-    it('detects a sub-minute overlap (seconds precision)', async () => {
+    it('catches a sub-minute room overlap (seconds precision)', async () => {
       repo.sameRoomSessions.mockResolvedValue([
         sessionRow({
           id: 'other',
@@ -186,15 +195,119 @@ describe('SessionsService', () => {
           endTime: '09:00:50',
         }),
       ]);
-      const res = await service.createSession(actor, eventId, {
-        day: 1,
-        startTime: '09:00:20',
-        endTime: '09:00:40',
-        title: 'Nested',
-        type: 'Talk',
-        room: 'Main Hall',
+      await expect(
+        service.createSession(actor, eventId, {
+          day: 1,
+          startTime: '09:00:20',
+          endTime: '09:00:40',
+          title: 'Nested',
+          type: 'Talk',
+          room: 'Main Hall',
+        }),
+      ).rejects.toMatchObject({ code: 'CONFLICT' });
+    });
+
+    describe('a speaker in two places at once (US-PROG-05)', () => {
+      const clashing = () =>
+        repo.speakerSessions.mockResolvedValue([
+          {
+            sessionId: 'other',
+            title: 'Panel',
+            startTime: '09:30:00',
+            endTime: '10:30:00',
+            speakerName: 'Dr Suda',
+          },
+        ]);
+
+      const book = (extra: Record<string, unknown> = {}) =>
+        service.createSession(actor, eventId, {
+          day: 1,
+          startTime: '09:00',
+          endTime: '10:00',
+          title: 'Opening',
+          type: 'Keynote',
+          room: 'Room B',
+          speakerIds: ['sp1'],
+          ...extra,
+        });
+
+      it('refuses the first attempt, naming the speaker and the clash', async () => {
+        clashing();
+        const err = await book().catch((e: unknown) => e as DomainException);
+        expect(err).toBeInstanceOf(DomainException);
+        expect(err.message).toMatch(/Dr Suda/);
+        expect(err.message).toMatch(/Panel/);
+        expect(repo.createWithSpeakers).not.toHaveBeenCalled();
       });
-      expect(res.warning).toMatch(/Micro Talk/);
+
+      it('saves once the organizer confirms, and says so on the way out', async () => {
+        // Unlike a room, a person double-booked is a judgement call — the
+        // organizer may know one session is a fly-by appearance.
+        clashing();
+        const res = await book({ confirmSpeakerClash: true });
+        expect(repo.createWithSpeakers).toHaveBeenCalledTimes(1);
+        expect(res.warning).toMatch(/Dr Suda/);
+      });
+
+      it('does not ask for confirmation when the speaker is free', async () => {
+        repo.speakerSessions.mockResolvedValue([]);
+        const res = await book();
+        expect(repo.createWithSpeakers).toHaveBeenCalledTimes(1);
+        expect(res.warning).toBeNull();
+      });
+    });
+  });
+
+  describe('updateSession feasibility (US-PROG-05)', () => {
+    it('never flags a session as clashing with itself', async () => {
+      // The row being edited must be excluded from its own conflict check —
+      // otherwise nudging a start time by a minute would refuse itself.
+      await service.updateSession(actor, eventId, 'ss1', {
+        startTime: '09:15',
+      });
+      expect(repo.sameRoomSessions).toHaveBeenCalledWith(
+        actor.organizationId,
+        eventId,
+        1,
+        'Main Hall',
+        'ss1',
+      );
+      expect(repo.updateWithSpeakers).toHaveBeenCalledTimes(1);
+    });
+
+    it('blocks a move into an already-booked room', async () => {
+      repo.sameRoomSessions.mockResolvedValue([
+        sessionRow({
+          id: 'other',
+          title: 'Workshop',
+          startTime: '14:00:00',
+          endTime: '15:00:00',
+        }),
+      ]);
+      await expect(
+        service.updateSession(actor, eventId, 'ss1', {
+          startTime: '14:30',
+          endTime: '15:30',
+        }),
+      ).rejects.toMatchObject({ code: 'CONFLICT' });
+      expect(repo.updateWithSpeakers).not.toHaveBeenCalled();
+    });
+
+    it('checks the speakers it already has when the PATCH omits them', async () => {
+      // Moving a session's time can double-book a speaker who was never resent.
+      repo.currentSpeakerIds.mockResolvedValue(['sp1']);
+      repo.speakerSessions.mockResolvedValue([
+        {
+          sessionId: 'other',
+          title: 'Panel',
+          startTime: '09:30:00',
+          endTime: '10:30:00',
+          speakerName: 'Dr Suda',
+        },
+      ]);
+      await expect(
+        service.updateSession(actor, eventId, 'ss1', { startTime: '09:20' }),
+      ).rejects.toMatchObject({ code: 'CONFLICT' });
     });
   });
 

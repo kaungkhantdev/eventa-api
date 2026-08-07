@@ -26,6 +26,8 @@ export interface CreateSessionInput {
   color?: SessionColor;
   sortOrder?: number;
   speakerIds?: string[];
+  /** Re-submit with this after a speaker-clash refusal to assign them anyway. */
+  confirmSpeakerClash?: boolean;
 }
 
 /** Service input to edit a session (undefined = leave as-is). */
@@ -39,6 +41,17 @@ export interface UpdateSessionInput {
   color?: SessionColor;
   sortOrder?: number;
   speakerIds?: string[];
+  /** Re-submit with this after a speaker-clash refusal to assign them anyway. */
+  confirmSpeakerClash?: boolean;
   /** Optimistic-concurrency token; when set, must match the current row. */
   version?: number;
+}
+
+/** A session a speaker is already booked into, for the US-PROG-05 clash check. */
+export interface SpeakerClashCandidate {
+  sessionId: string;
+  title: string;
+  startTime: string;
+  endTime: string | null;
+  speakerName: string;
 }

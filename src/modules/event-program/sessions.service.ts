@@ -13,6 +13,20 @@ import type {
   UpdateSessionInput,
 } from './sessions.types';
 
+/** A not-yet-inserted session excludes nothing when conflicts are checked. */
+const NO_SESSION_YET = '';
+
+/** The only part of a session the overlap test needs. */
+interface TimeSpan {
+  startTime: string;
+  endTime: string | null;
+}
+
+/** `09:30:00` → `09:30` — a time an organizer reads, not a database value. */
+function short(time: string | null): string {
+  return time ? time.slice(0, 5) : '';
+}
+
 /** Columns a PATCH may set on a session (speaker links are handled separately). */
 const UPDATABLE_KEYS: (keyof NewSessionValues & keyof UpdateSessionInput)[] = [
   'day',
@@ -58,8 +72,15 @@ export class SessionsService {
       color: input.color ?? null,
       sortOrder: input.sortOrder ?? 0,
     };
+    const warning = await this.assertFeasible(
+      actor.organizationId,
+      eventId,
+      { ...values, id: NO_SESSION_YET } as SessionRow,
+      speakerIds,
+      input.confirmSpeakerClash ?? false,
+    );
     const session = await this.repo.createWithSpeakers(values, speakerIds);
-    return this.respond(actor.organizationId, eventId, session);
+    return this.respond(actor.organizationId, eventId, session, warning);
   }
 
   async listSessions(
@@ -95,15 +116,24 @@ export class SessionsService {
       eventId,
       input.speakerIds,
     );
+    const values = this.buildValues(input);
+    const warning = await this.assertFeasible(
+      actor.organizationId,
+      eventId,
+      { ...session, ...values, startTime, endTime },
+      speakerIds ??
+        (await this.repo.currentSpeakerIds(actor.organizationId, sessionId)),
+      input.confirmSpeakerClash ?? false,
+    );
     const updated = await this.repo.updateWithSpeakers(
       actor.organizationId,
       sessionId,
-      this.buildValues(input),
+      values,
       session.version,
       speakerIds,
     );
     if (!updated) throw this.stale();
-    return this.respond(actor.organizationId, eventId, updated);
+    return this.respond(actor.organizationId, eventId, updated, warning);
   }
 
   async deleteSession(
@@ -115,38 +145,99 @@ export class SessionsService {
     await this.repo.softDelete(actor.organizationId, sessionId);
   }
 
-  /** Build the create/update response: speaker links + a non-blocking overlap note. */
+  /** Build the create/update response: speaker links + any accepted-clash note. */
   private async respond(
     organizationId: number,
     eventId: string,
     session: SessionRow,
+    warning: string | null,
   ): Promise<SessionResponseDto> {
-    const warning = await this.overlapWarning(organizationId, eventId, session);
     const refs = await this.repo.speakersFor(organizationId, [session.id]);
     return toSessionResponse(session, refs.get(session.id) ?? [], warning);
   }
 
-  /** Warn (never block) when a same-room, same-day session overlaps in time. */
-  private async overlapWarning(
+  /**
+   * The two feasibility checks of US-PROG-05, run BEFORE the write so a refusal
+   * leaves nothing behind. They differ deliberately:
+   *
+   * - **A room is physics.** Two sessions cannot occupy one room at one time,
+   *   so a clash is refused outright and the message names the room and the
+   *   time so the organizer can go straight to it.
+   * - **A speaker is a judgement call.** An organizer may genuinely intend a
+   *   fly-by appearance across two tracks, so an overlap is refused ONCE with
+   *   an explanation and allowed on a re-submit carrying `confirmSpeakerClash`.
+   *
+   * Parallel tracks in different rooms are untouched by either check, and a
+   * session is never compared against itself — `excludeId` sees to that.
+   */
+  private async assertFeasible(
     organizationId: number,
     eventId: string,
-    session: SessionRow,
+    candidate: SessionRow,
+    speakerIds: string[] | undefined,
+    confirmed: boolean,
   ): Promise<string | null> {
-    if (!session.room || !session.endTime) return null;
+    await this.assertRoomFree(organizationId, eventId, candidate);
+    return this.checkSpeakers(
+      organizationId,
+      eventId,
+      candidate,
+      speakerIds,
+      confirmed,
+    );
+  }
+
+  private async assertRoomFree(
+    organizationId: number,
+    eventId: string,
+    candidate: SessionRow,
+  ): Promise<void> {
+    if (!candidate.room || !candidate.endTime) return;
     const others = await this.repo.sameRoomSessions(
       organizationId,
       eventId,
-      session.day,
-      session.room,
-      session.id,
+      candidate.day,
+      candidate.room,
+      candidate.id,
     );
-    const clashes = others.filter((o) => this.overlaps(session, o));
-    if (clashes.length === 0) return null;
-    const titles = clashes.map((c) => `"${c.title}"`).join(', ');
-    return `Overlaps ${titles} in ${session.room}. Multi-track rooms are fine, so this is allowed.`;
+    const clash = others.find((o) => this.overlaps(candidate, o));
+    if (!clash) return;
+    throw DomainException.conflict(
+      `${candidate.room} is already booked for "${clash.title}" from ${short(clash.startTime)} to ${short(clash.endTime)}. Choose another room or time.`,
+    );
   }
 
-  private overlaps(a: SessionRow, b: SessionRow): boolean {
+  /** Returns the note to echo back once the organizer has confirmed. */
+  private async checkSpeakers(
+    organizationId: number,
+    eventId: string,
+    candidate: SessionRow,
+    speakerIds: string[] | undefined,
+    confirmed: boolean,
+  ): Promise<string | null> {
+    if (!speakerIds?.length || !candidate.endTime) return null;
+    const booked = await this.repo.speakerSessions(
+      organizationId,
+      eventId,
+      candidate.day,
+      speakerIds,
+      candidate.id,
+    );
+    const clashes = booked.filter((b) => this.overlaps(candidate, b));
+    if (clashes.length === 0) return null;
+    const who = [...new Set(clashes.map((c) => c.speakerName))].join(', ');
+    const what = clashes.map((c) => `"${c.title}"`).join(', ');
+    const note = `${who} is already speaking in ${what} at this time.`;
+    if (!confirmed) {
+      throw DomainException.conflict(`${note} Confirm to assign them anyway.`);
+    }
+    return note;
+  }
+
+  /** Half-open comparison, so a session ending at 10:00 and one starting at
+   * 10:00 are back-to-back rather than clashing. Takes only the times, so it
+   * serves both room rows and speaker-clash candidates. */
+  private overlaps(a: TimeSpan, b: TimeSpan): boolean {
     if (!a.endTime || !b.endTime) return false;
     const aStart = toSeconds(a.startTime);
     const aEnd = toSeconds(a.endTime);

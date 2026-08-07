@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
@@ -81,4 +82,12 @@ export class CreateSessionDto {
   @IsArray()
   @IsUUID('4', { each: true })
   speakerIds?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Re-submit with true after a speaker-clash refusal to assign them anyway (US-PROG-05). A room clash can never be confirmed away.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  confirmSpeakerClash?: boolean;
 }

@@ -135,7 +135,7 @@ describe('Sessions / agenda (e2e — US-EVT-09)', () => {
     }).expect(422);
   });
 
-  it('warns (but still creates) when a same-room session overlaps', async () => {
+  it('BLOCKS a double-booked room, naming the room and the time (US-PROG-05)', async () => {
     const res = await addSession(adminJwt, {
       day: 1,
       startTime: '09:30',
@@ -144,13 +144,14 @@ describe('Sessions / agenda (e2e — US-EVT-09)', () => {
       type: 'Talk',
       room: 'Main Hall',
     });
-    expect(res.status).toBe(201);
-    expect((res.body as Success<Session>).data.warning).toMatch(
-      /Opening Keynote/,
-    );
+    expect(res.status).toBe(409);
+    const { message } = res.body as { message: string };
+    expect(message).toMatch(/Main Hall/);
+    expect(message).toMatch(/Opening Keynote/);
+    expect(message).toMatch(/09:00/);
   });
 
-  it('does not warn for the same time in a different room', async () => {
+  it('allows parallel tracks in a different room at the same time', async () => {
     const res = await addSession(adminJwt, {
       day: 1,
       startTime: '09:30',
@@ -159,7 +160,45 @@ describe('Sessions / agenda (e2e — US-EVT-09)', () => {
       type: 'Talk',
       room: 'Room B',
     });
+    expect(res.status).toBe(201);
     expect((res.body as Success<Session>).data.warning).toBeNull();
+  });
+
+  it('warns once about a double-booked speaker, then saves on confirm (US-PROG-05)', async () => {
+    const suda = await addSpeaker('Dr Suda');
+    const first = await addSession(adminJwt, {
+      day: 4,
+      startTime: '09:00',
+      endTime: '10:00',
+      title: 'Suda Keynote',
+      type: 'Keynote',
+      room: 'Hall A',
+      speakerIds: [suda],
+    });
+    expect(first.status).toBe(201);
+
+    // Same speaker, overlapping time, DIFFERENT room — a judgement call.
+    const overlapping = {
+      day: 4,
+      startTime: '09:30',
+      endTime: '10:30',
+      title: 'Suda Panel',
+      type: 'Panel',
+      room: 'Hall B',
+      speakerIds: [suda],
+    };
+    const refused = await addSession(adminJwt, overlapping);
+    expect(refused.status).toBe(409);
+    expect((refused.body as { message: string }).message).toMatch(/Dr Suda/);
+
+    const confirmed = await addSession(adminJwt, {
+      ...overlapping,
+      confirmSpeakerClash: true,
+    });
+    expect(confirmed.status).toBe(201);
+    expect((confirmed.body as Success<Session>).data.warning).toMatch(
+      /Dr Suda/,
+    );
   });
 
   it('links speakers and returns them; rejects a foreign speaker id', async () => {
