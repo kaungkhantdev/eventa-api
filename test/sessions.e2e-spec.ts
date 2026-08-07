@@ -32,6 +32,9 @@ interface Session {
   startTime: string;
   endTime: string | null;
   room: string | null;
+  type: string;
+  color: string;
+  description: string | null;
   speakers: SessionSpeaker[];
   warning: string | null;
   version: number;
@@ -297,6 +300,47 @@ describe('Sessions / agenda (e2e — US-EVT-09)', () => {
 
     // The speaker stays in the directory; only the count drops (US-PROG-04).
     expect(await countFor(grace)).toBe(0);
+  });
+
+  it('colours every block from its type, consistently (US-PROG-01)', async () => {
+    const keynote = await addSession(adminJwt, {
+      day: 6,
+      startTime: '09:00',
+      endTime: '10:00',
+      title: 'Second Keynote',
+      type: 'Keynote',
+      room: 'Hall D',
+    });
+    const panel = await addSession(adminJwt, {
+      day: 6,
+      startTime: '10:00',
+      endTime: '11:00',
+      title: 'A Panel',
+      type: 'Panel',
+      room: 'Hall D',
+    });
+    expect((keynote.body as Success<Session>).data.color).toBe('blue');
+    expect((panel.body as Success<Session>).data.color).toBe('green');
+
+    // Colour is the server's to decide: sending one is refused outright rather
+    // than silently ignored, so eventa-web finds out immediately.
+    await addSession(adminJwt, {
+      day: 6,
+      startTime: '12:00',
+      endTime: '13:00',
+      title: 'Override attempt',
+      type: 'Talk',
+      color: 'rose',
+    }).expect(400);
+    // …and the very first Keynote in this suite gets the same blue.
+    const list = await request(server)
+      .get(`/api/v1/events/${eventId}/sessions`)
+      .set('Authorization', `Bearer ${adminJwt}`);
+    const keynotes = (list.body as Success<Session[]>).data.filter(
+      (x) => x.type === 'Keynote',
+    );
+    expect(keynotes.length).toBeGreaterThan(1);
+    expect(new Set(keynotes.map((k) => k.color))).toEqual(new Set(['blue']));
   });
 
   it("forbids adding a session to another tenant's event (404)", async () => {

@@ -146,10 +146,18 @@ export const sessionTypeEnum = pgEnum('session_type', [
   'Break',
 ]);
 
+/**
+ * The agenda block palette. One value per `session_type`, because US-PROG-01
+ * asks for a type shown by a CONSISTENT colour — the mapping lives in
+ * `sessions.mapper.ts`, not in the caller's hands. `blue` and `slate` were
+ * appended (enum values are add-only) so all five types can be expressed.
+ */
 export const sessionColorEnum = pgEnum('session_color', [
   'green',
   'amber',
   'rose',
+  'blue',
+  'slate',
 ]);
 
 export const speakerToneEnum = pgEnum('speaker_tone', [

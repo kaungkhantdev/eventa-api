@@ -4,12 +4,14 @@ import {
   check,
   index,
   integer,
+  jsonb,
   numeric,
   pgTable,
   smallint,
   text,
   time,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 import { createdAt, deletedAt, idPk, updatedAt, version } from './_columns';
@@ -38,6 +40,12 @@ export const speakers = pgTable(
     initials: text(),
     tone: speakerToneEnum(),
     rating: numeric({ precision: 3, scale: 2 }),
+    /** The profile an organizer keeps current (US-PROG-09/10). */
+    bio: text(),
+    photoUrl: text(),
+    website: text(),
+    /** `{ twitter, linkedin, … }` — links only; validated as URLs at the edge. */
+    socialLinks: jsonb().$type<Record<string, string>>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     deletedAt: deletedAt(),
@@ -46,6 +54,15 @@ export const speakers = pgTable(
   (t) => [
     index('ix_speakers_event').on(t.eventId),
     index('ix_speakers_org').on(t.organizationId),
+    /**
+     * One live speaker per email per event (US-PROG-09/10). Partial, so the
+     * many speakers with no email on file don't collide, and soft-deleted rows
+     * free their email for re-use.
+     */
+    uniqueIndex('uq_speakers_event_email')
+      .on(t.eventId, t.email)
+      .where(sql`${t.email} IS NOT NULL AND ${t.deletedAt} IS NULL`),
+    index('ix_speakers_name').on(t.eventId, t.name),
   ],
 );
 
@@ -66,7 +83,15 @@ export const sessions = pgTable(
     title: text().notNull(),
     type: sessionTypeEnum().notNull(),
     room: text(),
+    /**
+     * Retained so historic rows keep their value, but no longer written or
+     * read: the response colour is derived from `type` (US-PROG-01). Expand
+     * now, contract in a later migration once eventa-web has stopped sending
+     * it.
+     */
     color: sessionColorEnum(),
+    /** The optional blurb attendees read on the agenda (US-PROG-02). */
+    description: text(),
     sortOrder: integer().notNull().default(0),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

@@ -23,7 +23,14 @@ const UPDATABLE_KEYS: (keyof NewSpeakerValues & keyof UpdateSpeakerInput)[] = [
   'tag',
   'initials',
   'tone',
+  'bio',
+  'photoUrl',
+  'website',
+  'socialLinks',
 ];
+
+const DUPLICATE_EMAIL =
+  'Another speaker on this event already uses that email address.';
 
 /** Manage an event's speaker line-up (Events & Program context). */
 @Injectable()
@@ -51,8 +58,14 @@ export class SpeakersService {
       tag: input.tag ?? null,
       initials: input.initials ?? null,
       tone: input.tone ?? null,
+      bio: input.bio ?? null,
+      photoUrl: input.photoUrl ?? null,
+      website: input.website ?? null,
+      socialLinks: input.socialLinks ?? null,
     };
-    return toSpeakerResponse(await this.repo.insert(values));
+    await this.assertEmailFree(actor.organizationId, eventId, input.email);
+    // A brand-new speaker is in nothing yet, so the count is 0 by definition.
+    return toSpeakerResponse(await this.repo.insert(values), 0);
   }
 
   async listSpeakers(
@@ -81,6 +94,14 @@ export class SpeakersService {
       throw this.stale();
     }
     if (input.name !== undefined) this.requireName(input.name);
+    if (input.email) {
+      await this.assertEmailFree(
+        actor.organizationId,
+        eventId,
+        input.email,
+        speakerId,
+      );
+    }
     const updated = await this.repo.update(
       actor.organizationId,
       speakerId,
@@ -88,7 +109,10 @@ export class SpeakersService {
       speaker.version,
     );
     if (!updated) throw this.stale();
-    return toSpeakerResponse(updated);
+    const counts = await this.repo.sessionCounts(actor.organizationId, [
+      speakerId,
+    ]);
+    return toSpeakerResponse(updated, counts.get(speakerId) ?? 0);
   }
 
   async deleteSpeaker(
@@ -125,6 +149,27 @@ export class SpeakersService {
       idMap.set(s.id, copy.id);
     }
     return idMap;
+  }
+
+  /**
+   * One live speaker per email per event (US-PROG-09/10). Checked here for a
+   * clean 409 and enforced by `uq_speakers_event_email` underneath, so a race
+   * cannot slip a duplicate past the read.
+   */
+  private async assertEmailFree(
+    organizationId: number,
+    eventId: string,
+    email: string | null | undefined,
+    excludeId?: string,
+  ): Promise<void> {
+    if (!email) return;
+    const existing = await this.repo.findByEmail(
+      organizationId,
+      eventId,
+      email,
+      excludeId,
+    );
+    if (existing) throw DomainException.conflict(DUPLICATE_EMAIL);
   }
 
   private requireName(name: string): string {

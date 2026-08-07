@@ -260,6 +260,13 @@
       "when": 1785996047240,
       "tag": "0036_payout_audit_type",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1786070303550,
+      "tag": "0037_program_palette_and_speaker_profile",
+      "breakpoints": true
     }
   ]
 }

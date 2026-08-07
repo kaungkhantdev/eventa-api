@@ -23,7 +23,7 @@ export interface CreateSessionInput {
   title: string;
   type: SessionType;
   room?: string;
-  color?: SessionColor;
+  description?: string;
   sortOrder?: number;
   speakerIds?: string[];
   /** Re-submit with this after a speaker-clash refusal to assign them anyway. */
@@ -38,7 +38,7 @@ export interface UpdateSessionInput {
   title?: string;
   type?: SessionType;
   room?: string | null;
-  color?: SessionColor;
+  description?: string | null;
   sortOrder?: number;
   speakerIds?: string[];
   /** Re-submit with this after a speaker-clash refusal to assign them anyway. */

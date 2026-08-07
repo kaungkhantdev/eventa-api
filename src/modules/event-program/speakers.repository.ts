@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, ne, sql, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { sessionSpeakers, sessions, speakers } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
@@ -65,6 +65,34 @@ export class SpeakersRepository {
           ),
         )
         .orderBy(asc(speakers.name), asc(speakers.id));
+    });
+  }
+
+  /**
+   * A live speaker on this event with the given email, ignoring `excludeId`
+   * (the row being edited). Case-insensitive because `email` is `citext`.
+   */
+  async findByEmail(
+    organizationId: number,
+    eventId: string,
+    email: string,
+    excludeId?: string,
+  ): Promise<SpeakerRow | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(speakers)
+        .where(
+          and(
+            eq(speakers.organizationId, organizationId),
+            eq(speakers.eventId, eventId),
+            eq(speakers.email, email),
+            isNull(speakers.deletedAt),
+            excludeId ? ne(speakers.id, excludeId) : undefined,
+          ),
+        )
+        .limit(1);
+      return row ?? null;
     });
   }
 

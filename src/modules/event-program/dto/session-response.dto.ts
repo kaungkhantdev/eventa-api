@@ -37,10 +37,13 @@ export class SessionResponseDto {
 
   @ApiProperty({
     enum: sessionColorEnum.enumValues,
-    nullable: true,
-    type: String,
+    description:
+      'DERIVED from `type` — the same type always gets the same colour (US-PROG-01). Read-only; sending it on create/update has no effect.',
   })
-  color!: string | null;
+  color!: string;
+
+  @ApiProperty({ nullable: true, type: String, description: 'Agenda blurb.' })
+  description!: string | null;
 
   @ApiProperty({ example: 0, description: 'Ordering within the day' })
   sortOrder!: number;
@@ -52,7 +55,7 @@ export class SessionResponseDto {
     nullable: true,
     type: String,
     description:
-      'Set when this write overlaps another same-room session (not blocking)',
+      'Set when a speaker double-booking was confirmed through (US-PROG-05). A ROOM clash is refused outright, never warned about.',
   })
   warning!: string | null;
 

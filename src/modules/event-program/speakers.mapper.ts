@@ -23,6 +23,10 @@ export function toSpeakerResponse(
     initials: s.initials,
     tone: s.tone,
     rating: s.rating,
+    bio: s.bio,
+    photoUrl: s.photoUrl,
+    website: s.website,
+    socialLinks: s.socialLinks,
     createdAt: s.createdAt.toISOString(),
     version: s.version,
   };

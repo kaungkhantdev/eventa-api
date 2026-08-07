@@ -35,7 +35,7 @@ const UPDATABLE_KEYS: (keyof NewSessionValues & keyof UpdateSessionInput)[] = [
   'title',
   'type',
   'room',
-  'color',
+  'description',
   'sortOrder',
 ];
 
@@ -69,7 +69,7 @@ export class SessionsService {
       title,
       type: input.type,
       room: input.room ?? null,
-      color: input.color ?? null,
+      description: input.description ?? null,
       sortOrder: input.sortOrder ?? 0,
     };
     const warning = await this.assertFeasible(

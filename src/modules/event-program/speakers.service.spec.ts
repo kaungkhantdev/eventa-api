@@ -192,3 +192,74 @@ describe('SpeakersService — session counts (US-PROG-02/04/08/09)', () => {
     expect(repo.sessionCounts).not.toHaveBeenCalled();
   });
 });
+
+describe('SpeakersService — one email per event (US-PROG-09/10)', () => {
+  let repo: jest.Mocked<SpeakersRepository>;
+  let service: SpeakersService;
+
+  beforeEach(() => {
+    repo = {
+      insert: jest
+        .fn()
+        .mockImplementation((v: Partial<SpeakerRow>) =>
+          Promise.resolve(speakerRow(v)),
+        ),
+      findSpeaker: jest.fn().mockResolvedValue(speakerRow()),
+      findByEmail: jest.fn().mockResolvedValue(null),
+      update: jest
+        .fn()
+        .mockImplementation((_o: number, _id: string, v: Partial<SpeakerRow>) =>
+          Promise.resolve(speakerRow({ ...v, version: 2 })),
+        ),
+      sessionCounts: jest.fn().mockResolvedValue(new Map<string, number>()),
+    } as unknown as jest.Mocked<SpeakersRepository>;
+    const events = {
+      getEvent: jest.fn().mockResolvedValue({ id: eventId }),
+    } as unknown as jest.Mocked<EventsService>;
+    service = new SpeakersService(repo, events);
+  });
+
+  it('refuses a second speaker with the same email', async () => {
+    repo.findByEmail.mockResolvedValue(speakerRow({ id: 'other' }));
+    await expect(
+      service.createSpeaker(actor, eventId, {
+        name: 'Ada',
+        email: 'ada@example.com',
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(repo.insert).not.toHaveBeenCalled();
+  });
+
+  it('allows a speaker with no email at all, however many', async () => {
+    // Most speakers are added without one; they must not collide.
+    await service.createSpeaker(actor, eventId, { name: 'Anon One' });
+    await service.createSpeaker(actor, eventId, { name: 'Anon Two' });
+    expect(repo.findByEmail).not.toHaveBeenCalled();
+    expect(repo.insert).toHaveBeenCalledTimes(2);
+  });
+
+  it('lets a speaker keep their own email when edited', async () => {
+    // The uniqueness check must exclude the row being edited, or every PATCH
+    // that resends the email would refuse itself.
+    await service.updateSpeaker(actor, eventId, 'sp1', {
+      email: 'ada@example.com',
+    });
+    expect(repo.findByEmail).toHaveBeenCalledWith(
+      actor.organizationId,
+      eventId,
+      'ada@example.com',
+      'sp1',
+    );
+    expect(repo.update).toHaveBeenCalled();
+  });
+
+  it('refuses an edit that takes another speaker’s email', async () => {
+    repo.findByEmail.mockResolvedValue(speakerRow({ id: 'other' }));
+    await expect(
+      service.updateSpeaker(actor, eventId, 'sp1', {
+        email: 'taken@example.com',
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(repo.update).not.toHaveBeenCalled();
+  });
+});
