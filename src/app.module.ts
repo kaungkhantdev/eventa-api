@@ -40,6 +40,7 @@ import { AuthSignupModule } from './modules/auth-signup/auth-signup.module';
 import { AuthSocialModule } from './modules/auth-social/auth-social.module';
 import { UsersModule } from './modules/users/users.module';
 import { CheckoutModule } from './modules/checkout/checkout.module';
+import { CheckInModule } from './modules/check-in/check-in.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { PayoutsModule } from './modules/payouts/payouts.module';
@@ -101,6 +102,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     PaymentsModule,
     InvoicesModule,
     TaxPeriodsModule,
+    CheckInModule,
     PayoutsModule,
   ],
 })
