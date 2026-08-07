@@ -1,9 +1,24 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, isNull, ne, sql, type SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  ne,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { sessionSpeakers, sessions, speakers } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
-import type { NewSpeakerValues, SpeakerRow } from './speakers.types';
+import type {
+  NewSpeakerValues,
+  SpeakerFilters,
+  SpeakerRow,
+} from './speakers.types';
 
 /** Data access for speakers (Events & Program context). All queries tenant-scoped. */
 @Injectable()
@@ -53,19 +68,63 @@ export class SpeakersRepository {
     organizationId: number,
     eventId: string,
   ): Promise<SpeakerRow[]> {
+    const { items } = await this.page(organizationId, eventId, {
+      page: 1,
+      limit: Number.MAX_SAFE_INTEGER,
+    });
+    return items;
+  }
+
+  /**
+   * One page of the directory, narrowed by a free-text term across name, role
+   * and email (US-PROG-08). The total is the FILTERED total, so the count the
+   * console shows always describes the list beneath it.
+   */
+  async page(
+    organizationId: number,
+    eventId: string,
+    filters: SpeakerFilters,
+  ): Promise<{ items: SpeakerRow[]; total: number }> {
     return withTenant(this.db, organizationId, async (tx) => {
-      return tx
+      const where = this.directoryWhere(organizationId, eventId, filters);
+      const [{ count }] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(speakers)
+        .where(where);
+      const items = await tx
         .select()
         .from(speakers)
-        .where(
-          and(
-            eq(speakers.organizationId, organizationId),
-            eq(speakers.eventId, eventId),
-            isNull(speakers.deletedAt),
-          ),
-        )
-        .orderBy(asc(speakers.name), asc(speakers.id));
+        .where(where)
+        .orderBy(asc(speakers.name), asc(speakers.id))
+        .limit(filters.limit)
+        .offset((filters.page - 1) * filters.limit);
+      return { items, total: count };
     });
+  }
+
+  private directoryWhere(
+    organizationId: number,
+    eventId: string,
+    filters: SpeakerFilters,
+  ): SQL | undefined {
+    const clauses = [
+      eq(speakers.organizationId, organizationId),
+      eq(speakers.eventId, eventId),
+      isNull(speakers.deletedAt),
+    ];
+    if (filters.search) {
+      const term = `%${filters.search}%`;
+      clauses.push(
+        or(
+          ilike(speakers.name, term),
+          ilike(speakers.role, term),
+          // `email` is citext, so ilike would be redundant — but harmless, and
+          // it keeps all three branches reading the same way.
+          ilike(speakers.email, term),
+        ) as SQL,
+      );
+    }
+    return and(...clauses);
   }
 
   /**

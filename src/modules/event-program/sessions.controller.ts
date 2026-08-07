@@ -18,6 +18,7 @@ import type { AuthContext } from '../auth/auth.types';
 import { CurrentAuth } from '../../common/decorators/current-auth.decorator';
 import {
   Permission,
+  RequireAnyPermission,
   RequirePermissions,
 } from '../../common/decorators/require-permissions.decorator';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
@@ -52,7 +53,8 @@ export class SessionsController {
   }
 
   @Get()
-  @RequirePermissions(Permission.evSpeakers)
+  // Read-only agenda: Staff support attendees on-site (US-PROG-01 note).
+  @RequireAnyPermission(Permission.evProgramView, Permission.evSpeakers)
   @ResponseMessage('Sessions retrieved.')
   @ApiList(SessionResponseDto)
   list(

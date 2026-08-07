@@ -3,11 +3,13 @@ import { DomainException } from '../../common/errors/domain.exception';
 import { pickDefined } from '../../common/util/pick-defined';
 import type { EventActor } from '../events/events.types';
 import { EventsService } from '../events/events.service';
+import { Paginated } from '../../common/http/paginated';
 import { SpeakerResponseDto } from './dto/speaker-response.dto';
 import { toSpeakerResponse } from './speakers.mapper';
 import { SpeakersRepository } from './speakers.repository';
 import type {
   CreateSpeakerInput,
+  SpeakerFilters,
   NewSpeakerValues,
   SpeakerRow,
   UpdateSpeakerInput,
@@ -28,6 +30,9 @@ const UPDATABLE_KEYS: (keyof NewSpeakerValues & keyof UpdateSpeakerInput)[] = [
   'website',
   'socialLinks',
 ];
+
+export const DEFAULT_LIMIT = 24;
+export const MAX_LIMIT = 100;
 
 const DUPLICATE_EMAIL =
   'Another speaker on this event already uses that email address.';
@@ -68,19 +73,43 @@ export class SpeakersService {
     return toSpeakerResponse(await this.repo.insert(values), 0);
   }
 
+  /**
+   * The speaker directory (US-PROG-08): searchable by name, role or email, and
+   * paginated so `meta.total` is the FILTERED total the console shows beside
+   * the list. An empty result is a page with no items, never an error.
+   */
   async listSpeakers(
     actor: EventActor,
     eventId: string,
-  ): Promise<SpeakerResponseDto[]> {
+    query: Partial<SpeakerFilters> = {},
+  ): Promise<Paginated<SpeakerResponseDto>> {
     await this.events.getEvent(actor, eventId);
-    const rows = await this.repo.listByEvent(actor.organizationId, eventId);
-    if (rows.length === 0) return [];
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.min(
+      MAX_LIMIT,
+      Math.max(1, query.limit ?? DEFAULT_LIMIT),
+    );
+    const { items, total } = await this.repo.page(
+      actor.organizationId,
+      eventId,
+      {
+        ...query,
+        page,
+        limit,
+      },
+    );
+    if (items.length === 0) return Paginated.of([], total, page, limit);
     // One grouped query for the whole page rather than a count per speaker.
     const counts = await this.repo.sessionCounts(
       actor.organizationId,
-      rows.map((r) => r.id),
+      items.map((r) => r.id),
     );
-    return rows.map((r) => toSpeakerResponse(r, counts.get(r.id) ?? 0));
+    return Paginated.of(
+      items.map((r) => toSpeakerResponse(r, counts.get(r.id) ?? 0)),
+      total,
+      page,
+      limit,
+    );
   }
 
   async updateSpeaker(

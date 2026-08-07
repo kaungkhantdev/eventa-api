@@ -24,6 +24,10 @@ export const permissionKeyEnum = pgEnum('permission_key', [
   'evCreate',
   'evPublish',
   'evSpeakers',
+  // Read-only agenda + speaker directory (US-PROG-01/08 notes): Staff support
+  // attendees on-site without being able to change the programme. Appended —
+  // enum values are add-only.
+  'evProgramView',
   'regView',
   'regCheckin',
   'regExport',

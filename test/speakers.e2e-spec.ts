@@ -16,6 +16,7 @@ const ORG = { slug: 'spk-e2e', name: 'Speakers E2E' };
 const ORG2 = { slug: 'spk-e2e-2', name: 'Speakers E2E 2' };
 const ADMIN = 'admin@spk-e2e.test'; // evSpeakers + evCreate
 const LIMITED = 'staff@spk-e2e.test'; // evCreate only (no evSpeakers)
+const VIEWER = 'staffviewer@spk-e2e.test';
 const ADMIN2 = 'admin@spk-e2e-2.test';
 
 interface Success<T> {
@@ -43,6 +44,11 @@ describe('Speakers (e2e — US-EVT-09)', () => {
     await seedOrg(pool, ORG, [
       { email: ADMIN, roleName: 'Admin', grants: ['evSpeakers', 'evCreate'] },
       { email: LIMITED, roleName: 'Organizer', grants: ['evCreate'] },
+      {
+        email: VIEWER,
+        roleName: 'Staff',
+        grants: ['evProgramView'],
+      },
     ]);
     await seedOrg(pool, ORG2, [
       { email: ADMIN2, roleName: 'Admin', grants: ['evSpeakers', 'evCreate'] },
@@ -121,6 +127,72 @@ describe('Speakers (e2e — US-EVT-09)', () => {
     );
   });
 
+  it('searches by name, role or email and reports the filtered total (US-PROG-08)', async () => {
+    await addSpeaker(adminJwt, {
+      name: 'Marie Curie',
+      role: 'Physicist',
+      email: 'marie@radium.test',
+    }).expect(201);
+
+    const byName = await request(server)
+      .get(`/api/v1/events/${eventId}/speakers?search=Curie`)
+      .set('Authorization', `Bearer ${adminJwt}`);
+    expect(byName.status).toBe(200);
+    const hit = byName.body as Success<Speaker[]> & { meta: { total: number } };
+    expect(hit.data.map((s) => s.name)).toEqual(['Marie Curie']);
+    // The count describes the FILTERED list, not the whole directory.
+    expect(hit.meta.total).toBe(1);
+
+    const byRole = await request(server)
+      .get(`/api/v1/events/${eventId}/speakers?search=Physicist`)
+      .set('Authorization', `Bearer ${adminJwt}`);
+    expect((byRole.body as Success<Speaker[]>).data).toHaveLength(1);
+
+    const byEmail = await request(server)
+      .get(`/api/v1/events/${eventId}/speakers?search=radium`)
+      .set('Authorization', `Bearer ${adminJwt}`);
+    expect((byEmail.body as Success<Speaker[]>).data).toHaveLength(1);
+  });
+
+  it('returns an empty page rather than an error when nothing matches', async () => {
+    const res = await request(server)
+      .get(`/api/v1/events/${eventId}/speakers?search=nobodyhasthisname`)
+      .set('Authorization', `Bearer ${adminJwt}`);
+    expect(res.status).toBe(200);
+    const body = res.body as Success<Speaker[]> & { meta: { total: number } };
+    expect(body.data).toEqual([]);
+    expect(body.meta.total).toBe(0);
+  });
+
+  it('refuses a duplicate email on the same event (US-PROG-09/10)', async () => {
+    await addSpeaker(adminJwt, {
+      name: 'First Claim',
+      email: 'shared@spk.test',
+    }).expect(201);
+    const dup = await addSpeaker(adminJwt, {
+      name: 'Second Claim',
+      email: 'shared@spk.test',
+    });
+    expect(dup.status).toBe(409);
+    // Case-insensitively, too — `email` is citext.
+    const upper = await addSpeaker(adminJwt, {
+      name: 'Third Claim',
+      email: 'SHARED@SPK.TEST',
+    });
+    expect(upper.status).toBe(409);
+  });
+
+  it('lets Staff browse the directory but not change it (US-PROG-08 note)', async () => {
+    const staffJwt = await token(VIEWER, ORG.slug);
+    const read = await request(server)
+      .get(`/api/v1/events/${eventId}/speakers`)
+      .set('Authorization', `Bearer ${staffJwt}`);
+    expect(read.status).toBe(200);
+
+    // …but the write routes stay closed to them.
+    await addSpeaker(staffJwt, { name: 'Should Not Exist' }).expect(403);
+  });
+
   it('edits and then removes a speaker', async () => {
     const created = await addSpeaker(adminJwt, { name: 'Alan Turing' });
     const speaker = (created.body as Success<Speaker>).data;
@@ -155,6 +227,7 @@ describe('Speakers (e2e — US-EVT-09)', () => {
 const PERM_GROUP: Record<string, string> = {
   evCreate: 'Events',
   evSpeakers: 'Events',
+  evProgramView: 'Events',
 };
 
 async function seedOrg(

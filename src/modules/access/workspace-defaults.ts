@@ -12,6 +12,7 @@ export const PERMISSION_CATALOG: {
   { key: 'evCreate', group: 'Events', label: 'Create & edit events' },
   { key: 'evPublish', group: 'Events', label: 'Publish & unpublish events' },
   { key: 'evSpeakers', group: 'Events', label: 'Manage speakers & program' },
+  { key: 'evProgramView', group: 'Events', label: 'View agenda & speakers' },
   { key: 'regView', group: 'Registrations', label: 'View registrations' },
   { key: 'regCheckin', group: 'Registrations', label: 'Check in attendees' },
   { key: 'regExport', group: 'Registrations', label: 'Export registrations' },
@@ -52,11 +53,12 @@ export const DEFAULT_ROLES: {
       'regExport',
       'finView',
       'finDiscount',
+      'evProgramView',
     ],
   },
   {
     name: 'Staff',
     description: 'Check-in & registration view',
-    grants: ['regView', 'regCheckin'],
+    grants: ['regView', 'regCheckin', 'evProgramView'],
   },
 ];

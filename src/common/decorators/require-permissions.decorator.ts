@@ -24,3 +24,16 @@ export const PERMISSIONS_KEY = 'requiredPermissions';
  */
 export const RequirePermissions = (...keys: PermissionKey[]) =>
   SetMetadata(PERMISSIONS_KEY, keys);
+
+export const ANY_PERMISSION_KEY = 'anyOfPermissions';
+
+/**
+ * Require the caller's role to grant AT LEAST ONE of the listed keys.
+ *
+ * Use it where a read is implied by a broader write permission: the speaker
+ * directory is readable with `evProgramView` (what Staff get) OR `evSpeakers`
+ * (what organizers who manage the programme already hold). Requiring only the
+ * view key would let a custom role edit the programme it cannot open.
+ */
+export const RequireAnyPermission = (...keys: PermissionKey[]) =>
+  SetMetadata(ANY_PERMISSION_KEY, keys);

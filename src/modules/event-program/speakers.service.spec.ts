@@ -42,6 +42,7 @@ describe('SpeakersService', () => {
           Promise.resolve(speakerRow(v)),
         ),
       listByEvent: jest.fn().mockResolvedValue([]),
+      page: jest.fn().mockResolvedValue({ items: [], total: 0 }),
       findSpeaker: jest.fn().mockResolvedValue(speakerRow()),
       update: jest
         .fn()
@@ -148,12 +149,10 @@ describe('SpeakersService — session counts (US-PROG-02/04/08/09)', () => {
         .mockImplementation((v: Partial<SpeakerRow>) =>
           Promise.resolve(speakerRow(v)),
         ),
-      listByEvent: jest
-        .fn()
-        .mockResolvedValue([
-          speakerRow({ id: 'sp1' }),
-          speakerRow({ id: 'sp2' }),
-        ]),
+      page: jest.fn().mockResolvedValue({
+        items: [speakerRow({ id: 'sp1' }), speakerRow({ id: 'sp2' })],
+        total: 2,
+      }),
       findSpeaker: jest.fn().mockResolvedValue(speakerRow({ id: 'sp1' })),
       sessionCounts: jest.fn().mockResolvedValue(new Map([['sp1', 3]])),
     } as unknown as jest.Mocked<SpeakersRepository>;
@@ -164,7 +163,8 @@ describe('SpeakersService — session counts (US-PROG-02/04/08/09)', () => {
   });
 
   it('reports how many sessions each speaker is booked into', async () => {
-    const [first, second] = await service.listSpeakers(actor, eventId);
+    const { items } = await service.listSpeakers(actor, eventId);
+    const [first, second] = items;
     expect(first.sessionCount).toBe(3);
     // A speaker in nothing yet is 0, never undefined — the directory shows it.
     expect(second.sessionCount).toBe(0);
@@ -186,10 +186,30 @@ describe('SpeakersService — session counts (US-PROG-02/04/08/09)', () => {
   });
 
   it('does not query counts for an empty directory', async () => {
-    repo.listByEvent.mockResolvedValue([]);
-    const rows = await service.listSpeakers(actor, eventId);
-    expect(rows).toEqual([]);
+    repo.page.mockResolvedValue({ items: [], total: 0 });
+    const page = await service.listSpeakers(actor, eventId);
+    expect(page.items).toEqual([]);
+    // An empty search is a page with no rows, never an error (US-PROG-08).
+    expect(page.meta.total).toBe(0);
     expect(repo.sessionCounts).not.toHaveBeenCalled();
+  });
+
+  it('passes the search term and page through to the repository', async () => {
+    await service.listSpeakers(actor, eventId, { search: 'ada', page: 2 });
+    expect(repo.page).toHaveBeenCalledWith(
+      actor.organizationId,
+      eventId,
+      expect.objectContaining({ search: 'ada', page: 2 }),
+    );
+  });
+
+  it('reports the FILTERED total, so the count matches the list', async () => {
+    repo.page.mockResolvedValue({
+      items: [speakerRow({ id: 'sp1' })],
+      total: 1,
+    });
+    const page = await service.listSpeakers(actor, eventId, { search: 'ada' });
+    expect(page.meta.total).toBe(1);
   });
 });
 
