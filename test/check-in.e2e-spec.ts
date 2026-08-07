@@ -418,16 +418,21 @@ async function cleanup(pool: Pool): Promise<void> {
        (SELECT id FROM organizations WHERE slug = ANY($1))`,
     [[ORG.slug, ORG2.slug]],
   );
-  await pool.query(
-    `DELETE FROM check_ins WHERE organization_id IN
-       (SELECT id FROM organizations WHERE slug = ANY($1))`,
-    [[ORG.slug, ORG2.slug]],
-  );
-  await pool.query(
-    `DELETE FROM events WHERE organization_id IN
-       (SELECT id FROM organizations WHERE slug = ANY($1))`,
-    [[ORG.slug, ORG2.slug]],
-  );
+  // Order matters: check_ins and tickets reference events ON DELETE RESTRICT.
+  for (const table of [
+    'check_ins',
+    'tickets',
+    'order_items',
+    'orders',
+    'ticket_types',
+    'events',
+  ]) {
+    await pool.query(
+      `DELETE FROM ${table} WHERE organization_id IN
+         (SELECT id FROM organizations WHERE slug = ANY($1))`,
+      [[ORG.slug, ORG2.slug]],
+    );
+  }
   await pool.query(`DELETE FROM organizations WHERE slug = ANY($1)`, [
     [ORG.slug, ORG2.slug],
   ]);
