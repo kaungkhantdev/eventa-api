@@ -284,6 +284,25 @@ export const holdStatusEnum = pgEnum('hold_status', [
   'released',
 ]);
 
+// ── Check-in (E8) ─────────────────────────────────────────────────────────
+
+/** How an attendee got through the door (US-REG-11/12/13). */
+export const checkInMethodEnum = pgEnum('check_in_method', [
+  'qr',
+  'manual',
+  /** Decoded from an uploaded photo when the camera could not be used. */
+  'upload',
+]);
+
+/** Why a scan was refused — the door needs to say which, not just "no". */
+export const scanOutcomeEnum = pgEnum('scan_outcome', [
+  'admitted',
+  'already_checked_in',
+  'invalid',
+  'wrong_event',
+  'cancelled',
+]);
+
 // ── Finance (E9) ──────────────────────────────────────────────────────────
 export const invoiceStatusEnum = pgEnum('invoice_status', [
   'issued',
