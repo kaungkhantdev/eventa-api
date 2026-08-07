@@ -263,6 +263,42 @@ describe('Sessions / agenda (e2e — US-EVT-09)', () => {
       .expect(200);
   });
 
+  it("a speaker's session count rises on assign and falls on remove (US-PROG-02/04)", async () => {
+    const grace = await addSpeaker('Grace Hopper');
+    const countFor = async (id: string): Promise<number> => {
+      const res = await request(server)
+        .get(`/api/v1/events/${eventId}/speakers`)
+        .set('Authorization', `Bearer ${adminJwt}`);
+      const rows = (res.body as Success<{ id: string; sessionCount: number }[]>)
+        .data;
+      return rows.find((s) => s.id === id)?.sessionCount ?? -1;
+    };
+
+    expect(await countFor(grace)).toBe(0);
+
+    const created = await addSession(adminJwt, {
+      day: 5,
+      startTime: '11:00',
+      endTime: '12:00',
+      title: 'Compilers',
+      type: 'Talk',
+      room: 'Hall C',
+      speakerIds: [grace],
+    });
+    expect(created.status).toBe(201);
+    expect(await countFor(grace)).toBe(1);
+
+    await request(server)
+      .delete(
+        `/api/v1/events/${eventId}/sessions/${(created.body as Success<Session>).data.id}`,
+      )
+      .set('Authorization', `Bearer ${adminJwt}`)
+      .expect(200);
+
+    // The speaker stays in the directory; only the count drops (US-PROG-04).
+    expect(await countFor(grace)).toBe(0);
+  });
+
   it("forbids adding a session to another tenant's event (404)", async () => {
     await request(server)
       .post(`/api/v1/events/${foreignEventId}/sessions`)

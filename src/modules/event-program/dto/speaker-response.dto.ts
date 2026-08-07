@@ -3,6 +3,12 @@ import { speakerToneEnum } from '../../../db/schema';
 
 /** A speaker card (mapped from the `speakers` row — never raw). */
 export class SpeakerResponseDto {
+  @ApiProperty({
+    example: 3,
+    description: 'Live sessions this speaker is booked into (US-PROG-08).',
+  })
+  sessionCount!: number;
+
   @ApiProperty({ format: 'uuid' })
   id!: string;
 

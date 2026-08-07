@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, isNull, type SQL } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
-import { speakers } from '../../db/schema';
+import { sessionSpeakers, sessions, speakers } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
 import type { NewSpeakerValues, SpeakerRow } from './speakers.types';
 
@@ -14,6 +14,37 @@ export class SpeakersRepository {
     return withTenant(this.db, values.organizationId, async (tx) => {
       const [row] = await tx.insert(speakers).values(values).returning();
       return row;
+    });
+  }
+
+  /**
+   * How many LIVE sessions each of `speakerIds` is booked into (US-PROG-08).
+   * Soft-deleted sessions are excluded, which is what makes a removed session
+   * drop its speakers' counts by one (US-PROG-04) without touching any link
+   * row. Speakers with no sessions are simply absent from the map.
+   */
+  async sessionCounts(
+    organizationId: number,
+    speakerIds: string[],
+  ): Promise<Map<string, number>> {
+    if (speakerIds.length === 0) return new Map();
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({
+          speakerId: sessionSpeakers.speakerId,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(sessionSpeakers)
+        .innerJoin(sessions, eq(sessions.id, sessionSpeakers.sessionId))
+        .where(
+          and(
+            eq(sessions.organizationId, organizationId),
+            inArray(sessionSpeakers.speakerId, speakerIds),
+            isNull(sessions.deletedAt),
+          ),
+        )
+        .groupBy(sessionSpeakers.speakerId);
+      return new Map(rows.map((r) => [r.speakerId, Number(r.count)]));
     });
   }
 

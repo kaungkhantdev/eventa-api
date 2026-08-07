@@ -61,7 +61,13 @@ export class SpeakersService {
   ): Promise<SpeakerResponseDto[]> {
     await this.events.getEvent(actor, eventId);
     const rows = await this.repo.listByEvent(actor.organizationId, eventId);
-    return rows.map(toSpeakerResponse);
+    if (rows.length === 0) return [];
+    // One grouped query for the whole page rather than a count per speaker.
+    const counts = await this.repo.sessionCounts(
+      actor.organizationId,
+      rows.map((r) => r.id),
+    );
+    return rows.map((r) => toSpeakerResponse(r, counts.get(r.id) ?? 0));
   }
 
   async updateSpeaker(

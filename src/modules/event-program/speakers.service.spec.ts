@@ -49,6 +49,7 @@ describe('SpeakersService', () => {
           Promise.resolve(speakerRow({ ...v, version: 2 })),
         ),
       softDelete: jest.fn().mockResolvedValue(true),
+      sessionCounts: jest.fn().mockResolvedValue(new Map<string, number>()),
     } as unknown as jest.Mocked<SpeakersRepository>;
     events = {
       getEvent: jest.fn().mockResolvedValue({ id: eventId }),
@@ -133,5 +134,61 @@ describe('SpeakersService', () => {
       expect((err as DomainException).getStatus()).toBe(404);
       expect(repo.softDelete).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('SpeakersService — session counts (US-PROG-02/04/08/09)', () => {
+  let repo: jest.Mocked<SpeakersRepository>;
+  let service: SpeakersService;
+
+  beforeEach(() => {
+    repo = {
+      insert: jest
+        .fn()
+        .mockImplementation((v: Partial<SpeakerRow>) =>
+          Promise.resolve(speakerRow(v)),
+        ),
+      listByEvent: jest
+        .fn()
+        .mockResolvedValue([
+          speakerRow({ id: 'sp1' }),
+          speakerRow({ id: 'sp2' }),
+        ]),
+      findSpeaker: jest.fn().mockResolvedValue(speakerRow({ id: 'sp1' })),
+      sessionCounts: jest.fn().mockResolvedValue(new Map([['sp1', 3]])),
+    } as unknown as jest.Mocked<SpeakersRepository>;
+    const events = {
+      getEvent: jest.fn().mockResolvedValue({ id: eventId }),
+    } as unknown as jest.Mocked<EventsService>;
+    service = new SpeakersService(repo, events);
+  });
+
+  it('reports how many sessions each speaker is booked into', async () => {
+    const [first, second] = await service.listSpeakers(actor, eventId);
+    expect(first.sessionCount).toBe(3);
+    // A speaker in nothing yet is 0, never undefined — the directory shows it.
+    expect(second.sessionCount).toBe(0);
+  });
+
+  it('asks for the counts of exactly the speakers it listed', async () => {
+    await service.listSpeakers(actor, eventId);
+    expect(repo.sessionCounts).toHaveBeenCalledWith(actor.organizationId, [
+      'sp1',
+      'sp2',
+    ]);
+  });
+
+  it('gives a brand-new speaker a count of zero', async () => {
+    const created = await service.createSpeaker(actor, eventId, {
+      name: 'Ada Lovelace',
+    });
+    expect(created.sessionCount).toBe(0);
+  });
+
+  it('does not query counts for an empty directory', async () => {
+    repo.listByEvent.mockResolvedValue([]);
+    const rows = await service.listSpeakers(actor, eventId);
+    expect(rows).toEqual([]);
+    expect(repo.sessionCounts).not.toHaveBeenCalled();
   });
 });
