@@ -8,6 +8,7 @@ import { CheckoutRepository } from './checkout.repository';
 import { CheckoutViewService } from './checkout-view.service';
 import {
   selectionSize,
+  type CheckoutContext,
   type CheckoutEvent,
   type CheckoutSelection,
   type CheckoutTier,
@@ -29,6 +30,13 @@ export interface QuoteCheckoutInput {
    * not report their own seats as taken.
    */
   holdIds?: number[];
+  /**
+   * Set only when an ORGANIZER is booking on someone's behalf (US-REG-03): the
+   * event is then resolved inside THIS workspace rather than through the public
+   * gate, so an invite-only or already-running event can still be booked. Absent
+   * on the anonymous path, where the event itself establishes the tenant.
+   */
+  actorOrganizationId?: number;
 }
 
 export type HoldCheckoutInput = Omit<
@@ -160,7 +168,7 @@ export class CheckoutService {
     tier: CheckoutTier;
     selection: CheckoutSelection;
   }> {
-    const { event } = await this.view.load(input.eventId);
+    const { event } = await this.loadEvent(input);
     const tier = await this.view.requireTier(
       event.organizationId,
       event.id,
@@ -178,6 +186,18 @@ export class CheckoutService {
       );
     }
     return { event, tier, selection };
+  }
+
+  /**
+   * Who is asking decides how the event is resolved. An anonymous buyer gets the
+   * public gate — where finding the event IS the authorization check. An
+   * organizer gets their own workspace's copy, which is the same check made a
+   * different way, and is the only way to seat a walk-up at an invite-only event.
+   */
+  private loadEvent(input: QuoteCheckoutInput): Promise<CheckoutContext> {
+    return input.actorOrganizationId === undefined
+      ? this.view.load(input.eventId)
+      : this.view.loadOwned(input.actorOrganizationId, input.eventId);
   }
 
   private async discountFor(

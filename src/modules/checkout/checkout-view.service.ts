@@ -70,6 +70,26 @@ export class CheckoutViewService {
     return { event };
   }
 
+  /**
+   * The event an ORGANIZER is booking into on someone's behalf (US-REG-03).
+   * The tenant is the authenticated caller's, not the event's, so an id from
+   * another workspace resolves to nothing — and the message says the event is
+   * not open for registrations, which is the story's wording for a draft,
+   * completed or cancelled one.
+   */
+  async loadOwned(
+    organizationId: number,
+    eventId: string,
+  ): Promise<CheckoutContext> {
+    const event = await this.events.findOwnedById(organizationId, eventId);
+    if (!event) {
+      throw DomainException.notFound(
+        "That event isn't open for new registrations.",
+      );
+    }
+    return { event };
+  }
+
   /** The tier being bought, priced by the catalog rather than by the client. */
   async requireTier(
     organizationId: number,

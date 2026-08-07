@@ -16,6 +16,18 @@ import { ticketsUrlFor } from './ticket-links';
 import type { ConfirmOrderDto } from './dto/confirm-order.dto';
 import type { OrderPlacedDto } from './dto/order-placed.dto';
 
+/**
+ * Present only when an ORGANIZER placed this booking themselves (US-REG-03),
+ * absent on the attendee's own checkout. It carries the three things that
+ * differ: whose workspace resolves the event, who to credit on the order, and
+ * whether the attendee hears about it at all.
+ */
+export interface OrganizerEntry {
+  organizationId: number;
+  createdBy: string;
+  notify: boolean;
+}
+
 /** How many fresh references to try before admitting defeat (32^8 collisions). */
 const REFERENCE_ATTEMPTS = 3;
 const UNIQUE_VIOLATION = '23505';
@@ -49,25 +61,35 @@ export class CheckoutOrderService {
     this.publicWebUrl = config.getOrThrow('PUBLIC_WEB_URL', { infer: true });
   }
 
-  async confirm(input: ConfirmOrderDto): Promise<OrderPlacedDto> {
+  async confirm(
+    input: ConfirmOrderDto,
+    entry?: OrganizerEntry,
+  ): Promise<OrderPlacedDto> {
     // Re-priced here, never taken from the request: what is charged is what the
     // tier and the code are worth now, not what the page showed ten minutes ago.
+    // US-REG-03 leans on the same rule — the organizer never types an amount.
     const priced = await this.checkout.priceSelection({
       ...input,
       buyerEmail: input.buyer.email,
+      actorOrganizationId: entry?.organizationId,
     });
-    const placed = await this.place(input, priced);
+    const placed = await this.place(input, priced, entry);
     return this.toResponse(placed.order, placed.tickets, priced);
   }
 
   private async place(
     input: ConfirmOrderDto,
     priced: PricedSelection,
+    entry?: OrganizerEntry,
   ): Promise<{ order: OrderRow; tickets: TicketRow[] }> {
     const { summary, event } = priced;
     const now = this.clock.now();
     // Nothing owed → the registration is complete the moment it is placed.
     const issueTickets = !summary.paymentRequired;
+    // US-REG-03's "Send confirmation" toggle. Off means the ticket is created
+    // quietly for the organizer to hand over — so no outbox row is written at
+    // all, rather than one the worker is asked to ignore.
+    const notify = entry?.notify ?? true;
     const base: Omit<PlaceOrderInput, 'reference'> = {
       organizationId: event.organizationId,
       eventId: event.id,
@@ -81,12 +103,13 @@ export class CheckoutOrderService {
       unitPriceSatang: summary.unitPriceSatang,
       totals: summary,
       discountCodeId: priced.discountCodeId,
+      createdBy: entry?.createdBy,
       issueTickets,
       qrTokens: issueTickets
         ? Array.from({ length: summary.quantity }, () => generateQrToken())
         : [],
       buildEvent: (order, issued) =>
-        issueTickets
+        issueTickets && notify
           ? registrationConfirmedEvent({
               organizationId: event.organizationId,
               orderId: order.id,

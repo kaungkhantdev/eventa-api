@@ -21,4 +21,11 @@ export class CheckoutEventAdapter extends CheckoutEventPort {
   findPublishedById(eventId: string): Promise<CheckoutEvent | null> {
     return this.repo.findPublishedForCheckout({ id: eventId });
   }
+
+  findOwnedById(
+    organizationId: number,
+    eventId: string,
+  ): Promise<CheckoutEvent | null> {
+    return this.repo.findOwnedForCheckout(organizationId, eventId);
+  }
 }

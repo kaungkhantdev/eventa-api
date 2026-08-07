@@ -21,9 +21,14 @@ import { ApiData, ApiPage } from '../../common/http/api-data.decorator';
 import type { Paginated } from '../../common/http/paginated';
 import type { AuthContext } from '../auth/auth.types';
 import {
+  AddRegistrationDto,
+  AddedRegistrationDto,
+} from './dto/add-registration.dto';
+import {
   DecisionOutcomeDto,
   RejectRegistrationDto,
 } from './dto/registration-decision.dto';
+import { RegistrationEntryService } from './registration-entry.service';
 import {
   ListRegistrationsDto,
   RegistrationCountsDto,
@@ -45,6 +50,7 @@ export class RegistrationsController {
   constructor(
     private readonly registrations: RegistrationsService,
     private readonly decisions: RegistrationDecisionsService,
+    private readonly entry: RegistrationEntryService,
   ) {}
 
   @Get()
@@ -57,6 +63,18 @@ export class RegistrationsController {
   ): Promise<Paginated<RegistrationEntryDto>> {
     const { page, counts } = await this.registrations.list(auth, { ...query });
     return page.withMeta({ counts });
+  }
+
+  /** A walk-up or phone booking the organizer enters themselves (US-REG-03). */
+  @Post()
+  @RequirePermissions(Permission.regManage)
+  @ResponseMessage('Registration added.')
+  @ApiData(AddedRegistrationDto, 201)
+  add(
+    @CurrentAuth() auth: AuthContext,
+    @Body() body: AddRegistrationDto,
+  ): Promise<AddedRegistrationDto> {
+    return this.entry.add(auth, body);
   }
 
   /**

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AccessModule } from '../access/access.module';
 import { CheckoutModule } from '../checkout/checkout.module';
 import { RegistrationDecisionsService } from './registration-decisions.service';
+import { RegistrationEntryService } from './registration-entry.service';
 import { RegistrationsController } from './registrations.controller';
 import { RegistrationsRepository } from './registrations.repository';
 import { RegistrationsService } from './registrations.service';
@@ -17,8 +18,10 @@ import { RegistrationsService } from './registrations.service';
  * this module reads orders for review, that one reserves inventory.
  * `AccessModule` supplies `PermissionsService`, used both for the route guard
  * and to decide whether the caller may see money at all. `CheckoutModule` binds
- * `RegistrationApprovalPort`: approving must run THE settlement transaction, so
- * this module never touches orders, tickets or seat holds itself. No
+ * both consumer-owned ports — `RegistrationApprovalPort` (approving must run THE
+ * settlement transaction) and `RegistrationEntryPort` (a hand-added booking is
+ * priced, reserved and placed by the attendee checkout's own code) — so this
+ * module never touches orders, tickets, tiers or seat holds itself. No
  * `forwardRef` — Checkout has no reason to ask the queue anything back.
  */
 @Module({
@@ -27,6 +30,7 @@ import { RegistrationsService } from './registrations.service';
   providers: [
     RegistrationsService,
     RegistrationDecisionsService,
+    RegistrationEntryService,
     RegistrationsRepository,
   ],
   exports: [RegistrationsService],

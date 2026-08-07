@@ -49,6 +49,8 @@ export interface PlaceOrderInput {
   unitPriceSatang: number;
   totals: OrderTotals;
   discountCodeId: string | null;
+  /** The organizer who entered it by hand (US-REG-03); absent on self-service. */
+  createdBy?: string;
   /** True when nothing is owed — a paid order waits for the payment (US-DISC-05). */
   issueTickets: boolean;
   /** Pre-generated, one per admission, so the transaction stays deterministic. */
@@ -830,6 +832,7 @@ export class CheckoutRepository {
         discountAmountSatang: input.totals.discountSatang,
         vatAmountSatang: input.totals.vatSatang,
         totalSatang: input.totals.totalSatang,
+        createdBy: input.createdBy ?? null,
       })
       .returning();
     return row;
