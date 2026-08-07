@@ -13,6 +13,9 @@ import type {
   UpdateSessionInput,
 } from './sessions.types';
 
+const CONFIRM_REMOVAL =
+  'Removing this session will NOT notify attendees who bookmarked it, and cannot be undone. Re-send with confirm=true to proceed.';
+
 /** A not-yet-inserted session excludes nothing when conflicts are checked. */
 const NO_SESSION_YET = '';
 
@@ -136,12 +139,20 @@ export class SessionsService {
     return this.respond(actor.organizationId, eventId, updated, warning);
   }
 
+  /**
+   * Remove a session (US-PROG-04). `confirm` is required because removal does
+   * NOT notify the attendees who bookmarked it — the caller has to have shown
+   * that warning and had it accepted, and the server refuses to take its word
+   * for granted.
+   */
   async deleteSession(
     actor: EventActor,
     eventId: string,
     sessionId: string,
+    confirm = false,
   ): Promise<void> {
     await this.load(actor.organizationId, eventId, sessionId);
+    if (!confirm) throw DomainException.conflict(CONFIRM_REMOVAL);
     await this.repo.softDelete(actor.organizationId, sessionId);
   }
 

@@ -261,9 +261,33 @@ describe('Sessions / agenda (e2e — US-EVT-09)', () => {
     });
     const id = (created.body as Success<Session>).data.id;
     await request(server)
-      .delete(`/api/v1/events/${eventId}/sessions/${id}`)
+      .delete(`/api/v1/events/${eventId}/sessions/${id}?confirm=true`)
       .set('Authorization', `Bearer ${adminJwt}`)
       .expect(200);
+  });
+
+  it('refuses to remove a session without an explicit confirm (US-PROG-04)', async () => {
+    const created = await addSession(adminJwt, {
+      day: 3,
+      startTime: '15:00',
+      title: 'Needs Confirming',
+      type: 'Talk',
+    });
+    const id = (created.body as Success<Session>).data.id;
+    const refused = await request(server)
+      .delete(`/api/v1/events/${eventId}/sessions/${id}`)
+      .set('Authorization', `Bearer ${adminJwt}`);
+    expect(refused.status).toBe(409);
+    expect((refused.body as { message: string }).message).toMatch(
+      /will NOT notify/i,
+    );
+    // …and it is still there.
+    const list = await request(server)
+      .get(`/api/v1/events/${eventId}/sessions`)
+      .set('Authorization', `Bearer ${adminJwt}`);
+    expect(
+      (list.body as Success<Session[]>).data.some((x) => x.id === id),
+    ).toBe(true);
   });
 
   it("a speaker's session count rises on assign and falls on remove (US-PROG-02/04)", async () => {
@@ -293,7 +317,7 @@ describe('Sessions / agenda (e2e — US-EVT-09)', () => {
 
     await request(server)
       .delete(
-        `/api/v1/events/${eventId}/sessions/${(created.body as Success<Session>).data.id}`,
+        `/api/v1/events/${eventId}/sessions/${(created.body as Success<Session>).data.id}?confirm=true`,
       )
       .set('Authorization', `Bearer ${adminJwt}`)
       .expect(200);

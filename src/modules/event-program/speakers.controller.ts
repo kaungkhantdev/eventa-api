@@ -92,8 +92,14 @@ export class SpeakersController {
     @CurrentAuth() auth: AuthContext,
     @Param('eventId') eventId: string,
     @Param('id') id: string,
+    @Query('confirm') confirm?: string,
   ): Promise<void> {
-    return this.speakers.deleteSpeaker(actorOf(auth), eventId, id);
+    return this.speakers.deleteSpeaker(
+      actorOf(auth),
+      eventId,
+      id,
+      confirm === 'true',
+    );
   }
 }
 

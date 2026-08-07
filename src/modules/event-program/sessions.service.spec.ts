@@ -346,16 +346,33 @@ describe('SessionsService', () => {
     });
   });
 
+  describe('deleteSession confirmation (US-PROG-04)', () => {
+    it('refuses without an explicit confirm, and says why', async () => {
+      const err = await service
+        .deleteSession(actor, eventId, 'ss1')
+        .catch((e: unknown) => e as DomainException);
+      expect(err).toBeInstanceOf(DomainException);
+      expect(err.message).toMatch(/will NOT notify/i);
+      expect(err.message).toMatch(/cannot be undone/i);
+      expect(repo.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('removes it once confirmed', async () => {
+      await service.deleteSession(actor, eventId, 'ss1', true);
+      expect(repo.softDelete).toHaveBeenCalledWith(1, 'ss1');
+    });
+  });
+
   describe('deleteSession', () => {
     it('soft-deletes an existing session', async () => {
-      await service.deleteSession(actor, eventId, 'ss1');
+      await service.deleteSession(actor, eventId, 'ss1', true);
       expect(repo.softDelete).toHaveBeenCalledWith(1, 'ss1');
     });
 
     it('throws 404 when the session is absent', async () => {
       repo.findSession.mockResolvedValue(null);
       const err = await service
-        .deleteSession(actor, eventId, 'missing')
+        .deleteSession(actor, eventId, 'missing', true)
         .catch((e: unknown) => e);
       expect((err as DomainException).getStatus()).toBe(404);
     });

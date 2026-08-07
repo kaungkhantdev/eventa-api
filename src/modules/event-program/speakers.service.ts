@@ -34,6 +34,9 @@ const UPDATABLE_KEYS: (keyof NewSpeakerValues & keyof UpdateSpeakerInput)[] = [
 export const DEFAULT_LIMIT = 24;
 export const MAX_LIMIT = 100;
 
+const CONFIRM_SPEAKER_REMOVAL =
+  'Removing this speaker takes them off ALL of their sessions and cannot be undone. Re-send with confirm=true to proceed.';
+
 const DUPLICATE_EMAIL =
   'Another speaker on this event already uses that email address.';
 
@@ -144,12 +147,20 @@ export class SpeakersService {
     return toSpeakerResponse(updated, counts.get(speakerId) ?? 0);
   }
 
+  /**
+   * Remove a speaker (US-PROG-11). Their sessions SURVIVE and simply stop
+   * listing them — `speakersFor` joins live speakers only — so the programme
+   * keeps its shape when someone drops out. `confirm` is required because that
+   * unlinking is invisible from the directory and cannot be undone.
+   */
   async deleteSpeaker(
     actor: EventActor,
     eventId: string,
     speakerId: string,
+    confirm = false,
   ): Promise<void> {
     await this.load(actor.organizationId, eventId, speakerId);
+    if (!confirm) throw DomainException.conflict(CONFIRM_SPEAKER_REMOVAL);
     await this.repo.softDelete(actor.organizationId, speakerId);
   }
 

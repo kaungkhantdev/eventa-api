@@ -8,9 +8,15 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiForbiddenResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiQuery,
+  ApiBearerAuth,
+  ApiForbiddenResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { ApiErrorDto } from '../../common/errors/error-envelope';
 import { ApiData, ApiList } from '../../common/http/api-data.decorator';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
@@ -77,15 +83,29 @@ export class SessionsController {
     return this.sessions.updateSession(actorOf(auth), eventId, id, dto);
   }
 
+  /** Requires `?confirm=true` — see `deleteSession` (US-PROG-04). */
   @Delete(':id')
   @RequirePermissions(Permission.evSpeakers)
   @ResponseMessage('Session removed.')
+  @ApiQuery({
+    name: 'confirm',
+    required: true,
+    schema: { type: 'boolean' },
+    description:
+      'Must be true. Removal does not notify attendees who bookmarked the session.',
+  })
   remove(
     @CurrentAuth() auth: AuthContext,
     @Param('eventId') eventId: string,
     @Param('id') id: string,
+    @Query('confirm') confirm?: string,
   ): Promise<void> {
-    return this.sessions.deleteSession(actorOf(auth), eventId, id);
+    return this.sessions.deleteSession(
+      actorOf(auth),
+      eventId,
+      id,
+      confirm === 'true',
+    );
   }
 }
 

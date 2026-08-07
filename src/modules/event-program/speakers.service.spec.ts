@@ -123,14 +123,24 @@ describe('SpeakersService', () => {
 
   describe('deleteSpeaker', () => {
     it('soft-deletes an existing speaker', async () => {
-      await service.deleteSpeaker(actor, eventId, 'sp1');
+      await service.deleteSpeaker(actor, eventId, 'sp1', true);
       expect(repo.softDelete).toHaveBeenCalledWith(1, 'sp1');
+    });
+
+    it('refuses without an explicit confirm, warning about the unlinking', async () => {
+      const err = await service
+        .deleteSpeaker(actor, eventId, 'sp1')
+        .catch((e: unknown) => e as DomainException);
+      expect(err).toBeInstanceOf(DomainException);
+      expect(err.message).toMatch(/ALL of their sessions/i);
+      expect(err.message).toMatch(/cannot be undone/i);
+      expect(repo.softDelete).not.toHaveBeenCalled();
     });
 
     it('throws 404 when the speaker is absent', async () => {
       repo.findSpeaker.mockResolvedValue(null);
       const err = await service
-        .deleteSpeaker(actor, eventId, 'missing')
+        .deleteSpeaker(actor, eventId, 'missing', true)
         .catch((e: unknown) => e);
       expect((err as DomainException).getStatus()).toBe(404);
       expect(repo.softDelete).not.toHaveBeenCalled();
