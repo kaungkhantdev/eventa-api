@@ -50,6 +50,7 @@ import { SavedEventsModule } from './modules/saved-events/saved-events.module';
 import { PublicPagesModule } from './modules/public-pages/public-pages.module';
 import { RegistrationModule } from './modules/registration/registration.module';
 import { RegistrationStatsModule } from './modules/registration-stats/registration-stats.module';
+import { RegistrationsModule } from './modules/registrations/registrations.module';
 import { TicketSharingModule } from './modules/ticket-sharing/ticket-sharing.module';
 import { TicketingModule } from './modules/ticketing/ticketing.module';
 
@@ -98,6 +99,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     AttendeePaymentsModule,
     RegistrationModule,
     RegistrationStatsModule,
+    RegistrationsModule,
     CheckoutModule,
     PaymentsModule,
     InvoicesModule,
