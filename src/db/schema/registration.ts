@@ -93,6 +93,13 @@ export const orders = pgTable(
     totalSatang: bigint({ mode: 'number' }).notNull(),
     currency: char({ length: 3 }).notNull().default('THB'),
     registeredAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    /** When it actually became confirmed — the history US-REG-01 renders. */
+    confirmedAt: timestamp({ withTimezone: true }),
+    /** Set only on the organizer's decision path (US-REG-02), never by checkout. */
+    approvedAt: timestamp({ withTimezone: true }),
+    rejectedAt: timestamp({ withTimezone: true }),
+    decidedBy: uuid().references(() => users.id, { onDelete: 'set null' }),
+    rejectionReason: text(),
     cancelledAt: timestamp({ withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

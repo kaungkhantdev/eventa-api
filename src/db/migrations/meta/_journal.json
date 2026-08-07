@@ -295,6 +295,13 @@
       "when": 1786077730480,
       "tag": "0041_checkin_history_outlives_event",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1786096695984,
+      "tag": "0042_registration_decisions",
+      "breakpoints": true
     }
   ]
 }

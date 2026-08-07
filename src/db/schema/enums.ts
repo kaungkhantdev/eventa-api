@@ -31,6 +31,12 @@ export const permissionKeyEnum = pgEnum('permission_key', [
   'regView',
   'regCheckin',
   'regExport',
+  /**
+   * Decide, hand-add and invite registrations (US-REG-02/03/06). Separate from
+   * `regCheckin` on purpose: Staff work the door but must not approve, reject
+   * or create registrations. Appended — enum values are add-only.
+   */
+  'regManage',
   'finView',
   'finRefund',
   'finDiscount',
@@ -228,6 +234,12 @@ export const orderStatusEnum = pgEnum('order_status', [
   'pending',
   'waitlisted',
   'cancelled',
+  /**
+   * Turned down by an organizer (US-REG-02) — deliberately distinct from
+   * `cancelled`, which is the buyer's own withdrawal or a refund. A rejected
+   * registration can never be re-approved; the two must not be conflated.
+   */
+  'rejected',
 ]);
 
 export const paymentStatusEnum = pgEnum('payment_status', [
