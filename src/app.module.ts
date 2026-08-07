@@ -51,6 +51,7 @@ import { PublicPagesModule } from './modules/public-pages/public-pages.module';
 import { RegistrationModule } from './modules/registration/registration.module';
 import { RegistrationStatsModule } from './modules/registration-stats/registration-stats.module';
 import { RegistrationsModule } from './modules/registrations/registrations.module';
+import { InvitationsModule } from './modules/invitations/invitations.module';
 import { TicketSharingModule } from './modules/ticket-sharing/ticket-sharing.module';
 import { TicketingModule } from './modules/ticketing/ticketing.module';
 
@@ -100,6 +101,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     RegistrationModule,
     RegistrationStatsModule,
     RegistrationsModule,
+    InvitationsModule,
     CheckoutModule,
     PaymentsModule,
     InvoicesModule,
