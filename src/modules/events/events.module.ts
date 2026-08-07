@@ -17,6 +17,8 @@ import { EventsQueryService } from './events-query.service';
 import { EventsService } from './events.service';
 import { EventInsightsPort } from '../dashboard/ports/operations-insights.port';
 import { EventInsightsAdapter } from './event-insights.adapter';
+import { MeetingEventPort } from '../meetings/ports/meeting-event.port';
+import { MeetingEventAdapter } from './meeting-event.adapter';
 
 /**
  * Events bounded context: create/manage events and publish them. Depends on the
@@ -33,6 +35,7 @@ import { EventInsightsAdapter } from './event-insights.adapter';
   imports: [AccessModule, PlatformModule, forwardRef(() => TicketingModule)],
   controllers: [EventsController],
   providers: [
+    { provide: MeetingEventPort, useClass: MeetingEventAdapter },
     { provide: EventInsightsPort, useClass: EventInsightsAdapter },
     { provide: CheckInEventPort, useClass: CheckInEventAdapter },
     EventsService,
@@ -44,6 +47,7 @@ import { EventInsightsAdapter } from './event-insights.adapter';
     { provide: CheckoutEventPort, useClass: CheckoutEventAdapter },
   ],
   exports: [
+    MeetingEventPort,
     EventInsightsPort,
     CheckInEventPort,
     EventsService,

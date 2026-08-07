@@ -21,3 +21,4 @@ export * from './checkin'; // check_ins — one admission per ticket (E8)
 export * from './invitations'; // event_invitations (E8)
 export * from './finance'; // invoices, payouts, payout_items, tax_periods
 export * from './attendee'; // saved_events — keyed by user, not by workspace
+export * from './meetings'; // meetings (E12)

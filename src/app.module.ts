@@ -56,9 +56,11 @@ import { AttendeeDirectoryModule } from './modules/attendee-directory/attendee-d
 import { TicketSharingModule } from './modules/ticket-sharing/ticket-sharing.module';
 import { TicketingModule } from './modules/ticketing/ticketing.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { MeetingsModule } from './modules/meetings/meetings.module';
 
 @Module({
   imports: [
+    MeetingsModule,
     DashboardModule,
     AppConfigModule,
     LoggerModule.forRootAsync({

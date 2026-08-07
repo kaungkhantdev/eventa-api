@@ -316,6 +316,20 @@
       "when": 1786098027557,
       "tag": "0044_invitations_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1786110336188,
+      "tag": "0045_meetings",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1786110352737,
+      "tag": "0046_meetings_rls",
+      "breakpoints": true
     }
   ]
 }
