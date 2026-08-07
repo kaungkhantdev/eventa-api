@@ -6,9 +6,11 @@ import { RegistrationModule } from '../registration/registration.module';
 import { TicketingModule } from '../ticketing/ticketing.module';
 import { InvoiceOrderPort } from '../invoices/ports/invoice-order.port';
 import { OrderPaymentPort } from '../payments/ports/order-payment.port';
+import { RegistrationApprovalPort } from '../registrations/ports/registration-approval.port';
 import { CheckoutController } from './checkout.controller';
 import { InvoiceOrderAdapter } from './invoice-order.adapter';
 import { OrderPaymentAdapter } from './order-payment.adapter';
+import { RegistrationApprovalAdapter } from './registration-approval.adapter';
 import { CheckoutOrderService } from './checkout-order.service';
 import { CheckoutPolicy } from './checkout.policy';
 import { CheckoutRepository } from './checkout.repository';
@@ -50,6 +52,10 @@ import { CheckoutViewService } from './checkout-view.service';
     CheckoutPolicy,
     { provide: OrderPaymentPort, useClass: OrderPaymentAdapter },
     { provide: InvoiceOrderPort, useClass: InvoiceOrderAdapter },
+    {
+      provide: RegistrationApprovalPort,
+      useClass: RegistrationApprovalAdapter,
+    },
   ],
   exports: [
     CheckoutViewService,
@@ -57,6 +63,7 @@ import { CheckoutViewService } from './checkout-view.service';
     CheckoutOrderService,
     OrderPaymentPort,
     InvoiceOrderPort,
+    RegistrationApprovalPort,
   ],
 })
 export class CheckoutModule {}

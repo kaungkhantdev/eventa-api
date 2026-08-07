@@ -1,22 +1,34 @@
 import { Module } from '@nestjs/common';
 import { AccessModule } from '../access/access.module';
+import { CheckoutModule } from '../checkout/checkout.module';
+import { RegistrationDecisionsService } from './registration-decisions.service';
 import { RegistrationsController } from './registrations.controller';
 import { RegistrationsRepository } from './registrations.repository';
 import { RegistrationsService } from './registrations.service';
 
 /**
- * Registrations: the organizer's cross-event sign-up workbench (US-REG-01),
- * and the home of the approve/reject rules in `registration-decision.ts`.
+ * Registrations: the organizer's cross-event sign-up workbench (US-REG-01) and
+ * the decisions taken on it (US-REG-02). Two facets of one concern —
+ * `RegistrationsService` reads the queue, `RegistrationDecisionsService`
+ * approves and rejects from it — with the rules themselves in
+ * `registration-decision.ts`.
  *
  * Distinct from `registration` (singular), which owns the seat-hold engine —
  * this module reads orders for review, that one reserves inventory.
  * `AccessModule` supplies `PermissionsService`, used both for the route guard
- * and to decide whether the caller may see money at all.
+ * and to decide whether the caller may see money at all. `CheckoutModule` binds
+ * `RegistrationApprovalPort`: approving must run THE settlement transaction, so
+ * this module never touches orders, tickets or seat holds itself. No
+ * `forwardRef` — Checkout has no reason to ask the queue anything back.
  */
 @Module({
-  imports: [AccessModule],
+  imports: [AccessModule, CheckoutModule],
   controllers: [RegistrationsController],
-  providers: [RegistrationsService, RegistrationsRepository],
+  providers: [
+    RegistrationsService,
+    RegistrationDecisionsService,
+    RegistrationsRepository,
+  ],
   exports: [RegistrationsService],
 })
 export class RegistrationsModule {}
