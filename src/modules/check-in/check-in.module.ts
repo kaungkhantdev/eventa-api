@@ -4,6 +4,8 @@ import { EventsModule } from '../events/events.module';
 import { CheckInController } from './check-in.controller';
 import { CheckInRepository } from './check-in.repository';
 import { CheckInService } from './check-in.service';
+import { CheckInInsightsPort } from '../dashboard/ports/operations-insights.port';
+import { CheckInInsightsAdapter } from './check-in-insights.adapter';
 
 /**
  * Check-in: the door. Sole writer of `check_ins` and of the `tickets`
@@ -17,7 +19,11 @@ import { CheckInService } from './check-in.service';
 @Module({
   imports: [AccessModule, EventsModule],
   controllers: [CheckInController],
-  providers: [CheckInService, CheckInRepository],
-  exports: [CheckInService],
+  providers: [
+    { provide: CheckInInsightsPort, useClass: CheckInInsightsAdapter },
+    CheckInService,
+    CheckInRepository,
+  ],
+  exports: [CheckInInsightsPort, CheckInService],
 })
 export class CheckInModule {}

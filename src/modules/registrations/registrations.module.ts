@@ -6,6 +6,8 @@ import { RegistrationEntryService } from './registration-entry.service';
 import { RegistrationsController } from './registrations.controller';
 import { RegistrationsRepository } from './registrations.repository';
 import { RegistrationsService } from './registrations.service';
+import { RegistrationInsightsPort } from '../dashboard/ports/registration-insights.port';
+import { RegistrationInsightsAdapter } from './registration-insights.adapter';
 
 /**
  * Registrations: the organizer's cross-event sign-up workbench (US-REG-01) and
@@ -28,11 +30,15 @@ import { RegistrationsService } from './registrations.service';
   imports: [AccessModule, CheckoutModule],
   controllers: [RegistrationsController],
   providers: [
+    {
+      provide: RegistrationInsightsPort,
+      useClass: RegistrationInsightsAdapter,
+    },
     RegistrationsService,
     RegistrationDecisionsService,
     RegistrationEntryService,
     RegistrationsRepository,
   ],
-  exports: [RegistrationsService],
+  exports: [RegistrationInsightsPort, RegistrationsService],
 })
 export class RegistrationsModule {}

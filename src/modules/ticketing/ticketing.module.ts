@@ -16,6 +16,8 @@ import { TicketingService } from './ticketing.service';
 import { TicketingController } from './ticketing.controller';
 import { TicketingQueryController } from './ticketing-query.controller';
 import { TicketingQueryService } from './ticketing-query.service';
+import { InventoryInsightsPort } from '../dashboard/ports/operations-insights.port';
+import { InventoryInsightsAdapter } from './inventory-insights.adapter';
 
 /**
  * Ticketing bounded context: sellable ticket tiers per event. Depends on the
@@ -32,6 +34,7 @@ import { TicketingQueryService } from './ticketing-query.service';
   ],
   controllers: [TicketingController, TicketingQueryController],
   providers: [
+    { provide: InventoryInsightsPort, useClass: InventoryInsightsAdapter },
     TicketingService,
     TicketingQueryService,
     TicketingPolicy,
@@ -42,6 +45,7 @@ import { TicketingQueryService } from './ticketing-query.service';
     { provide: TicketCatalogPort, useClass: CheckoutCatalogAdapter },
   ],
   exports: [
+    InventoryInsightsPort,
     TicketingService,
     TicketAvailabilityPort,
     TicketSalesPort,

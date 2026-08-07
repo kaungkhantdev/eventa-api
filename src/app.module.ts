@@ -55,9 +55,11 @@ import { InvitationsModule } from './modules/invitations/invitations.module';
 import { AttendeeDirectoryModule } from './modules/attendee-directory/attendee-directory.module';
 import { TicketSharingModule } from './modules/ticket-sharing/ticket-sharing.module';
 import { TicketingModule } from './modules/ticketing/ticketing.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 @Module({
   imports: [
+    DashboardModule,
     AppConfigModule,
     LoggerModule.forRootAsync({
       inject: [ConfigService],
