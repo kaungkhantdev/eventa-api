@@ -34,6 +34,22 @@ import { attendees, tickets } from './registration';
  * `tickets.checked_in_at` / `tickets.status` are mirrored in the SAME
  * transaction so the attendee's own ticket view stays truthful; this table is
  * the source of truth, that pair is the projection.
+ *
+ * The admit MUST be a single statement, or the constraint buys nothing:
+ *
+ * ```sql
+ * INSERT INTO check_ins (...) VALUES (...)
+ * ON CONFLICT ON CONSTRAINT uq_check_ins_ticket DO UPDATE
+ *   SET checked_in_at = LEAST(check_ins.checked_in_at, EXCLUDED.checked_in_at)
+ * RETURNING id, checked_in_at, (xmax = 0) AS inserted;
+ * ```
+ *
+ * `DO UPDATE` rather than `DO NOTHING` so `RETURNING` always yields a row — a
+ * conflicting `DO NOTHING` returns nothing and would force a second read, which
+ * is the race this constraint exists to close. `LEAST` keeps the EARLIEST
+ * arrival, which is what the story asks for and what makes an out-of-order
+ * offline replay harmless. `xmax = 0` is how the caller learns whether it
+ * admitted someone or found them already inside.
  */
 export const checkIns = pgTable(
   'check_ins',
@@ -42,9 +58,13 @@ export const checkIns = pgTable(
     organizationId: bigint({ mode: 'number' })
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
+    /**
+     * RESTRICT, not cascade: who came through the door is history, and it must
+     * outlive the event row rather than being erased with it.
+     */
     eventId: uuid()
       .notNull()
-      .references(() => events.id, { onDelete: 'cascade' }),
+      .references(() => events.id, { onDelete: 'restrict' }),
     ticketId: uuid()
       .notNull()
       .references(() => tickets.id, { onDelete: 'cascade' }),

@@ -82,6 +82,8 @@ export const auditTypeEnum = pgEnum('audit_type', [
   // Finance (E9) — appended; enum values are add-only.
   'invoice',
   'payout',
+  // Check-in (E8): a manual admit and an undo are both auditable acts.
+  'checkin',
 ]);
 
 export const webhookStatusEnum = pgEnum('webhook_status', [

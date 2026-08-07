@@ -288,6 +288,13 @@
       "when": 1786076703264,
       "tag": "0040_checkin_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1786077730480,
+      "tag": "0041_checkin_history_outlives_event",
+      "breakpoints": true
     }
   ]
 }
