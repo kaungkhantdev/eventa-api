@@ -295,6 +295,41 @@
       "when": 1786077730480,
       "tag": "0041_checkin_history_outlives_event",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1786096695984,
+      "tag": "0042_registration_decisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1786098027055,
+      "tag": "0043_event_invitations",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1786098027557,
+      "tag": "0044_invitations_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1786110336188,
+      "tag": "0045_meetings",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1786110352737,
+      "tag": "0046_meetings_rls",
+      "breakpoints": true
     }
   ]
 }

@@ -31,6 +31,12 @@ export const permissionKeyEnum = pgEnum('permission_key', [
   'regView',
   'regCheckin',
   'regExport',
+  /**
+   * Decide, hand-add and invite registrations (US-REG-02/03/06). Separate from
+   * `regCheckin` on purpose: Staff work the door but must not approve, reject
+   * or create registrations. Appended — enum values are add-only.
+   */
+  'regManage',
   'finView',
   'finRefund',
   'finDiscount',
@@ -228,6 +234,12 @@ export const orderStatusEnum = pgEnum('order_status', [
   'pending',
   'waitlisted',
   'cancelled',
+  /**
+   * Turned down by an organizer (US-REG-02) — deliberately distinct from
+   * `cancelled`, which is the buyer's own withdrawal or a refund. A rejected
+   * registration can never be re-approved; the two must not be conflated.
+   */
+  'rejected',
 ]);
 
 export const paymentStatusEnum = pgEnum('payment_status', [
@@ -321,3 +333,41 @@ export const payoutStatusEnum = pgEnum('payout_status', [
 ]);
 
 export const taxStatusEnum = pgEnum('tax_status', ['upcoming', 'due', 'filed']);
+
+// ── Meetings (E12) ────────────────────────────────────────────────────────
+export const meetingTypeEnum = pgEnum('meeting_type', [
+  'Venue',
+  'Sponsor',
+  'Vendor',
+  'Speaker',
+  'Internal',
+]);
+
+export const meetingModeEnum = pgEnum('meeting_mode', [
+  'Video',
+  'In person',
+  'Phone',
+]);
+
+/**
+ * Cancelled is terminal and kept on record (US-MTG-06) — a cancelled meeting
+ * still shows in Past, it is not erased. There is deliberately no `completed`:
+ * whether a meeting has happened is derived from its date, not stored.
+ */
+export const meetingStatusEnum = pgEnum('meeting_status', [
+  'scheduled',
+  'cancelled',
+]);
+
+/**
+ * How far the workspace calendar has got with this meeting (US-MTG-04). The
+ * meeting is ALWAYS saved first; this records whether the invite and Meet link
+ * made it out, so a calendar outage never loses a booking and can be retried.
+ */
+export const meetingSyncStatusEnum = pgEnum('meeting_sync_status', [
+  'pending',
+  'synced',
+  'failed',
+  /** No calendar is connected, so there is nothing to sync to yet. */
+  'not_connected',
+]);

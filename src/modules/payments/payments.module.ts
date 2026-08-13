@@ -19,6 +19,8 @@ import { PaymentsService } from './payments.service';
 import { PaymentProviderPort } from './ports/payment-provider.port';
 import { FakePaymentAdapter } from './providers/fake-payment.adapter';
 import { StripePaymentAdapter } from './providers/stripe-payment.adapter';
+import { RevenueInsightsPort } from '../dashboard/ports/revenue-insights.port';
+import { RevenueInsightsAdapter } from './revenue-insights.adapter';
 
 /**
  * Payments (US-DISC-05): collect an order's total by card or PromptPay, and act
@@ -35,6 +37,7 @@ import { StripePaymentAdapter } from './providers/stripe-payment.adapter';
   imports: [AccessModule, CheckoutModule],
   controllers: [PaymentsController, FinanceController],
   providers: [
+    { provide: RevenueInsightsPort, useClass: RevenueInsightsAdapter },
     PaymentsService,
     RefundsService,
     PaymentsLedgerService,
@@ -56,6 +59,7 @@ import { StripePaymentAdapter } from './providers/stripe-payment.adapter';
     { provide: SettledFundsPort, useClass: SettledFundsAdapter },
   ],
   exports: [
+    RevenueInsightsPort,
     PaymentsService,
     InvoicePaymentPort,
     TaxableSalesPort,

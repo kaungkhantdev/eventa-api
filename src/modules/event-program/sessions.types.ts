@@ -45,6 +45,13 @@ export interface UpdateSessionInput {
   confirmSpeakerClash?: boolean;
   /** Optimistic-concurrency token; when set, must match the current row. */
   version?: number;
+  /**
+   * Opt in to telling attendees who bookmarked this session (US-PROG-03).
+   * Absent means silence — the story is explicit that no message is sent by
+   * default, and a notice only goes out for a MATERIAL change (day, time or
+   * room) on an event people are actually following.
+   */
+  notifyAttendees?: boolean;
 }
 
 /** A session a speaker is already booked into, for the US-PROG-05 clash check. */

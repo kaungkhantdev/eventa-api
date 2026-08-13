@@ -3,6 +3,7 @@ import { and, asc, eq, inArray, isNull, ne, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { sessionSpeakers, sessions, speakers } from '../../db/schema';
 import { type Tx, withTenant } from '../../db/tenant';
+import { OutboxPort, type OutboxEventInput } from '../platform/outbox.port';
 import type {
   NewSessionValues,
   SessionRow,
@@ -13,7 +14,10 @@ import type {
 /** Data access for agenda sessions + speaker links (Events & Program context). */
 @Injectable()
 export class SessionsRepository {
-  constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: Database,
+    private readonly outbox: OutboxPort,
+  ) {}
 
   /**
    * Insert a session and (optionally) its speaker links in ONE transaction, so the
@@ -44,6 +48,11 @@ export class SessionsRepository {
     values: Partial<NewSessionValues>,
     currentVersion: number,
     speakerIds: string[] | undefined,
+    /**
+     * Built from the row that actually won the version race, so the notice can
+     * never describe an update that was rolled back (US-PROG-03).
+     */
+    buildNotice?: (row: SessionRow) => OutboxEventInput,
   ): Promise<SessionRow | null> {
     return withTenant(this.db, organizationId, async (tx) => {
       const [row] = await tx
@@ -62,6 +71,7 @@ export class SessionsRepository {
       if (speakerIds !== undefined) {
         await this.writeSpeakers(tx, sessionId, speakerIds);
       }
+      if (buildNotice) await this.outbox.enqueueIn(tx, buildNotice(row));
       return row;
     });
   }

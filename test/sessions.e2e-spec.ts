@@ -384,6 +384,125 @@ describe('Sessions / agenda (e2e — US-EVT-09)', () => {
       type: 'Talk',
     }).expect(403);
   });
+
+  describe('telling attendees a session moved (US-PROG-03)', () => {
+    /** A live event, so there is a schedule people are actually following. */
+    const goLive = async () => {
+      await pool.query(`UPDATE events SET status = 'live' WHERE id = $1`, [
+        eventId,
+      ]);
+    };
+
+    let seq = 0;
+    /** A fresh slot each time, so the room-clash rule never gets in the way. */
+    const newSession = async () => {
+      seq += 1;
+      const res = await addSession(adminJwt, {
+        day: 1,
+        startTime: `${String(8 + seq).padStart(2, '0')}:00`,
+        endTime: `${String(8 + seq).padStart(2, '0')}:30`,
+        title: `Session ${seq}`,
+        type: 'Keynote',
+        room: `Hall A${seq}`,
+      });
+      expect(res.status).toBe(201);
+      return (res.body as Success<{ id: string; version: number }>).data;
+    };
+
+    const patch = (id: string, body: Record<string, unknown>) =>
+      request(server)
+        .patch(`/api/v1/events/${eventId}/sessions/${id}`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send(body);
+
+    const notices = async (sessionId: string) => {
+      const { rows } = await pool.query<{
+        routing_key: string;
+        payload: Record<string, unknown>;
+      }>(
+        `SELECT routing_key, payload FROM outbox_events WHERE aggregate_id = $1`,
+        [sessionId],
+      );
+      return rows;
+    };
+
+    beforeEach(async () => {
+      await pool.query(
+        `DELETE FROM outbox_events WHERE aggregate_type = 'session'`,
+      );
+    });
+
+    it('sends NOTHING by default when a session moves', async () => {
+      await goLive();
+      const session = await newSession();
+      const res = await patch(session.id, { room: 'Moved 1' });
+      expect(res.status).toBe(200);
+      expect(await notices(session.id)).toHaveLength(0);
+    });
+
+    it('queues the notice when the organizer opts in', async () => {
+      await goLive();
+      const session = await newSession();
+      await patch(session.id, { room: 'Moved 2', notifyAttendees: true });
+      const rows = await notices(session.id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].routing_key).toBe('program.session_changed');
+    });
+
+    it('carries WHERE IT WAS as well as where it is now', async () => {
+      await goLive();
+      const session = await newSession();
+      const moved = await patch(session.id, {
+        startTime: '14:00',
+        endTime: '15:00',
+        room: 'Moved 3',
+        notifyAttendees: true,
+      });
+      expect(moved.status).toBe(200);
+      const [notice] = await notices(session.id);
+      expect(notice.payload).toMatchObject({
+        previous: { room: 'Hall A3' },
+        current: { room: 'Moved 3', startTime: '14:00:00' },
+      });
+    });
+
+    it('sends nothing for a rename — that is not a material change', async () => {
+      await goLive();
+      const session = await newSession();
+      await patch(session.id, { title: 'Renamed', notifyAttendees: true });
+      expect(await notices(session.id)).toHaveLength(0);
+    });
+
+    it('sends nothing on a DRAFT event — nobody is following it yet', async () => {
+      await pool.query(`UPDATE events SET status = 'draft' WHERE id = $1`, [
+        eventId,
+      ]);
+      const session = await newSession();
+      await patch(session.id, { room: 'Moved 5', notifyAttendees: true });
+      expect(await notices(session.id)).toHaveLength(0);
+      await goLive();
+    });
+
+    it('does not queue a notice when the save loses the version race', async () => {
+      await goLive();
+      const session = await newSession();
+      // Read the version from the row rather than the response, so the test
+      // does not depend on the create DTO happening to echo it back.
+      const before = await pool.query<{ version: number }>(
+        `SELECT version FROM sessions WHERE id = $1`,
+        [session.id],
+      );
+      const first = await patch(session.id, { room: 'Moved 6' });
+      expect(first.status).toBe(200);
+      const stale = await patch(session.id, {
+        room: 'Moved 6b',
+        version: before.rows[0].version,
+        notifyAttendees: true,
+      });
+      expect(stale.status).toBe(409);
+      expect(await notices(session.id)).toHaveLength(0);
+    });
+  });
 });
 
 const PERM_GROUP: Record<string, string> = {

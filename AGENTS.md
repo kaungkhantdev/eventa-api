@@ -243,7 +243,8 @@ owners) · `OrderPaymentPort` (Payments settles "paid + ticketed" atomically thr
 transaction) · `InvoiceOrderPort` (Invoices bills an order Checkout owns) · `InvoicePaymentPort`
 (Invoices learns how and when that order settled, from Payments) · `TaxableSalesPort` (the VAT ledger asks
 Payments what was collected each month) · `SettledFundsPort` (Payouts asks Payments what has settled) ·
-`PayoutAccountPort` (Payouts asks PaymentSettings whether a payout account is connected). Provider seams
+`PayoutAccountPort` (Payouts asks PaymentSettings whether a payout account is connected) ·
+`CheckInEventPort` (the door asks Events whether it may admit, which is also its tenancy check). Provider seams
 (infrastructure behind an abstract class, not cross-context reads): `SocialVerifierPort` (OAuth token
 verification) · `PaymentProviderPort` (the PSP adapter — PCI SAQ-A; also carries the payout settings link
 and payout retry) · `ObjectStoragePort` (S3 for profile photos).

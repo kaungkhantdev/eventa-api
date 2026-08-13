@@ -7,6 +7,7 @@ import { SessionsService } from './sessions.service';
 import { SpeakersController } from './speakers.controller';
 import { SpeakersRepository } from './speakers.repository';
 import { SpeakersService } from './speakers.service';
+import { PlatformModule } from '../platform/platform.module';
 
 /**
  * Program sub-context of Events & Program: agenda sessions and the speaker
@@ -15,7 +16,7 @@ import { SpeakersService } from './speakers.service';
  * tables directly.
  */
 @Module({
-  imports: [EventsModule, AccessModule],
+  imports: [EventsModule, AccessModule, PlatformModule],
   controllers: [SpeakersController, SessionsController],
   providers: [
     SpeakersService,

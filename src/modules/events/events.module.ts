@@ -10,9 +10,15 @@ import { EventLookupPort } from '../ticketing/ports/event-lookup.port';
 import { CheckoutEventAdapter } from './checkout-event.adapter';
 import { EventOrgLookupAdapter } from './event-org-lookup.adapter';
 import { EventLookupAdapter } from './event-lookup.adapter';
+import { CheckInEventPort } from '../check-in/ports/check-in-event.port';
+import { CheckInEventAdapter } from './check-in-event.adapter';
 import { EventsRepository } from './events.repository';
 import { EventsQueryService } from './events-query.service';
 import { EventsService } from './events.service';
+import { EventInsightsPort } from '../dashboard/ports/operations-insights.port';
+import { EventInsightsAdapter } from './event-insights.adapter';
+import { MeetingEventPort } from '../meetings/ports/meeting-event.port';
+import { MeetingEventAdapter } from './meeting-event.adapter';
 
 /**
  * Events bounded context: create/manage events and publish them. Depends on the
@@ -29,6 +35,9 @@ import { EventsService } from './events.service';
   imports: [AccessModule, PlatformModule, forwardRef(() => TicketingModule)],
   controllers: [EventsController],
   providers: [
+    { provide: MeetingEventPort, useClass: MeetingEventAdapter },
+    { provide: EventInsightsPort, useClass: EventInsightsAdapter },
+    { provide: CheckInEventPort, useClass: CheckInEventAdapter },
     EventsService,
     EventsQueryService,
     EventsRepository,
@@ -38,6 +47,9 @@ import { EventsService } from './events.service';
     { provide: CheckoutEventPort, useClass: CheckoutEventAdapter },
   ],
   exports: [
+    MeetingEventPort,
+    EventInsightsPort,
+    CheckInEventPort,
     EventsService,
     EventsQueryService,
     EventLookupPort,

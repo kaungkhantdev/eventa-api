@@ -40,6 +40,7 @@ import { AuthSignupModule } from './modules/auth-signup/auth-signup.module';
 import { AuthSocialModule } from './modules/auth-social/auth-social.module';
 import { UsersModule } from './modules/users/users.module';
 import { CheckoutModule } from './modules/checkout/checkout.module';
+import { CheckInModule } from './modules/check-in/check-in.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { PayoutsModule } from './modules/payouts/payouts.module';
@@ -49,11 +50,18 @@ import { SavedEventsModule } from './modules/saved-events/saved-events.module';
 import { PublicPagesModule } from './modules/public-pages/public-pages.module';
 import { RegistrationModule } from './modules/registration/registration.module';
 import { RegistrationStatsModule } from './modules/registration-stats/registration-stats.module';
+import { RegistrationsModule } from './modules/registrations/registrations.module';
+import { InvitationsModule } from './modules/invitations/invitations.module';
+import { AttendeeDirectoryModule } from './modules/attendee-directory/attendee-directory.module';
 import { TicketSharingModule } from './modules/ticket-sharing/ticket-sharing.module';
 import { TicketingModule } from './modules/ticketing/ticketing.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { MeetingsModule } from './modules/meetings/meetings.module';
 
 @Module({
   imports: [
+    MeetingsModule,
+    DashboardModule,
     AppConfigModule,
     LoggerModule.forRootAsync({
       inject: [ConfigService],
@@ -97,10 +105,14 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     AttendeePaymentsModule,
     RegistrationModule,
     RegistrationStatsModule,
+    RegistrationsModule,
+    InvitationsModule,
+    AttendeeDirectoryModule,
     CheckoutModule,
     PaymentsModule,
     InvoicesModule,
     TaxPeriodsModule,
+    CheckInModule,
     PayoutsModule,
   ],
 })

@@ -68,6 +68,11 @@ export const events = pgTable(
     description: text(),
     type: eventTypeEnum().notNull(),
     status: eventStatusEnum().notNull().default('draft'),
+    /**
+     * When true a sign-up lands `pending` and waits for an organizer's decision
+     * (US-REG-02); when false checkout confirms it outright.
+     */
+    requiresApproval: boolean().notNull().default(false),
     bucket: eventBucketEnum().notNull(),
     visibility: visibilityEnum().notNull().default('private'),
     categoryId: bigint({ mode: 'number' }).references(() => categories.id, {

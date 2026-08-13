@@ -30,6 +30,25 @@ import type {
 
 /** Statuses whose event is live to the public — a draft or cancelled one is not. */
 const LIVE_STATUSES = ['planned', 'upcoming', 'live'] as const;
+
+/** The `CheckoutEvent` projection, shared by the public and organizer lookups. */
+const CHECKOUT_EVENT_COLUMNS = {
+  id: events.id,
+  organizationId: events.organizationId,
+  slug: events.slug,
+  name: events.name,
+  startAt: events.startAt,
+  endAt: events.endAt,
+  timezone: events.timezone,
+  isOnline: events.isOnline,
+  onlineNote: events.onlineNote,
+  venueName: events.venueName,
+  venueAddress: events.venueAddress,
+  city: events.city,
+  coverImage: events.coverImage,
+  organizerName: events.organizerName,
+  seatingMode: events.seatingMode,
+};
 /** Only a public event is buyable by an anonymous visitor. */
 const PUBLIC_VISIBILITY = 'public';
 
@@ -63,29 +82,43 @@ export class EventsRepository {
     by: { slug: string } | { id: string },
   ): Promise<CheckoutEvent | null> {
     const [row] = await this.db
-      .select({
-        id: events.id,
-        organizationId: events.organizationId,
-        slug: events.slug,
-        name: events.name,
-        startAt: events.startAt,
-        endAt: events.endAt,
-        timezone: events.timezone,
-        isOnline: events.isOnline,
-        onlineNote: events.onlineNote,
-        venueName: events.venueName,
-        venueAddress: events.venueAddress,
-        city: events.city,
-        coverImage: events.coverImage,
-        organizerName: events.organizerName,
-        seatingMode: events.seatingMode,
-      })
+      .select(CHECKOUT_EVENT_COLUMNS)
       .from(events)
       .where(
         and(
           'slug' in by ? eq(events.slug, by.slug) : eq(events.id, by.id),
           eq(events.visibility, PUBLIC_VISIBILITY),
           isNotNull(events.publishedAt),
+          inArray(events.status, [...LIVE_STATUSES]),
+          isNull(events.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  /**
+   * The organizer's own event, for a registration they are adding by hand
+   * (US-REG-03) — backs `CheckoutEventPort.findOwnedById`. Tenant-scoped, which
+   * is the point: the caller is authenticated, so the workspace comes from them
+   * and an event id from elsewhere resolves to nothing.
+   *
+   * Unlike the public gate this ignores visibility and `published_at` — an
+   * organizer may seat a walk-up at an invite-only event — but keeps the status
+   * filter, because a draft, completed or cancelled event has nothing to
+   * register for.
+   */
+  async findOwnedForCheckout(
+    organizationId: number,
+    eventId: string,
+  ): Promise<CheckoutEvent | null> {
+    const [row] = await this.db
+      .select(CHECKOUT_EVENT_COLUMNS)
+      .from(events)
+      .where(
+        and(
+          eq(events.id, eventId),
+          eq(events.organizationId, organizationId),
           inArray(events.status, [...LIVE_STATUSES]),
           isNull(events.deletedAt),
         ),

@@ -49,6 +49,8 @@ export interface PlaceOrderInput {
   unitPriceSatang: number;
   totals: OrderTotals;
   discountCodeId: string | null;
+  /** The organizer who entered it by hand (US-REG-03); absent on self-service. */
+  createdBy?: string;
   /** True when nothing is owed — a paid order waits for the payment (US-DISC-05). */
   issueTickets: boolean;
   /** Pre-generated, one per admission, so the transaction stays deterministic. */
@@ -66,9 +68,28 @@ export interface PlacedOrder {
 }
 
 /** Everything the settlement transaction needs, resolved before it opens. */
+/**
+ * Who is settling, and therefore what a refusal means.
+ *
+ * `payment` — money has arrived. A refusal must move that money back, so the
+ * order is cancelled and a refund queued: the buyer has been charged either
+ * way, and leaving the order open would let it be charged twice.
+ *
+ * `approval` — an organizer is deciding (US-REG-02). Nothing has been charged
+ * that this refusal must undo, so a refusal changes NOTHING: the registration
+ * stays where it was, awaiting a decision, and the organizer is offered the
+ * waitlist. Cancelling here would terminate a sign-up on the strength of a
+ * transient sell-out.
+ */
+export type SettlementMode = 'payment' | 'approval';
+
 export interface SettleOrderInput {
   organizationId: number;
   orderId: string;
+  /** Defaults to `payment` — the path that existed before approvals. */
+  mode?: SettlementMode;
+  /** The organizer, on the approval path only. Stamped onto the order. */
+  decidedBy?: string;
   /** One fresh QR token per admission, minted as tickets are written. */
   mintQrToken: () => string;
   buildConfirmedEvent: (
@@ -81,11 +102,39 @@ export interface SettleOrderInput {
   now: Date;
 }
 
-export interface SettlementOutcome {
-  outcome: 'settled' | 'already_settled' | 'refund_required';
+export interface RejectOrderInput {
+  organizationId: number;
+  orderId: string;
+  decidedBy: string;
+  reason: string | null;
+  buildRejectedEvent: (order: OrderRow) => OutboxEventInput;
+  now: Date;
+}
+
+interface SettlementBase {
   reference: string;
   ticketCount: number;
+  /** Why it could not be honoured — set only on `unavailable`. */
+  reason?: string;
 }
+
+/** Money arrived: it either bought tickets, or it has to go back. */
+export interface PaymentSettlement extends SettlementBase {
+  outcome: 'settled' | 'already_settled' | 'refund_required';
+}
+
+/** An organizer decided: it either issued tickets, or nothing happened. */
+export interface ApprovalSettlement extends SettlementBase {
+  outcome: 'settled' | 'already_settled' | 'unavailable';
+}
+
+/**
+ * The two modes can each produce only three of the four outcomes, and the
+ * overloads on `settleOrder` make that a fact the compiler checks rather than a
+ * comment: an approval can never hand its caller a `refund_required` to handle,
+ * and a payment can never be told `unavailable` and quietly drop the money.
+ */
+export type SettlementOutcome = PaymentSettlement | ApprovalSettlement;
 
 /** What the settlement judged: the order line, its tier, and the seat picture. */
 interface SettlementContext {
@@ -101,24 +150,47 @@ interface SettlementContext {
   takenSeatIds: number[];
 }
 
+/**
+ * The same four refusals, worded for whoever is about to read them. A buyer is
+ * told what happened to their money; an organizer is told what to do next.
+ */
+const BLOCKERS = {
+  payment: {
+    noTier: 'The ticket type on this order no longer exists.',
+    soldOut: 'The tickets sold out while the payment was being made.',
+    seatsTaken: 'The seats were taken while the payment was being made.',
+    seatMismatch: 'The seat reservation no longer matches the order.',
+  },
+  approval: {
+    noTier: 'The ticket type on this registration no longer exists.',
+    soldOut:
+      'This ticket is now sold out — offer the attendee the waitlist instead.',
+    seatsTaken: 'The seat on this registration has been taken by someone else.',
+    seatMismatch: 'The seat reservation no longer matches the registration.',
+  },
+} as const satisfies Record<SettlementMode, Record<string, string>>;
+
 /** Why a settlement cannot be honoured, or null when it can. */
-function settlementBlocker(context: SettlementContext): string | null {
-  if (!context.line) {
-    return 'The ticket type on this order no longer exists.';
-  }
+function settlementBlocker(
+  context: SettlementContext,
+  mode: SettlementMode,
+): string | null {
+  const said = BLOCKERS[mode];
+  if (!context.line) return said.noTier;
   const { sold, total, quantity } = context.line;
-  if (total !== UNLIMITED && sold + quantity > total) {
-    return 'The tickets sold out while the payment was being made.';
-  }
-  if (context.takenSeatIds.length > 0) {
-    return 'The seats were taken while the payment was being made.';
-  }
+  if (total !== UNLIMITED && sold + quantity > total) return said.soldOut;
+  if (context.takenSeatIds.length > 0) return said.seatsTaken;
   // A reserved-seating order must seat every admission it is about to ticket.
   if (context.seatIds.length > 0 && context.seatIds.length !== quantity) {
-    return 'The seat reservation no longer matches the order.';
+    return said.seatMismatch;
   }
   return null;
 }
+
+/** The two states awaiting a decision — approvable, and rejectable. */
+const AWAITING_DECISION = ['pending', 'waitlisted'] as const;
+const DECIDED_ELSEWHERE =
+  'This registration was decided by someone else — refresh to see where it stands.';
 
 /** An allocation of 0 means unlimited — mirrors `TicketingPolicy`. */
 const UNLIMITED = 0;
@@ -278,7 +350,14 @@ export class CheckoutRepository {
    * cancelled, the holds released, and a refund event queued INSTEAD of issuing
    * tickets. Money wins over a mere hold, but never over an assigned seat.
    */
+  async settleOrder(
+    input: SettleOrderInput & { mode: 'approval' },
+  ): Promise<ApprovalSettlement>;
+  async settleOrder(
+    input: SettleOrderInput & { mode?: 'payment' },
+  ): Promise<PaymentSettlement>;
   async settleOrder(input: SettleOrderInput): Promise<SettlementOutcome> {
+    const mode = input.mode ?? 'payment';
     return withTenant(this.db, input.organizationId, async (tx) => {
       const order = await this.lockOrder(tx, input);
       if (order.status === 'confirmed') {
@@ -289,7 +368,12 @@ export class CheckoutRepository {
           ticketCount: order.seats,
         };
       }
-      if (order.status !== 'pending') {
+      if (!this.isOpenFor(mode, order.status)) {
+        // An organizer approving something already decided is a lost race, not
+        // stray money: nothing to cancel and nothing to send back.
+        if (mode === 'approval') {
+          throw DomainException.conflict(DECIDED_ELSEWHERE);
+        }
         return this.refuseSettlement(
           tx,
           input,
@@ -298,9 +382,74 @@ export class CheckoutRepository {
         );
       }
       const context = await this.loadSettlement(tx, input, order);
-      const blocked = settlementBlocker(context);
-      if (blocked) return this.refuseSettlement(tx, input, order, blocked);
+      const blocked = settlementBlocker(context, mode);
+      if (blocked) {
+        // Nothing has been written yet on either path, so an approval simply
+        // reports back and leaves the registration exactly as it found it.
+        if (mode === 'approval') {
+          return {
+            outcome: 'unavailable',
+            reference: order.reference,
+            ticketCount: 0,
+            reason: blocked,
+          };
+        }
+        return this.refuseSettlement(tx, input, order, blocked);
+      }
       return this.completeSettlement(tx, input, order, context);
+    });
+  }
+
+  /**
+   * A payment may only land on a `pending` order. An organizer may also decide
+   * a `waitlisted` one — approving off the waitlist into a seat that freed up
+   * is the whole point of the queue (US-REG-02).
+   */
+  private isOpenFor(mode: SettlementMode, status: string): boolean {
+    if (mode === 'approval') {
+      return (AWAITING_DECISION as readonly string[]).includes(status);
+    }
+    return status === 'pending';
+  }
+
+  /**
+   * The organizer refused a sign-up (US-REG-02): the held seat goes back so it
+   * can be offered to someone else, and a notice is queued. Terminal, and never
+   * a money path — the "nothing captured" rule is re-checked HERE, under the
+   * row lock, because a payment can land between the organizer opening the list
+   * and clicking Reject. Idempotent: rejecting twice releases and notifies once.
+   */
+  async rejectOrder(input: RejectOrderInput): Promise<{ reference: string }> {
+    return withTenant(this.db, input.organizationId, async (tx) => {
+      const order = await this.lockOrder(tx, input);
+      if (order.status === 'rejected') return { reference: order.reference };
+      const decidable =
+        (AWAITING_DECISION as readonly string[]).includes(order.status) &&
+        order.paymentStatus !== 'paid';
+      if (!decidable) throw DomainException.conflict(DECIDED_ELSEWHERE);
+      await tx
+        .update(orders)
+        .set({
+          status: 'rejected',
+          rejectedAt: input.now,
+          decidedBy: input.decidedBy,
+          rejectionReason: input.reason,
+          updatedAt: input.now,
+          version: order.version + 1,
+        })
+        .where(eq(orders.id, order.id));
+      await tx
+        .update(seatHolds)
+        .set({ status: 'released' })
+        .where(
+          and(
+            eq(seatHolds.organizationId, input.organizationId),
+            eq(seatHolds.orderId, order.id),
+            eq(seatHolds.status, ACTIVE_HOLD),
+          ),
+        );
+      await this.outbox.enqueueIn(tx, input.buildRejectedEvent(order));
+      return { reference: order.reference };
     });
   }
 
@@ -379,7 +528,10 @@ export class CheckoutRepository {
     );
   }
 
-  private async lockOrder(tx: Tx, input: SettleOrderInput): Promise<OrderRow> {
+  private async lockOrder(
+    tx: Tx,
+    input: { organizationId: number; orderId: string },
+  ): Promise<OrderRow> {
     const [order] = await tx
       .select()
       .from(orders)
@@ -561,6 +713,12 @@ export class CheckoutRepository {
       .set({
         status: 'confirmed',
         paymentStatus: 'paid',
+        // The moment it actually became confirmed — what the queue renders as
+        // the confirmation date, and previously never written at all.
+        confirmedAt: input.now,
+        ...(input.mode === 'approval'
+          ? { approvedAt: input.now, decidedBy: input.decidedBy }
+          : {}),
         updatedAt: input.now,
         version: order.version + 1,
       })
@@ -674,6 +832,7 @@ export class CheckoutRepository {
         discountAmountSatang: input.totals.discountSatang,
         vatAmountSatang: input.totals.vatSatang,
         totalSatang: input.totals.totalSatang,
+        createdBy: input.createdBy ?? null,
       })
       .returning();
     return row;
