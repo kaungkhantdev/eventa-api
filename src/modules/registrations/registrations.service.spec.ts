@@ -25,6 +25,7 @@ const row = (o: Partial<RegistrationRow> = {}): RegistrationRow => ({
   paymentStatus: 'pending',
   seats: 2,
   totalSatang: 1_880 * BAHT,
+  ticketTypeName: 'VIP',
   registeredAt: new Date('2026-06-01T00:00:00Z'),
   confirmedAt: null,
   rejectedAt: null,
@@ -105,6 +106,38 @@ describe('RegistrationsService (US-REG-01)', () => {
         total: 1,
       });
       expect((await list()).page.items[0].amountLabel).toBe('Free');
+    });
+  });
+
+  describe('which ticket the registration is for (US-REG-01)', () => {
+    it('names the tier, so the queue says what was bought', async () => {
+      expect((await list()).page.items[0].ticketTypeName).toBe('VIP');
+    });
+
+    it('lists every tier of a mixed order rather than picking one', async () => {
+      repo.page.mockResolvedValue({
+        items: [row({ ticketTypeName: 'Early Bird, VIP' })],
+        total: 1,
+      });
+      expect((await list()).page.items[0].ticketTypeName).toBe('Early Bird, VIP');
+    });
+
+    it('is null when the tier has been deleted, not an empty string', async () => {
+      // The order still exists and must still appear in the queue; the console
+      // renders a dash rather than a blank cell that reads as a bug.
+      repo.page.mockResolvedValue({
+        items: [row({ ticketTypeName: null })],
+        total: 1,
+      });
+      expect((await list()).page.items[0].ticketTypeName).toBeNull();
+    });
+
+    it('shows the tier to a caller without finance access', async () => {
+      // What was bought is not a money privilege — only its price is.
+      permissions.getFor.mockResolvedValue(['regView']);
+      const [item] = (await list()).page.items;
+      expect(item.ticketTypeName).toBe('VIP');
+      expect(item.totalSatang).toBeNull();
     });
   });
 

@@ -88,6 +88,15 @@ export class RegistrationEntryDto {
 
   @ApiProperty({
     nullable: true,
+    type: String,
+    example: 'VIP',
+    description:
+      'Tier(s) bought — comma-separated for a mixed order, null once a tier is deleted',
+  })
+  ticketTypeName!: string | null;
+
+  @ApiProperty({
+    nullable: true,
     description: 'Null when the caller lacks finance access (US-REG-01).',
   })
   totalSatang!: number | null;
