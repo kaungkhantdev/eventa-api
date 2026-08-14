@@ -8,6 +8,7 @@ import type { RevenueInsightsPort } from './ports/revenue-insights.port';
 import type {
   CheckInInsightsPort,
   EventInsightsPort,
+  InventoryInsightsPort,
 } from './ports/operations-insights.port';
 
 const ORG = 7;
@@ -36,6 +37,7 @@ describe('DashboardAnalyticsService (US-DASH-08/09/12)', () => {
   let revenue: jest.Mocked<RevenueInsightsPort>;
   let events: jest.Mocked<EventInsightsPort>;
   let checkIns: jest.Mocked<CheckInInsightsPort>;
+  let inventory: jest.Mocked<InventoryInsightsPort>;
   let permissions: jest.Mocked<PermissionsService>;
   let service: DashboardAnalyticsService;
 
@@ -70,6 +72,19 @@ describe('DashboardAnalyticsService (US-DASH-08/09/12)', () => {
         .fn()
         .mockResolvedValue({ admitted: 80, expected: 100 }),
     };
+    inventory = {
+      countSellingOut: jest.fn(),
+      sellingFast: jest.fn().mockResolvedValue([
+        {
+          ticketTypeId: 't-1',
+          ticketTypeName: 'VIP',
+          eventId: 'e-1',
+          eventName: 'Bangkok Tech Week',
+          remaining: 3,
+          total: 100,
+        },
+      ]),
+    };
     permissions = {
       getFor: jest
         .fn()
@@ -81,6 +96,7 @@ describe('DashboardAnalyticsService (US-DASH-08/09/12)', () => {
       revenue,
       events,
       checkIns,
+      inventory,
       permissions,
       clock,
     );
@@ -188,6 +204,34 @@ describe('DashboardAnalyticsService (US-DASH-08/09/12)', () => {
       const view = await service.load(auth, {});
       expect(view.recent).toEqual([]);
       expect(registrations.recent).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('tickets selling fast (US-DASH-11)', () => {
+    it('lists the tiers running low, with the event they belong to', async () => {
+      const view = await service.load(auth, {});
+      expect(view.sellingFast).toEqual([
+        {
+          ticketTypeId: 't-1',
+          ticketTypeName: 'VIP',
+          eventId: 'e-1',
+          eventName: 'Bangkok Tech Week',
+          remaining: 3,
+          total: 100,
+        },
+      ]);
+    });
+
+    // The panel is a preview with a "Manage" link, not the inventory list.
+    it('asks for only as many as the panel shows', async () => {
+      await service.load(auth, {});
+      expect(inventory.sellingFast).toHaveBeenCalledWith(ORG, 3);
+    });
+
+    it('is simply empty when nothing is close to selling out', async () => {
+      inventory.sellingFast.mockResolvedValue([]);
+      const view = await service.load(auth, {});
+      expect(view.sellingFast).toEqual([]);
     });
   });
 

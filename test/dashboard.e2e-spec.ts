@@ -55,6 +55,14 @@ interface Analytics {
   revenue: { range: string; totalSatang: number; points: unknown[] } | null;
   recent: { attendeeName: string; totalSatang: number | null }[];
   tierMix: { ticketTypeName: string; count: number; percent: number }[];
+  sellingFast: {
+    ticketTypeId: string;
+    ticketTypeName: string;
+    eventId: string;
+    eventName: string;
+    remaining: number;
+    total: number;
+  }[];
 }
 
 describe('Dashboard and operations home (e2e — E11)', () => {
@@ -116,6 +124,12 @@ describe('Dashboard and operations home (e2e — E11)', () => {
         orgs,
       ]);
     }
+    // Extra tiers a test added (everything but the seeded 'General') go, so a
+    // stock level set for one case cannot decide the next one's panel.
+    await pool.query(
+      `DELETE FROM ticket_types WHERE organization_id = ANY($1) AND name <> 'General'`,
+      [orgs],
+    );
     await pool.query(
       `UPDATE ticket_types SET sold = 0, total = 100, status = 'onsale'
        WHERE organization_id = ANY($1)`,
@@ -381,6 +395,45 @@ describe('Dashboard and operations home (e2e — E11)', () => {
       expect(body.recent[0].attendeeName).toBe('Anan Suksawat');
     });
 
+    it('lists tickets selling fast, scarcest first, with their event', async () => {
+      // Two tiers past the low-stock threshold, the second the scarcer.
+      await pool.query(
+        `UPDATE ticket_types SET total = 100, sold = 90 WHERE id = $1`,
+        [tierId],
+      );
+      const scarcest = await seedTier(pool, orgId, eventId, {
+        name: 'Last few',
+        total: 100,
+        sold: 98,
+      });
+
+      const res = await dashboard(adminJwt);
+      const { sellingFast } = (res.body as Success<Analytics>).data;
+
+      expect(sellingFast.map((t) => t.ticketTypeName)).toEqual([
+        'Last few',
+        'General',
+      ]);
+      expect(sellingFast[0]).toMatchObject({
+        ticketTypeId: scarcest,
+        eventId,
+        eventName: 'Dashboard Summit',
+        remaining: 2,
+        total: 100,
+      });
+    });
+
+    it('leaves out a tier that is not close to selling out', async () => {
+      await seedTier(pool, orgId, eventId, {
+        name: 'Plenty',
+        total: 100,
+        sold: 10,
+      });
+      const res = await dashboard(adminJwt);
+      const { sellingFast } = (res.body as Success<Analytics>).data;
+      expect(sellingFast.map((t) => t.ticketTypeName)).not.toContain('Plenty');
+    });
+
     it('never leaks another workspace’s figures', async () => {
       await seedRegistration({ totalSatang: 9_999 * BAHT, paid: true });
       const res = await dashboard(otherJwt);
@@ -464,6 +517,22 @@ async function seedEvent(
     [orgId, eventId],
   );
   return { eventId, tierId: tier.rows[0].id };
+}
+
+/** An extra tier on an existing event, for the selling-fast ordering. */
+async function seedTier(
+  pool: Pool,
+  orgId: number,
+  eventId: string,
+  tier: { name: string; total: number; sold: number },
+): Promise<string> {
+  const res = await pool.query<{ id: string }>(
+    `INSERT INTO ticket_types (organization_id, event_id, name, price_satang,
+                               status, total, sold, min_per_order, max_per_order)
+     VALUES ($1,$2,$3,0,'onsale',$4,$5,1,8) RETURNING id`,
+    [orgId, eventId, tier.name, tier.total, tier.sold],
+  );
+  return res.rows[0].id;
 }
 
 async function cleanup(pool: Pool): Promise<void> {

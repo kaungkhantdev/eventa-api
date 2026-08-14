@@ -172,6 +172,26 @@ class TierSliceDto {
   percent!: number;
 }
 
+class SellingFastDto {
+  @ApiProperty()
+  ticketTypeId!: string;
+
+  @ApiProperty()
+  ticketTypeName!: string;
+
+  @ApiProperty()
+  eventId!: string;
+
+  @ApiProperty()
+  eventName!: string;
+
+  @ApiProperty({ description: 'Allocation minus sold; never negative.' })
+  remaining!: number;
+
+  @ApiProperty({ description: 'The allocation it is running out of.' })
+  total!: number;
+}
+
 class KpisDto {
   @ApiProperty({ type: KpiDto })
   registrations!: KpiDto;
@@ -209,6 +229,12 @@ export class AnalyticsDto {
 
   @ApiProperty({ type: [TierSliceDto], description: 'Largest share first.' })
   tierMix!: TierSliceDto[];
+
+  @ApiProperty({
+    type: [SellingFastDto],
+    description: 'Tiers nearly sold out, scarcest first.',
+  })
+  sellingFast!: SellingFastDto[];
 
   @ApiProperty({ format: 'date-time' })
   generatedAt!: Date;

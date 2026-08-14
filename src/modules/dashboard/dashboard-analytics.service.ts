@@ -14,6 +14,8 @@ import {
 import {
   CheckInInsightsPort,
   EventInsightsPort,
+  InventoryInsightsPort,
+  type SellingFastTier,
 } from './ports/operations-insights.port';
 import { RegistrationInsightsPort } from './ports/registration-insights.port';
 import {
@@ -23,6 +25,8 @@ import {
 
 /** How many rows the dashboard table shows before "view all". */
 const TABLE_LIMIT = 10;
+/** How many low-stock tiers the selling-fast panel previews before "Manage". */
+const SELLING_FAST_LIMIT = 3;
 const PERCENT = 100;
 
 /** A headline card: the figure, and how it moved. `value` is null when unknown. */
@@ -57,6 +61,8 @@ export interface AnalyticsView {
   revenue: RevenueTrend | null;
   recent: TodayFeedItem[];
   tierMix: TierSlice[];
+  /** Tiers close to selling out, scarcest first (US-DASH-11). */
+  sellingFast: SellingFastTier[];
   generatedAt: Date;
 }
 
@@ -83,6 +89,7 @@ export class DashboardAnalyticsService {
     private readonly revenue: RevenueInsightsPort,
     private readonly events: EventInsightsPort,
     private readonly checkIns: CheckInInsightsPort,
+    private readonly inventory: InventoryInsightsPort,
     private readonly permissions: PermissionsService,
     private readonly clock: Clock,
   ) {}
@@ -100,14 +107,19 @@ export class DashboardAnalyticsService {
       finance: granted.includes(Permission.finView),
     };
     const org = auth.organizationId;
-    const [signUps, money, reach, attendance, recent, mix] = await Promise.all([
-      this.registrations.totalsForPeriod(org, period),
-      access.finance ? this.revenue.totalsForPeriod(org, period) : null,
-      this.events.reach(org),
-      this.attendance(org, period),
-      this.recentRows(org, access),
-      this.registrations.tierMix(org, { from: period.from, to: period.to }),
-    ]);
+    const [signUps, money, reach, attendance, recent, mix, sellingFast] =
+      await Promise.all([
+        this.registrations.totalsForPeriod(org, period),
+        access.finance ? this.revenue.totalsForPeriod(org, period) : null,
+        this.events.reach(org),
+        this.attendance(org, period),
+        this.recentRows(org, access),
+        this.registrations.tierMix(org, { from: period.from, to: period.to }),
+        // Not period-scoped and not gated: what is left of an allocation is
+        // neither money nor personal data, and "about to sell out" is true
+        // right now regardless of which window the rest of the page is showing.
+        this.inventory.sellingFast(org, SELLING_FAST_LIMIT),
+      ]);
     return {
       kpis: {
         registrations: kpi(signUps.current, signUps.previous),
@@ -123,6 +135,7 @@ export class DashboardAnalyticsService {
       revenue: money ? await this.trend(org, period, range, money) : null,
       recent,
       tierMix: toSlices(mix, signUps.current),
+      sellingFast,
       generatedAt: now,
     };
   }
