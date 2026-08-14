@@ -63,6 +63,9 @@ const UPDATABLE_KEYS: (keyof NewEventValues & keyof UpdateEventInput)[] = [
   'coverImage',
   'accentColor',
   'contactEmail',
+  // Settable after publishing, not only during it: changing how the public
+  // page looks should not mean taking it down and putting it back up.
+  'landingTemplateId',
 ];
 
 /** event_bucket is derived from lifecycle status (entities.md): terminal → completed. */

@@ -120,6 +120,8 @@ export interface UpdateEventInput {
   coverImage?: string | null;
   accentColor?: string | null;
   contactEmail?: string | null;
+  /** The public page's look. Changeable while the event is live (US-EVT-07). */
+  landingTemplateId?: TemplateId;
   /** Optimistic-concurrency token from the client (must match the current row). */
   version?: number;
 }
