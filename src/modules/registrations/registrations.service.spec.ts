@@ -119,7 +119,9 @@ describe('RegistrationsService (US-REG-01)', () => {
         items: [row({ ticketTypeName: 'Early Bird, VIP' })],
         total: 1,
       });
-      expect((await list()).page.items[0].ticketTypeName).toBe('Early Bird, VIP');
+      expect((await list()).page.items[0].ticketTypeName).toBe(
+        'Early Bird, VIP',
+      );
     });
 
     it('is null when the tier has been deleted, not an empty string', async () => {

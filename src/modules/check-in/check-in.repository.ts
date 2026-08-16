@@ -1,12 +1,25 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  isNotNull,
+  isNull,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
-import { auditEvents, checkIns, tickets } from '../../db/schema';
+import { auditEvents, checkIns, ticketTypes, tickets } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
 import type {
   AdmissibleTicket,
   AdmitInput,
   AdmitOutcome,
+  AttendanceCounts,
+  AttendanceQuery,
+  AttendanceRow,
 } from './check-in.types';
 
 const AUDIT_TYPE = 'checkin' as const;
@@ -116,6 +129,116 @@ export class CheckInRepository {
   }
 
   /** The ticket behind a scanned QR token, if the token is one of ours. */
+  /**
+   * The roll: everyone holding a ticket that entitles entry, and whether they
+   * are already inside (US-REG-11).
+   *
+   * A LEFT JOIN, not a filter: somebody still expected has no `check_ins` row,
+   * and an inner join would answer "who came" to a question about who is due.
+   * Statuses that deny entry are excluded here rather than in the service —
+   * a refunded ticket is not somebody the door is waiting for.
+   */
+  async listAttendance(
+    organizationId: number,
+    query: AttendanceQuery,
+  ): Promise<{ rows: AttendanceRow[]; total: number }> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const where = this.attendanceWhere(organizationId, query);
+      const offset = (query.page - 1) * query.limit;
+
+      const rows = await tx
+        .select({
+          ticketId: tickets.id,
+          holderName: tickets.holderName,
+          ticketLabel: tickets.ticketLabel,
+          ticketTypeName: ticketTypes.name,
+          checkedInAt: checkIns.checkedInAt,
+          method: checkIns.method,
+        })
+        .from(tickets)
+        .innerJoin(ticketTypes, eq(ticketTypes.id, tickets.ticketTypeId))
+        .leftJoin(checkIns, eq(checkIns.ticketId, tickets.id))
+        .where(where)
+        .orderBy(...this.attendanceOrder(query.sort))
+        .limit(query.limit)
+        .offset(offset);
+
+      const [counted] = await tx
+        .select({ total: sql<number>`count(*)::int` })
+        .from(tickets)
+        .leftJoin(checkIns, eq(checkIns.ticketId, tickets.id))
+        .where(where);
+
+      return {
+        rows: rows.map((row) => ({
+          ...row,
+          status: row.checkedInAt
+            ? ('checked_in' as const)
+            : ('expected' as const),
+        })),
+        total: counted?.total ?? 0,
+      };
+    });
+  }
+
+  /**
+   * The headline figures, counted across the whole event rather than the page
+   * on screen — the station shows them while looking at eight of a thousand.
+   */
+  async countAttendance(
+    organizationId: number,
+    eventId: string,
+  ): Promise<AttendanceCounts> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({
+          total: sql<number>`count(*)::int`,
+          checkedIn: sql<number>`count(${checkIns.id})::int`,
+        })
+        .from(tickets)
+        .leftJoin(checkIns, eq(checkIns.ticketId, tickets.id))
+        .where(this.admissible(organizationId, eventId));
+
+      const total = row?.total ?? 0;
+      const checkedIn = row?.checkedIn ?? 0;
+      return { total, checkedIn, expected: total - checkedIn };
+    });
+  }
+
+  /** Tickets for this event that entitle entry at all. */
+  private admissible(organizationId: number, eventId: string) {
+    return and(
+      eq(tickets.organizationId, organizationId),
+      eq(tickets.eventId, eventId),
+      isNull(tickets.deletedAt),
+      sql`${tickets.status} NOT IN ('void', 'refunded', 'transferred')`,
+    );
+  }
+
+  private attendanceWhere(organizationId: number, query: AttendanceQuery) {
+    const clauses = [this.admissible(organizationId, query.eventId)];
+    if (query.status === 'checked_in') clauses.push(isNotNull(checkIns.id));
+    if (query.status === 'expected') clauses.push(isNull(checkIns.id));
+    if (query.search) {
+      const term = `%${query.search}%`;
+      clauses.push(
+        or(ilike(tickets.holderName, term), ilike(tickets.ticketLabel, term)),
+      );
+    }
+    return and(...clauses);
+  }
+
+  /**
+   * Newest arrival first for the feed; by name otherwise. The ticket id breaks
+   * ties so paging is stable — without it two rows sharing a name can swap
+   * between pages and one is read twice while another is never seen.
+   */
+  private attendanceOrder(sort: AttendanceQuery['sort']) {
+    return sort === 'recent'
+      ? [desc(checkIns.checkedInAt), asc(tickets.id)]
+      : [asc(tickets.holderName), asc(tickets.id)];
+  }
+
   async findTicketByToken(
     organizationId: number,
     qrToken: string,

@@ -27,6 +27,18 @@ interface ScanResult {
   holderName: string | null;
   checkedInAt: string | null;
 }
+interface AttendanceRow {
+  ticketId: string;
+  holderName: string | null;
+  ticketTypeName: string;
+  status: 'checked_in' | 'expected';
+  checkedInAt: string | null;
+}
+interface Counts {
+  total: number;
+  checkedIn: number;
+  expected: number;
+}
 
 describe('Check-in at the door (e2e — US-REG-11/12/13)', () => {
   let app: INestApplication;
@@ -98,7 +110,7 @@ describe('Check-in at the door (e2e — US-REG-11/12/13)', () => {
 
   /** A confirmed order with one issued ticket, ready to walk through the door. */
   async function seedTicket(
-    o: { org?: number; event?: string; status?: string } = {},
+    o: { org?: number; event?: string; status?: string; holder?: string } = {},
   ): Promise<{ ticketId: string; qrToken: string }> {
     seq += 1;
     const org = o.org ?? orgId;
@@ -124,7 +136,7 @@ describe('Check-in at the door (e2e — US-REG-11/12/13)', () => {
     const ticket = await pool.query<{ id: string }>(
       `INSERT INTO tickets (organization_id, order_id, order_item_id, event_id,
                             ticket_type_id, qr_token, holder_name, ticket_label, status)
-       VALUES ($1,$2,$3,$4,$5,$6,'Anan Suksawat','General',$7) RETURNING id`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'General',$8) RETURNING id`,
       [
         org,
         order.rows[0].id,
@@ -132,6 +144,7 @@ describe('Check-in at the door (e2e — US-REG-11/12/13)', () => {
         event,
         tier.rows[0].id,
         qrToken,
+        o.holder ?? 'Anan Suksawat',
         o.status ?? 'issued',
       ],
     );
@@ -309,6 +322,167 @@ describe('Check-in at the door (e2e — US-REG-11/12/13)', () => {
     it('404s an event from another workspace', async () => {
       const res = await scan(staffJwt, otherEventId, { qrToken: 'x' });
       expect(res.status).toBe(404);
+    });
+  });
+
+  /**
+   * The roll: who is expected, and who is already inside (US-REG-11).
+   *
+   * One endpoint serves both screens the door uses — the queue reads it by
+   * name, the station's live feed reads it newest-first — because they are two
+   * views of one list, and two endpoints would drift apart.
+   */
+  describe('reading the roll (US-REG-11)', () => {
+    const roll = (jwt: string, event: string, query = '') =>
+      request(server)
+        .get(`/api/v1/events/${event}/check-ins${query}`)
+        .set('Authorization', `Bearer ${jwt}`);
+
+    it('lists everyone holding a ticket, checked in or not', async () => {
+      await seedTicket({ holder: 'Anan Suksawat' });
+      await seedTicket({ holder: 'Bea Chen' });
+
+      const res = await roll(staffJwt, eventId);
+
+      expect(res.status).toBe(200);
+      const body = res.body as Success<AttendanceRow[]>;
+      expect(body.data).toHaveLength(2);
+      expect(body.data.map((r) => r.holderName).sort()).toEqual([
+        'Anan Suksawat',
+        'Bea Chen',
+      ]);
+    });
+
+    it('reports who is inside and when they arrived', async () => {
+      const { qrToken } = await seedTicket({ holder: 'Anan Suksawat' });
+      await seedTicket({ holder: 'Bea Chen' });
+      await scan(staffJwt, eventId, { qrToken });
+
+      const body = (await roll(staffJwt, eventId)).body as Success<
+        AttendanceRow[]
+      >;
+      const anan = body.data.find((r) => r.holderName === 'Anan Suksawat')!;
+      const bea = body.data.find((r) => r.holderName === 'Bea Chen')!;
+
+      expect(anan.status).toBe('checked_in');
+      expect(anan.checkedInAt).toEqual(expect.any(String));
+      expect(bea.status).toBe('expected');
+      expect(bea.checkedInAt).toBeNull();
+    });
+
+    it('counts the room without paging through it', async () => {
+      const { qrToken } = await seedTicket();
+      await seedTicket();
+      await seedTicket();
+      await scan(staffJwt, eventId, { qrToken });
+
+      const res = await roll(staffJwt, eventId, '?limit=1');
+      const body = res.body as Success<AttendanceRow[]> & {
+        meta: { total: number; counts: Counts };
+      };
+
+      expect(body.data).toHaveLength(1);
+      expect(body.meta.total).toBe(3);
+      // The station's headline figures, whatever page is on screen.
+      expect(body.meta.counts).toEqual({
+        total: 3,
+        checkedIn: 1,
+        expected: 2,
+      });
+    });
+
+    it('narrows to those already inside, and to those still expected', async () => {
+      const { qrToken } = await seedTicket({ holder: 'Anan Suksawat' });
+      await seedTicket({ holder: 'Bea Chen' });
+      await scan(staffJwt, eventId, { qrToken });
+
+      const inside = (await roll(staffJwt, eventId, '?status=checked_in'))
+        .body as Success<AttendanceRow[]>;
+      const waiting = (await roll(staffJwt, eventId, '?status=expected'))
+        .body as Success<AttendanceRow[]>;
+
+      expect(inside.data.map((r) => r.holderName)).toEqual(['Anan Suksawat']);
+      expect(waiting.data.map((r) => r.holderName)).toEqual(['Bea Chen']);
+    });
+
+    it('finds somebody by name at the door', async () => {
+      await seedTicket({ holder: 'Anan Suksawat' });
+      await seedTicket({ holder: 'Bea Chen' });
+
+      const body = (await roll(staffJwt, eventId, '?search=bea'))
+        .body as Success<AttendanceRow[]>;
+
+      expect(body.data.map((r) => r.holderName)).toEqual(['Bea Chen']);
+    });
+
+    // The station's feed is "who just walked in", so the newest is first.
+    it('orders by arrival, newest first, when asked', async () => {
+      const first = await seedTicket({ holder: 'Anan Suksawat' });
+      const second = await seedTicket({ holder: 'Bea Chen' });
+      await scan(staffJwt, eventId, { qrToken: first.qrToken });
+      await scan(staffJwt, eventId, { qrToken: second.qrToken });
+
+      const body = (
+        await roll(staffJwt, eventId, '?status=checked_in&sort=recent')
+      ).body as Success<AttendanceRow[]>;
+
+      expect(body.data.map((r) => r.holderName)).toEqual([
+        'Bea Chen',
+        'Anan Suksawat',
+      ]);
+    });
+
+    it('orders by name by default, so the queue reads like a list', async () => {
+      await seedTicket({ holder: 'Chai Wong' });
+      await seedTicket({ holder: 'Anan Suksawat' });
+
+      const body = (await roll(staffJwt, eventId)).body as Success<
+        AttendanceRow[]
+      >;
+
+      expect(body.data.map((r) => r.holderName)).toEqual([
+        'Anan Suksawat',
+        'Chai Wong',
+      ]);
+    });
+
+    it('names the tier each ticket was bought on', async () => {
+      await seedTicket();
+      const body = (await roll(staffJwt, eventId)).body as Success<
+        AttendanceRow[]
+      >;
+      expect(body.data[0].ticketTypeName).toEqual(expect.any(String));
+    });
+
+    // A ticket that is not entitled to entry is not somebody to expect.
+    it('leaves out a refunded ticket', async () => {
+      await seedTicket({ holder: 'Anan Suksawat' });
+      await seedTicket({ holder: 'Void Person', status: 'refunded' });
+
+      const body = (await roll(staffJwt, eventId)).body as Success<
+        AttendanceRow[]
+      >;
+
+      expect(body.data.map((r) => r.holderName)).toEqual(['Anan Suksawat']);
+    });
+
+    it('denies a member who may view but not work the door', async () => {
+      await expect(roll(viewerJwt, eventId)).resolves.toMatchObject({
+        status: 403,
+      });
+    });
+
+    it('refuses an unauthenticated caller', async () => {
+      await request(server)
+        .get(`/api/v1/events/${eventId}/check-ins`)
+        .expect(401);
+    });
+
+    it('404s an event from another workspace', async () => {
+      await seedTicket({ org: otherOrgId, event: otherEventId });
+      await expect(roll(staffJwt, otherEventId)).resolves.toMatchObject({
+        status: 404,
+      });
     });
   });
 
