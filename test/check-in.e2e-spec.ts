@@ -30,6 +30,7 @@ interface ScanResult {
 interface AttendanceRow {
   ticketId: string;
   holderName: string | null;
+  attendeeEmail: string | null;
   ticketTypeName: string;
   status: 'checked_in' | 'expected';
   checkedInAt: string | null;
@@ -403,6 +404,18 @@ describe('Check-in at the door (e2e — US-REG-11/12/13)', () => {
 
       expect(inside.data.map((r) => r.holderName)).toEqual(['Anan Suksawat']);
       expect(waiting.data.map((r) => r.holderName)).toEqual(['Bea Chen']);
+    });
+
+    // The door is often given an email, not a name — it is what the buyer has
+    // in their inbox, and the only thing they can spell back reliably.
+    it('finds somebody by email at the door', async () => {
+      await seedTicket({ holder: 'Anan Suksawat' });
+
+      const body = (await roll(staffJwt, eventId, '?search=anan@chk.test'))
+        .body as Success<AttendanceRow[]>;
+
+      expect(body.data.map((r) => r.holderName)).toEqual(['Anan Suksawat']);
+      expect(body.data[0].attendeeEmail).toBe('anan@chk.test');
     });
 
     it('finds somebody by name at the door', async () => {

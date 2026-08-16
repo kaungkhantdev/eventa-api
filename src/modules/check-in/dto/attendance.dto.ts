@@ -74,6 +74,12 @@ export class AttendanceRowDto {
   @ApiProperty({ nullable: true, description: 'Null when nobody was named.' })
   holderName!: string | null;
 
+  @ApiProperty({
+    nullable: true,
+    description: "The attendee's address, or the buyer's when unassigned.",
+  })
+  attendeeEmail!: string | null;
+
   @ApiProperty({ nullable: true })
   ticketLabel!: string | null;
 

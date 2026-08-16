@@ -63,6 +63,8 @@ export interface AttendanceQuery {
 export interface AttendanceRow {
   ticketId: string;
   holderName: string | null;
+  /** The attendee's address, or the buyer's when the ticket names nobody. */
+  attendeeEmail: string | null;
   ticketLabel: string | null;
   ticketTypeName: string;
   status: AttendanceStatus;

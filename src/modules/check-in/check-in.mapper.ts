@@ -18,6 +18,7 @@ export function toAttendanceRow(row: AttendanceRow): AttendanceRowDto {
   return {
     ticketId: row.ticketId,
     holderName: row.holderName,
+    attendeeEmail: row.attendeeEmail,
     ticketLabel: row.ticketLabel,
     ticketTypeName: row.ticketTypeName,
     status: row.status,

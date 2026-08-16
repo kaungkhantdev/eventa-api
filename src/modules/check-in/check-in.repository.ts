@@ -11,7 +11,14 @@ import {
   sql,
 } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
-import { auditEvents, checkIns, ticketTypes, tickets } from '../../db/schema';
+import {
+  attendees,
+  auditEvents,
+  checkIns,
+  orders,
+  ticketTypes,
+  tickets,
+} from '../../db/schema';
 import { withTenant } from '../../db/tenant';
 import type {
   AdmissibleTicket,
@@ -128,7 +135,6 @@ export class CheckInRepository {
     });
   }
 
-  /** The ticket behind a scanned QR token, if the token is one of ours. */
   /**
    * The roll: everyone holding a ticket that entitles entry, and whether they
    * are already inside (US-REG-11).
@@ -152,11 +158,14 @@ export class CheckInRepository {
           holderName: tickets.holderName,
           ticketLabel: tickets.ticketLabel,
           ticketTypeName: ticketTypes.name,
+          attendeeEmail: this.contactEmail(),
           checkedInAt: checkIns.checkedInAt,
           method: checkIns.method,
         })
         .from(tickets)
         .innerJoin(ticketTypes, eq(ticketTypes.id, tickets.ticketTypeId))
+        .innerJoin(orders, eq(orders.id, tickets.orderId))
+        .leftJoin(attendees, eq(attendees.id, tickets.attendeeId))
         .leftJoin(checkIns, eq(checkIns.ticketId, tickets.id))
         .where(where)
         .orderBy(...this.attendanceOrder(query.sort))
@@ -166,6 +175,8 @@ export class CheckInRepository {
       const [counted] = await tx
         .select({ total: sql<number>`count(*)::int` })
         .from(tickets)
+        .innerJoin(orders, eq(orders.id, tickets.orderId))
+        .leftJoin(attendees, eq(attendees.id, tickets.attendeeId))
         .leftJoin(checkIns, eq(checkIns.ticketId, tickets.id))
         .where(where);
 
@@ -205,6 +216,19 @@ export class CheckInRepository {
     });
   }
 
+  /**
+   * Who to contact about this ticket.
+   *
+   * The attendee's own address when the ticket was assigned to one, and the
+   * buyer's otherwise — somebody who bought four tickets is the contact for
+   * all four until they are handed on.
+   */
+  private contactEmail() {
+    return sql<
+      string | null
+    >`coalesce(${attendees.email}, ${orders.buyerEmail})`;
+  }
+
   /** Tickets for this event that entitle entry at all. */
   private admissible(organizationId: number, eventId: string) {
     return and(
@@ -222,7 +246,15 @@ export class CheckInRepository {
     if (query.search) {
       const term = `%${query.search}%`;
       clauses.push(
-        or(ilike(tickets.holderName, term), ilike(tickets.ticketLabel, term)),
+        or(
+          ilike(tickets.holderName, term),
+          ilike(tickets.ticketLabel, term),
+          // Both addresses rather than the coalesce: an email is what somebody
+          // at the door can actually spell back, and it may be either the
+          // attendee's or the buyer's.
+          ilike(attendees.email, term),
+          ilike(orders.buyerEmail, term),
+        ),
       );
     }
     return and(...clauses);
@@ -239,6 +271,7 @@ export class CheckInRepository {
       : [asc(tickets.holderName), asc(tickets.id)];
   }
 
+  /** The ticket behind a scanned QR token, if the token is one of ours. */
   async findTicketByToken(
     organizationId: number,
     qrToken: string,
