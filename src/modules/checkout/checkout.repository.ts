@@ -272,6 +272,58 @@ export class CheckoutRepository {
     return row ?? null;
   }
 
+  /**
+   * An order, its tickets and its event name, reached by the order's uuid alone
+   * (US-DISC-06/07).
+   *
+   * No tenant scope, exactly like `findOrderAnyTenant` above and for the same
+   * reason: the buyer is a guest with no workspace, and the unguessable uuid IS
+   * the capability — it is what the confirmation email hands them. Nothing here
+   * is looked up by reference or email, which are both things a stranger could
+   * guess or already know.
+   */
+  async findGuestOrder(orderId: string): Promise<{
+    order: OrderRow;
+    tickets: TicketRow[];
+    eventName: string;
+    lines: {
+      ticketTypeName: string;
+      quantity: number;
+      unitPriceSatang: number;
+      lineSubtotalSatang: number;
+    }[];
+  } | null> {
+    const [row] = await this.db
+      .select({ order: orders, eventName: events.name })
+      .from(orders)
+      .innerJoin(events, eq(events.id, orders.eventId))
+      .where(eq(orders.id, orderId))
+      .limit(1);
+    if (!row) return null;
+    const issued = await this.db
+      .select()
+      .from(tickets)
+      .where(eq(tickets.orderId, orderId))
+      .orderBy(asc(tickets.id));
+    const lines = await this.db
+      .select({
+        ticketTypeName: ticketTypes.name,
+        quantity: orderItems.quantity,
+        unitPriceSatang: orderItems.unitPriceSatang,
+        lineSubtotalSatang: orderItems.lineSubtotalSatang,
+      })
+      .from(orderItems)
+      .innerJoin(ticketTypes, eq(ticketTypes.id, orderItems.ticketTypeId))
+      .where(eq(orderItems.orderId, orderId))
+      .orderBy(asc(orderItems.id));
+    return {
+      order: row.order,
+      tickets: issued,
+      eventName: row.eventName,
+      lines,
+    };
+  }
+
   /** A tenant-scoped order read (settlement pre-flight). */
   async orderById(
     organizationId: number,

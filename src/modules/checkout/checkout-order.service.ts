@@ -14,6 +14,7 @@ import { registrationConfirmedEvent } from './events/registration-confirmed.even
 import { generateOrderReference, generateQrToken } from './order-reference';
 import { ticketsUrlFor } from './ticket-links';
 import type { ConfirmOrderDto } from './dto/confirm-order.dto';
+import type { GuestOrderDto } from './dto/guest-order.dto';
 import type { OrderPlacedDto } from './dto/order-placed.dto';
 
 /**
@@ -48,6 +49,10 @@ const UNIQUE_VIOLATION = '23505';
  * the payment settles (US-DISC-05) — so nobody holds a QR for something they
  * have not paid for.
  */
+/** Said for a bad id and for somebody else's alike — the two must not be
+ *  distinguishable, or the endpoint becomes a way to probe for orders. */
+const ORDER_NOT_FOUND = 'That order could not be found.';
+
 @Injectable()
 export class CheckoutOrderService {
   private readonly publicWebUrl: string;
@@ -157,6 +162,48 @@ export class CheckoutOrderService {
     throw DomainException.conflict(
       "We couldn't complete your booking. Please try again.",
     );
+  }
+
+  /**
+   * The buyer's own copy of their order (US-DISC-06/07).
+   *
+   * Registration never requires an account, so whoever just paid must be able
+   * to see what they bought without signing in to one they do not have. The
+   * order's uuid is the capability — the same link the confirmation email
+   * carries — so this returns the tickets, QR tokens included, to whoever holds
+   * it. A missing order is a plain 404: "no such order" and "not yours" must
+   * not be distinguishable, or the endpoint becomes a way to probe for orders.
+   */
+  async viewGuestOrder(orderId: string): Promise<GuestOrderDto> {
+    const found = await this.repo.findGuestOrder(orderId);
+    if (!found) throw DomainException.notFound(ORDER_NOT_FOUND);
+    const { order, tickets, eventName, lines } = found;
+    return {
+      orderId: order.id,
+      reference: order.reference,
+      status: order.status,
+      paymentStatus: order.paymentStatus,
+      eventName,
+      buyerEmail: order.buyerEmail,
+      buyerName: order.buyerName,
+      totalSatang: order.totalSatang,
+      vatSatang: order.vatAmountSatang,
+      subtotalSatang: order.subtotalSatang,
+      discountSatang: order.discountAmountSatang,
+      currency: order.currency,
+      lines,
+      tickets: tickets.map((ticket) => ({
+        id: ticket.id,
+        qrToken: ticket.qrToken,
+        holderName: ticket.holderName,
+        ticketLabel: ticket.ticketLabel,
+        status: ticket.status,
+      })),
+      // Owed until the money has actually arrived — a pending order is exactly
+      // when somebody comes looking for this page.
+      paymentRequired: order.paymentStatus !== 'paid',
+      placedAt: order.createdAt.toISOString(),
+    };
   }
 
   private toResponse(

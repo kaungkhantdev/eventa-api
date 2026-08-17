@@ -220,6 +220,107 @@ describe('Confirming a registration (e2e — US-DISC-06)', () => {
     });
   });
 
+  /**
+   * The guest's own copy of the order (US-DISC-06/07).
+   *
+   * Registration never requires an account, so the person who just paid has to
+   * be able to see what they bought without signing in to one. The order's uuid
+   * IS the capability — the same one the confirmation email already links to
+   * via `ticketsUrlFor` — so the link is the credential and nothing else is.
+   */
+  describe('looking up an order without an account', () => {
+    const viewOrder = (orderId: string) =>
+      request(server).get(`/api/v1/public/orders/${orderId}`);
+
+    const placeFreeOrder = async (quantity = 2) => {
+      const holdIds = await hold({
+        eventId: ids.events[FREE],
+        ticketTypeId: ids.tiers.free,
+        quantity,
+      });
+      const res = await confirm({
+        eventId: ids.events[FREE],
+        ticketTypeId: ids.tiers.free,
+        quantity,
+        holdIds,
+        buyer,
+        idempotencyKey: nextKey(),
+      });
+      return (res.body as Success<Placed>).data;
+    };
+
+    it('shows the order to whoever holds its id, with no session', async () => {
+      const placed = await placeFreeOrder(2);
+
+      const res = await viewOrder(placed.orderId);
+
+      expect(res.status).toBe(200);
+      const view = (res.body as Success<Placed>).data;
+      expect(view.reference).toBe(placed.reference);
+      expect(view.eventName).toBe(placed.eventName);
+      expect(view.status).toBe('confirmed');
+    });
+
+    it('hands over the tickets, so the QR can be shown at the door', async () => {
+      const placed = await placeFreeOrder(2);
+
+      const view = ((await viewOrder(placed.orderId)).body as Success<Placed>)
+        .data;
+
+      expect(view.tickets).toHaveLength(2);
+      expect(view.tickets.map((t) => t.qrToken).sort()).toEqual(
+        placed.tickets.map((t) => t.qrToken).sort(),
+      );
+    });
+
+    it('reports the totals the buyer actually paid', async () => {
+      const placed = await placeFreeOrder(1);
+      const view = ((await viewOrder(placed.orderId)).body as Success<Placed>)
+        .data;
+      expect(view.totalSatang).toBe(placed.totalSatang);
+      expect(view.vatSatang).toBe(placed.vatSatang);
+    });
+
+    // An unpaid order has no tickets yet; the page still has to render, because
+    // that is exactly when somebody goes looking for it.
+    it('shows a pending order, with no tickets and the money still owed', async () => {
+      const holdIds = await hold({
+        eventId: ids.events[PAID],
+        ticketTypeId: ids.tiers.paid,
+        quantity: 1,
+      });
+      const placed = (
+        (
+          await confirm({
+            eventId: ids.events[PAID],
+            ticketTypeId: ids.tiers.paid,
+            quantity: 1,
+            holdIds,
+            buyer,
+            idempotencyKey: nextKey(),
+          })
+        ).body as Success<Placed>
+      ).data;
+
+      const view = ((await viewOrder(placed.orderId)).body as Success<Placed>)
+        .data;
+
+      expect(view.status).toBe('pending');
+      expect(view.paymentRequired).toBe(true);
+      expect(view.tickets).toEqual([]);
+    });
+
+    // The uuid is the credential. A wrong one must not distinguish "no such
+    // order" from "not yours" — both are simply not found.
+    it('404s an id that is not an order', async () => {
+      await viewOrder('3f1b7c9e-0000-4000-8000-000000000000').expect(404);
+    });
+
+    it('rejects an id that is not a uuid rather than searching for it', async () => {
+      await viewOrder('ORD-27VEEC7Y').expect(400);
+    });
+  });
+
   describe('confirming twice', () => {
     it('returns the first registration rather than placing a second', async () => {
       const key = nextKey();
