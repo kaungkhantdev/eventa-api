@@ -39,11 +39,16 @@ export class OrderPaymentAdapter extends OrderPaymentPort {
   async findPayable(orderId: string): Promise<PayableOrder | null> {
     const order = await this.repo.findOrderAnyTenant(orderId);
     if (!order) return null;
+    const eventName = await this.repo.eventNameForOrder(orderId);
     return {
       id: order.id,
       organizationId: order.organizationId,
       reference: order.reference,
       eventId: order.eventId,
+      // The order cannot exist without its event, so a missing name is a bad
+      // join rather than a real state; fall back to the reference instead of
+      // showing the buyer an empty line item.
+      eventName: eventName ?? order.reference,
       buyerName: order.buyerName,
       buyerEmail: order.buyerEmail,
       status: order.status,

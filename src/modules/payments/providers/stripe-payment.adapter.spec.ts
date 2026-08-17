@@ -16,6 +16,8 @@ const TTL = 900;
 const BAHT = 100;
 /** Unix seconds; the adapter derives the QR deadline from this, not from now. */
 const PI_CREATED = 1_800_000_000;
+/** Unix seconds a Checkout Session lapses at. */
+const SESSION_EXPIRES = 1_800_003_600;
 
 const clock: Clock = { now: () => NOW };
 
@@ -33,10 +35,16 @@ const real = new Stripe(SECRET_KEY, { apiVersion: STRIPE_API_VERSION });
 
 interface Harness {
   adapter: StripePaymentAdapter;
+  /** `paymentIntents.create` — the PromptPay path. */
   create: jest.Mock;
+  /** `checkout.sessions.create` — the card path. */
+  session: jest.Mock;
 }
 
-function harness(intent: Partial<Stripe.PaymentIntent> = {}): Harness {
+function harness(
+  intent: Partial<Stripe.PaymentIntent> = {},
+  checkout: Partial<Stripe.Checkout.Session> = {},
+): Harness {
   const create = jest.fn().mockResolvedValue({
     id: 'pi_123',
     status: 'requires_action',
@@ -46,13 +54,22 @@ function harness(intent: Partial<Stripe.PaymentIntent> = {}): Harness {
     last_payment_error: null,
     ...intent,
   });
+  const session = jest.fn().mockResolvedValue({
+    id: 'cs_test_123',
+    url: 'https://checkout.stripe.com/c/pay/cs_test_123',
+    payment_intent: 'pi_123',
+    expires_at: SESSION_EXPIRES,
+    ...checkout,
+  });
   const client = {
     paymentIntents: { create },
+    checkout: { sessions: { create: session } },
     webhooks: real.webhooks,
   } as unknown as Stripe;
   return {
     adapter: new StripePaymentAdapter(clock, config(), client),
     create,
+    session,
   };
 }
 
@@ -60,6 +77,8 @@ function input(o: Partial<StartPaymentInput> = {}): StartPaymentInput {
   return {
     orderId: 'o-1',
     organizationId: 7,
+    description: 'Bangkok Tech Week',
+    returnUrl: 'https://eventa.test/my/tickets/orders/o-1',
     amountSatang: 2_100 * BAHT,
     currency: 'THB',
     method: 'Card',
@@ -99,30 +118,88 @@ function paymentIntentEvent(
 }
 
 describe('StripePaymentAdapter (US-DISC-05)', () => {
+  /**
+   * Card runs through a HOSTED Checkout Session, not a bare intent: the page
+   * is Stripe's own, so no key, account id or SDK ever reaches the browser —
+   * which is what keeps a multi-tenant product in PCI SAQ-A without the client
+   * knowing which workspace it is paying.
+   */
   describe('start — card', () => {
-    it('asks for the order total in satang, in lowercase thb, and hands back the client secret', async () => {
+    const sessionParams = (session: jest.Mock) =>
+      (session.mock.calls[0] as [Stripe.Checkout.SessionCreateParams])[0];
+
+    it('hands back the hosted page, and never a card field of our own', async () => {
       const { adapter, create } = harness();
       const result = await adapter.start(input());
 
-      const [params] = create.mock.calls[0] as [
-        Stripe.PaymentIntentCreateParams,
-      ];
-      expect(params.amount).toBe(210_000);
-      expect(params.currency).toBe('thb');
-      expect(params.payment_method_types).toEqual(['card']);
-      // A card PI is NOT confirmed here — the buyer confirms in hosted fields.
-      expect(params.confirm).toBeUndefined();
-      expect(result.gatewayRef).toBe('pi_123');
-      expect(result.clientSecret).toBe('pi_123_secret_abc');
+      expect(result.checkoutUrl).toBe(
+        'https://checkout.stripe.com/c/pay/cs_test_123',
+      );
+      expect(result.clientSecret).toBeNull();
       expect(result.promptPayQr).toBeNull();
-      expect(result.expiresAt).toBeNull();
+      // Nothing is owed-and-settled yet — the buyer has not opened the page.
       expect(result.status).toBe('requires_action');
+      // The card path must not create a bare intent of its own.
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The Session's own PaymentIntent, not the Session id. Settlement arrives
+     * as `payment_intent.succeeded` and refunds take a `pi_…`, so storing the
+     * intent is what let both stay exactly as they were.
+     */
+    it('stores the PaymentIntent as the gateway reference', async () => {
+      const { adapter } = harness();
+      expect((await adapter.start(input())).gatewayRef).toBe('pi_123');
+    });
+
+    it('falls back to the session id when the intent is not expanded', async () => {
+      const { adapter } = harness({}, { payment_intent: null });
+      expect((await adapter.start(input())).gatewayRef).toBe('cs_test_123');
+    });
+
+    it('asks for the order total in satang, in lowercase thb', async () => {
+      const { adapter, session } = harness();
+      await adapter.start(input());
+
+      const params = sessionParams(session);
+      const [line] = params.line_items ?? [];
+      expect(line?.price_data?.currency).toBe('thb');
+      expect(line?.price_data?.unit_amount).toBe(210_000);
+      expect(line?.quantity).toBe(1);
+      expect(params.mode).toBe('payment');
+      expect(params.payment_method_types).toEqual(['card']);
+    });
+
+    // Somebody deciding whether to type a card number needs to recognise what
+    // they are buying; an order reference tells them nothing.
+    it('names the event on the page, so the buyer knows what this is', async () => {
+      const { adapter, session } = harness();
+      await adapter.start(input({ description: 'Founders Coffee Connect' }));
+      const [line] = sessionParams(session).line_items ?? [];
+      expect(line?.price_data?.product_data?.name).toBe(
+        'Founders Coffee Connect',
+      );
+    });
+
+    // Cancelling is not failing: the order still exists, still unpaid, still
+    // payable — so both endings land on the buyer's own copy of it.
+    it('returns the buyer to their order either way', async () => {
+      const { adapter, session } = harness();
+      await adapter.start(input());
+      const params = sessionParams(session);
+      expect(params.success_url).toBe(
+        'https://eventa.test/my/tickets/orders/o-1',
+      );
+      expect(params.cancel_url).toBe(
+        'https://eventa.test/my/tickets/orders/o-1',
+      );
     });
 
     it('sends the idempotency key so a retry cannot double-charge', async () => {
-      const { adapter, create } = harness();
+      const { adapter, session } = harness();
       await adapter.start(input());
-      const [, options] = create.mock.calls[0] as [
+      const [, options] = session.mock.calls[0] as [
         unknown,
         Stripe.RequestOptions,
       ];
@@ -131,9 +208,9 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
     });
 
     it('charges on the workspace’s connected account when it has one', async () => {
-      const { adapter, create } = harness();
+      const { adapter, session } = harness();
       await adapter.start(input({ accountId: 'acct_123' }));
-      const [, options] = create.mock.calls[0] as [
+      const [, options] = session.mock.calls[0] as [
         unknown,
         Stripe.RequestOptions,
       ];
@@ -141,45 +218,43 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
     });
 
     it('sends the statement descriptor as a SUFFIX — cards reject the full form', async () => {
-      const { adapter, create } = harness();
+      const { adapter, session } = harness();
       await adapter.start(input({ statementDescriptor: 'Bangkok Tech Week' }));
-      const [params] = create.mock.calls[0] as [
-        Stripe.PaymentIntentCreateParams,
-      ];
-      expect(params.statement_descriptor).toBeUndefined();
-      expect(params.statement_descriptor_suffix).toBe('Bangkok Tech');
+      const intentData = sessionParams(session).payment_intent_data;
+      expect(intentData?.statement_descriptor).toBeUndefined();
+      expect(intentData?.statement_descriptor_suffix).toBe('Bangkok Tech');
     });
 
     it('drops a Thai descriptor rather than sending one Stripe will reject', async () => {
-      const { adapter, create } = harness();
+      const { adapter, session } = harness();
       await adapter.start(input({ statementDescriptor: 'งานเทคโนโลยี' }));
-      const [params] = create.mock.calls[0] as [
-        Stripe.PaymentIntentCreateParams,
-      ];
-      expect(params.statement_descriptor_suffix).toBeUndefined();
+      expect(
+        sessionParams(session).payment_intent_data?.statement_descriptor_suffix,
+      ).toBeUndefined();
     });
 
-    it('tags the intent with the order it belongs to, for reconciliation', async () => {
-      const { adapter, create } = harness();
+    // On BOTH objects: the Session is what reconciles against the dashboard,
+    // the intent is what the webhook carries.
+    it('tags the session and its intent with the order, for reconciliation', async () => {
+      const { adapter, session } = harness();
       await adapter.start(input());
-      const [params] = create.mock.calls[0] as [
-        Stripe.PaymentIntentCreateParams,
-      ];
+      const params = sessionParams(session);
       expect(params.metadata).toEqual({ order_id: 'o-1', org_id: '7' });
-      expect(params.receipt_email).toBe('anan@example.test');
+      expect(params.payment_intent_data?.metadata).toEqual({
+        order_id: 'o-1',
+        org_id: '7',
+      });
+      expect(params.customer_email).toBe('anan@example.test');
+      expect(params.payment_intent_data?.receipt_email).toBe(
+        'anan@example.test',
+      );
     });
 
-    it('reports a declined intent as failed, with a reason', async () => {
-      const { adapter } = harness({
-        status: 'requires_payment_method',
-        last_payment_error: {
-          message: 'Your card was declined.',
-          code: 'card_declined',
-        } as Stripe.PaymentIntent.LastPaymentError,
-      });
-      const result = await adapter.start(input());
-      expect(result.status).toBe('failed');
-      expect(result.declineReason).toBe('Your card was declined.');
+    it('carries the deadline the session lapses at', async () => {
+      const { adapter } = harness();
+      expect((await adapter.start(input())).expiresAt).toEqual(
+        new Date(SESSION_EXPIRES * 1000),
+      );
     });
   });
 
@@ -261,10 +336,11 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
     });
 
     it('accepts exactly the Thai minimum and maximum', async () => {
-      const { adapter, create } = harness();
+      // A card, so the hosted session is what gets opened.
+      const { adapter, session } = harness();
       await adapter.start(input({ amountSatang: 1_000 }));
       await adapter.start(input({ amountSatang: 99_999_999 }));
-      expect(create).toHaveBeenCalledTimes(2);
+      expect(session).toHaveBeenCalledTimes(2);
     });
 
     it('refuses a currency the method cannot settle in', async () => {

@@ -91,13 +91,86 @@ export class StripePaymentAdapter extends PaymentProviderPort {
       });
   }
 
+  /**
+   * Open a hosted Checkout Session and hand back its URL (US-DISC-05).
+   *
+   * A Session rather than a bare PaymentIntent, because the payment page is
+   * then Stripe's own: the browser needs no publishable key, no account id and
+   * no SDK, which is what keeps a multi-tenant product simple — each workspace
+   * charges on its own connected account, and none of that reaches the client.
+   *
+   * In `payment` mode the Session creates its PaymentIntent immediately, so
+   * `payment_intent` is the reference stored as `gateway_ref`. That is
+   * deliberate: settlement still arrives as `payment_intent.succeeded` and
+   * refunds still take a `pi_…`, so neither had to change.
+   */
   async start(input: StartPaymentInput): Promise<StartedPayment> {
     assertChargeable(input);
-    const intent = await this.stripe.paymentIntents.create(
-      this.params(input),
+    // PromptPay stays a PaymentIntent: its QR renders in our own page, and
+    // sending somebody to a hosted page to look at a code they scan on their
+    // phone would be a worse journey, not a safer one. Only the card needs
+    // fields we must never host.
+    if (input.method === 'PromptPay') {
+      const intent = await this.stripe.paymentIntents.create(
+        this.params(input),
+        requestOptions(input),
+      );
+      return this.toStartedPayment(intent, input.method);
+    }
+    const session = await this.stripe.checkout.sessions.create(
+      this.sessionParams(input),
       requestOptions(input),
     );
-    return this.toStartedPayment(intent, input.method);
+    return {
+      gatewayRef: intentIdOf(session),
+      // Nothing is owed-and-settled at this point: the buyer has not opened the
+      // page yet, let alone paid. Only the webhook says otherwise.
+      status: 'requires_action',
+      checkoutUrl: session.url,
+      clientSecret: null,
+      promptPayQr: null,
+      expiresAt: session.expires_at
+        ? new Date(session.expires_at * 1000)
+        : null,
+      declineReason: null,
+    };
+  }
+
+  private sessionParams(
+    input: StartPaymentInput,
+  ): Stripe.Checkout.SessionCreateParams {
+    const metadata = {
+      order_id: input.orderId,
+      org_id: String(input.organizationId),
+    };
+    const suffix = statementDescriptorSuffix(input.statementDescriptor);
+    return {
+      mode: 'payment',
+      payment_method_types: ['card'],
+      customer_email: input.buyerEmail,
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: input.currency.toLowerCase(),
+            unit_amount: input.amountSatang,
+            product_data: { name: input.description },
+          },
+        },
+      ],
+      // Both land on the order page. Cancelling is not failing — the order is
+      // still there, still unpaid, and still payable.
+      success_url: input.returnUrl,
+      cancel_url: input.returnUrl,
+      metadata,
+      payment_intent_data: {
+        metadata,
+        receipt_email: input.buyerEmail,
+        // A SUFFIX, and Latin-only — the same rule the intent path follows,
+        // because cards reject the full form and reject Thai script outright.
+        ...(suffix ? { statement_descriptor_suffix: suffix } : {}),
+      },
+    };
   }
 
   /**
@@ -193,6 +266,9 @@ export class StripePaymentAdapter extends PaymentProviderPort {
     return {
       gatewayRef: intent.id,
       status: toStartedStatus(intent),
+      // This path answers a PaymentIntent, not a hosted Session; `start` is
+      // the one that opens a page.
+      checkoutUrl: null,
       clientSecret: method === 'Card' ? intent.client_secret : null,
       promptPayQr: qr?.data ?? null,
       expiresAt: qr ? this.qrDeadline(intent) : null,
@@ -331,6 +407,13 @@ function toVerifiedWebhook(event: Stripe.Event): VerifiedWebhook {
     default:
       return IGNORED;
   }
+}
+
+/** The Session's PaymentIntent id — a string once expanded, an object if not. */
+function intentIdOf(session: Stripe.Checkout.Session): string {
+  const intent = session.payment_intent;
+  if (typeof intent === 'string') return intent;
+  return intent?.id ?? session.id;
 }
 
 function intentOf(event: Stripe.Event): Stripe.PaymentIntent {

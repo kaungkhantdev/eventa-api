@@ -324,6 +324,22 @@ export class CheckoutRepository {
     };
   }
 
+  /**
+   * The name of the event an order is for, reached by the order's uuid alone.
+   *
+   * Same no-tenant read as `findOrderAnyTenant`, and for the same reason: an
+   * anonymous buyer paying for their order has no workspace.
+   */
+  async eventNameForOrder(orderId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ name: events.name })
+      .from(orders)
+      .innerJoin(events, eq(events.id, orders.eventId))
+      .where(eq(orders.id, orderId))
+      .limit(1);
+    return row?.name ?? null;
+  }
+
   /** A tenant-scoped order read (settlement pre-flight). */
   async orderById(
     organizationId: number,

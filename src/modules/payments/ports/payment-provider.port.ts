@@ -18,20 +18,44 @@ export interface StartPaymentInput {
   statementDescriptor: string | null;
   /** The workspace's connected account at the provider; null = platform account. */
   accountId: string | null;
+  /**
+   * What the buyer is paying for, shown on the provider's own page.
+   *
+   * The event's name rather than an order reference: somebody deciding whether
+   * to type a card number needs to recognise what they are buying, and
+   * "ORD-27VEEC7Y" tells them nothing.
+   */
+  description: string;
   /** Exactly-once at the provider, not just here — a retry must not double-charge. */
   idempotencyKey: string;
+  /**
+   * Where the provider returns the buyer once its hosted page is done.
+   *
+   * Built by the caller from `PUBLIC_WEB_URL`, because the adapter has no
+   * notion of the web origin — the same reason `verifyUrl` and `ticketsUrl`
+   * are built there. Landing on it means the buyer finished at the provider,
+   * NOT that the money moved; only the webhook settles.
+   */
+  returnUrl: string;
 }
 
 /**
- * The provider's answer. `clientSecret` and `promptPayQr` are the only things
- * that reach the browser, and neither is card data: one authorises the provider's
- * OWN hosted fields, the other is a bank-scannable payload for an amount.
+ * The provider's answer. Nothing here is card data — and with a hosted
+ * checkout, nothing here even touches a payment form: `checkoutUrl` is a page
+ * on the provider's own domain. That is what keeps this app in PCI SAQ-A and
+ * keeps the browser free of any provider key, which matters most for a
+ * multi-tenant product where each workspace charges on its own account.
  */
 export interface StartedPayment {
   /** The provider's reference (e.g. Stripe `pi_…`), stored as `gateway_ref`. */
   gatewayRef: string;
   status: 'requires_action' | 'succeeded' | 'failed';
-  /** Card only — hands off to the provider's hosted fields. */
+  /**
+   * The provider's own hosted payment page. The browser is sent here and comes
+   * back to `returnUrl`; it never learns a key, an account id, or an SDK.
+   */
+  checkoutUrl: string | null;
+  /** Card only — the key to the provider's hosted FIELDS, when embedded. */
   clientSecret: string | null;
   /** PromptPay only — the payload a Thai banking app scans. */
   promptPayQr: string | null;

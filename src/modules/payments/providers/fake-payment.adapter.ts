@@ -64,7 +64,7 @@ export class FakePaymentAdapter extends PaymentProviderPort {
     return Promise.resolve(
       input.method === 'PromptPay'
         ? this.promptPay(gatewayRef, input)
-        : card(gatewayRef),
+        : card(gatewayRef, input.returnUrl),
     );
   }
 
@@ -121,6 +121,8 @@ export class FakePaymentAdapter extends PaymentProviderPort {
     return {
       gatewayRef,
       status: 'requires_action',
+      // PromptPay is a QR scanned in a banking app — no page to send anyone to.
+      checkoutUrl: null,
       clientSecret: null,
       // Shaped like an EMVCo payload so a client renders it the same as the real one.
       promptPayQr: `00020101021229370016A00000067701011101130066${input.amountSatang}`,
@@ -132,10 +134,19 @@ export class FakePaymentAdapter extends PaymentProviderPort {
   }
 }
 
-function card(gatewayRef: string): StartedPayment {
+/**
+ * A stand-in for the provider's hosted page.
+ *
+ * It points straight back at where the real one would return the buyer, so the
+ * whole redirect round trip is exercised in dev and in the suite without a
+ * Stripe account. It settles nothing — the webhook still has to arrive, exactly
+ * as in production.
+ */
+function card(gatewayRef: string, returnUrl: string): StartedPayment {
   return {
     gatewayRef,
     status: 'requires_action',
+    checkoutUrl: returnUrl,
     // Authorises the provider's hosted fields; it is not, and cannot be, a card.
     clientSecret: `${gatewayRef}_secret`,
     promptPayQr: null,
@@ -148,6 +159,7 @@ function declined(gatewayRef: string): StartedPayment {
   return {
     gatewayRef,
     status: 'failed',
+    checkoutUrl: null,
     clientSecret: null,
     promptPayQr: null,
     expiresAt: null,

@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { DomainException } from '../../common/errors/domain.exception';
 import { formatBaht } from '../../common/money/baht';
 import { Clock } from '../../common/time/clock';
+import { ticketsUrlFor } from '../checkout/ticket-links';
 import type { Env } from '../../config/env.validation';
 import type { PayOrderDto } from './dto/pay-order.dto';
 import type { PaymentIntentDto } from './dto/payment-intent.dto';
@@ -37,6 +38,7 @@ export interface WebhookAck {
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
   private readonly providerName: string;
+  private readonly publicWebUrl: string;
 
   constructor(
     private readonly repo: PaymentsRepository,
@@ -46,6 +48,7 @@ export class PaymentsService {
     config: ConfigService<Env, true>,
   ) {
     this.providerName = config.getOrThrow('PAYMENT_PROVIDER', { infer: true });
+    this.publicWebUrl = config.getOrThrow('PUBLIC_WEB_URL', { infer: true });
   }
 
   /** Start collecting. Safe to replay — the idempotency key finds its own attempt. */
@@ -62,6 +65,10 @@ export class PaymentsService {
         order.organizationId,
       ),
       accountId: null,
+      description: order.eventName,
+      // Where the provider sends the buyer back: their own copy of the order,
+      // which reads correctly whether or not the money has landed yet.
+      returnUrl: ticketsUrlFor(this.publicWebUrl, order.id),
       idempotencyKey: input.idempotencyKey,
     });
     const payment = await this.repo.upsertAttempt({
@@ -249,6 +256,7 @@ export class PaymentsService {
       amountSatang: order.totalSatang,
       amountLabel: formatBaht(order.totalSatang),
       clientSecret: started.clientSecret,
+      checkoutUrl: started.checkoutUrl,
       promptPayQr: started.promptPayQr,
       expiresAt: started.expiresAt?.toISOString() ?? null,
       declineReason: started.declineReason,
