@@ -13,7 +13,7 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "dev": "nest start --watch",
-    "relay": "tsx watch src/relay.ts",
+    "relay": "nest start --watch --entryFile relay",
     "start:relay": "node dist/relay",
     "generate": "drizzle-kit generate",
     "migrate": "drizzle-kit migrate",
