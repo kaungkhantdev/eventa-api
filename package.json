@@ -13,8 +13,6 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "dev": "nest start --watch",
-    "relay": "nest start --watch --entryFile relay",
-    "start:relay": "node dist/relay",
     "generate": "drizzle-kit generate",
     "migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",

@@ -19,10 +19,10 @@ export const envSchema = z
     REDIS_URL: z.string().min(1).optional(),
     RABBITMQ_URL: z.string().min(1).optional(),
 
-    // Outbox relay (separate entrypoint)
+    // The exchange the outbox's routing keys are published to. This service
+    // never publishes — eventa-relay does — but the name is part of the
+    // contract, so it stays declared where the events are produced.
     RABBITMQ_EXCHANGE: z.string().default('eventa.events'),
-    OUTBOX_POLL_MS: z.coerce.number().int().positive().default(1000),
-    OUTBOX_BATCH: z.coerce.number().int().positive().default(100),
 
     // Auth (JWT — access + refresh)
     JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
