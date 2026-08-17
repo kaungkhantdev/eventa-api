@@ -17,7 +17,6 @@ import { RefundsService } from './refunds.service';
 import { PaymentsRepository } from './payments.repository';
 import { PaymentsService } from './payments.service';
 import { PaymentProviderPort } from './ports/payment-provider.port';
-import { FakePaymentAdapter } from './providers/fake-payment.adapter';
 import { StripePaymentAdapter } from './providers/stripe-payment.adapter';
 import { RevenueInsightsPort } from '../dashboard/ports/revenue-insights.port';
 import { RevenueInsightsAdapter } from './revenue-insights.adapter';
@@ -29,9 +28,10 @@ import { RevenueInsightsAdapter } from './revenue-insights.adapter';
  * the Payments-owned `OrderPaymentPort`, which Checkout binds.
  *
  * The provider sits behind `PaymentProviderPort` — the PCI SAQ-A boundary; see
- * the port's docstring. Selection is by `PAYMENT_PROVIDER`, defaulting to the
- * fake so nothing charges a card by accident; `stripe` needs both Stripe
- * secrets, which the env schema enforces at boot rather than at the till.
+ * the port's docstring. There is one implementation and it is the real one:
+ * a stand-in that can mint a "paid" order does not belong in the shipped app,
+ * so the test suite supplies its own. Both Stripe secrets are required at
+ * boot rather than discovered at the till.
  */
 @Module({
   imports: [AccessModule, CheckoutModule],
@@ -44,14 +44,11 @@ import { RevenueInsightsAdapter } from './revenue-insights.adapter';
     PaymentsRepository,
     {
       provide: PaymentProviderPort,
-      useFactory: (clock: Clock, config: ConfigService<Env, true>) => {
-        const provider = config.getOrThrow('PAYMENT_PROVIDER', {
-          infer: true,
-        });
-        return provider === 'stripe'
-          ? new StripePaymentAdapter(clock, config)
-          : new FakePaymentAdapter(clock, config);
-      },
+      // A factory, not `useClass`: the adapter takes an optional Stripe client
+      // as a third argument so a test can pass its own, and Nest would try to
+      // resolve that as a dependency.
+      useFactory: (clock: Clock, config: ConfigService<Env, true>) =>
+        new StripePaymentAdapter(clock, config),
       inject: [Clock, ConfigService],
     },
     { provide: InvoicePaymentPort, useClass: InvoicePaymentAdapter },

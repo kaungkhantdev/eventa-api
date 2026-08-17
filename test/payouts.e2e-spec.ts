@@ -9,6 +9,8 @@ import { hash } from '@node-rs/argon2';
 import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { PaymentProviderPort } from '../src/modules/payments/ports/payment-provider.port';
+import { StubPaymentProvider } from './support/stub-payment.provider';
 import { buildValidationPipe } from '../src/common/http/validation';
 
 const PASSWORD = 'correct horse battery staple';
@@ -69,7 +71,12 @@ describe('Payouts (e2e — US-FIN-03/04/05)', () => {
 
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      // Payouts reach the provider too — a retry and the dashboard link. The
+      // suite must not touch Stripe's network, so it supplies its own stand-in.
+      .overrideProvider(PaymentProviderPort)
+      .useClass(StubPaymentProvider)
+      .compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());

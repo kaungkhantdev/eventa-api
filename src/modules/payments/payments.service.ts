@@ -37,7 +37,8 @@ export interface WebhookAck {
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
-  private readonly providerName: string;
+  /** Stamped on every webhook row, so the ledger says who reported it. */
+  private static readonly PROVIDER_NAME = 'stripe';
   private readonly publicWebUrl: string;
 
   constructor(
@@ -47,7 +48,6 @@ export class PaymentsService {
     private readonly clock: Clock,
     config: ConfigService<Env, true>,
   ) {
-    this.providerName = config.getOrThrow('PAYMENT_PROVIDER', { infer: true });
     this.publicWebUrl = config.getOrThrow('PUBLIC_WEB_URL', { infer: true });
   }
 
@@ -100,7 +100,10 @@ export class PaymentsService {
   async handleWebhook(rawBody: Buffer, signature: string): Promise<WebhookAck> {
     const verified = this.provider.verifyWebhook(rawBody, signature);
     if (verified.type === 'ignored') return { received: true };
-    const fresh = await this.repo.recordWebhook(this.providerName, verified);
+    const fresh = await this.repo.recordWebhook(
+      PaymentsService.PROVIDER_NAME,
+      verified,
+    );
     if (!fresh) return { received: true };
 
     const payment = await this.repo.findByGatewayRef(verified.gatewayRef);
@@ -113,7 +116,13 @@ export class PaymentsService {
       await this.repo.markWebhookProcessed(verified.eventId, null, 'processed');
       return { received: true };
     }
-    await this.dispatch(verified, payment);
+    // A hosted checkout settles under the SESSION id, because that is all that
+    // existed when the payment was started. Move the row onto the intent the
+    // session finally created — it is what a refund takes.
+    const settled = verified.settledRef
+      ? await this.reconcileGatewayRef(payment, verified.settledRef)
+      : payment;
+    await this.dispatch(verified, settled);
     return { received: true };
   }
 

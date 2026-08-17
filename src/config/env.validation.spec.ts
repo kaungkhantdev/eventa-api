@@ -4,6 +4,11 @@ describe('validateEnv', () => {
   const base = {
     DATABASE_URL: 'postgres://u:p@localhost:5432/db',
     JWT_SECRET: 'a-sufficiently-long-test-secret',
+    // Required now: card payment runs through Stripe and only Stripe, so the
+    // app refuses to boot without the keys rather than discovering they are
+    // missing at the till.
+    STRIPE_SECRET_KEY: 'sk_test_dummy',
+    STRIPE_WEBHOOK_SECRET: 'whsec_test_dummy',
   };
 
   it('rejects an env missing DATABASE_URL', () => {
@@ -49,41 +54,19 @@ describe('validateEnv', () => {
   });
 
   describe('payments (US-DISC-05)', () => {
-    it('defaults to the fake provider, so nothing charges a card by accident', () => {
-      const env = validateEnv(base);
-      expect(env.PAYMENT_PROVIDER).toBe('fake');
-      expect(env.PROMPTPAY_EXPIRY_SECONDS).toBe(900);
+    it('applies the PromptPay default', () => {
+      expect(validateEnv(base).PROMPTPAY_EXPIRY_SECONDS).toBe(900);
     });
 
-    it('refuses to boot on the real provider with no secret key', () => {
-      expect(() =>
-        validateEnv({
-          ...base,
-          PAYMENT_PROVIDER: 'stripe',
-          STRIPE_WEBHOOK_SECRET: 'whsec_test',
-        }),
-      ).toThrow(/STRIPE_SECRET_KEY/);
+    it('refuses to boot with no secret key', () => {
+      const withoutKey = { ...base, STRIPE_SECRET_KEY: undefined };
+      expect(() => validateEnv(withoutKey)).toThrow(/STRIPE_SECRET_KEY/);
     });
 
-    it('refuses to boot on the real provider with no webhook secret', () => {
+    it('refuses to boot with no webhook secret', () => {
       // Without it every webhook would have to be trusted unverified.
-      expect(() =>
-        validateEnv({
-          ...base,
-          PAYMENT_PROVIDER: 'stripe',
-          STRIPE_SECRET_KEY: 'sk_test',
-        }),
-      ).toThrow(/STRIPE_WEBHOOK_SECRET/);
-    });
-
-    it('accepts the real provider once both secrets are present', () => {
-      const env = validateEnv({
-        ...base,
-        PAYMENT_PROVIDER: 'stripe',
-        STRIPE_SECRET_KEY: 'sk_test',
-        STRIPE_WEBHOOK_SECRET: 'whsec_test',
-      });
-      expect(env.PAYMENT_PROVIDER).toBe('stripe');
+      const withoutSecret = { ...base, STRIPE_WEBHOOK_SECRET: undefined };
+      expect(() => validateEnv(withoutSecret)).toThrow(/STRIPE_WEBHOOK_SECRET/);
     });
 
     it('coerces the PromptPay window from a string', () => {
@@ -137,34 +120,12 @@ describe('validateEnv', () => {
     });
   });
 
-  describe('production refuses the fake provider', () => {
-    it('will not boot in production on the fake provider', () => {
-      // The fake signs webhooks with a constant; in production that is a public
-      // HMAC key, and anyone who knows it can POST themselves free tickets.
-      expect(() => validateEnv({ ...base, NODE_ENV: 'production' })).toThrow(
-        /PAYMENT_PROVIDER/,
-      );
-    });
-
-    it('boots in production on the real provider', () => {
-      const env = validateEnv({
-        ...base,
-        NODE_ENV: 'production',
-        PAYMENT_PROVIDER: 'stripe',
-        STRIPE_SECRET_KEY: 'sk_live_realmoney',
-        STRIPE_WEBHOOK_SECRET: 'whsec_live',
-      });
-      expect(env.PAYMENT_PROVIDER).toBe('stripe');
-    });
-  });
-
   describe('Stripe key mode (US-DISC-05)', () => {
     it('refuses a LIVE secret key outside production — a test run must not charge anyone', () => {
       expect(() =>
         validateEnv({
           ...base,
           NODE_ENV: 'development',
-          PAYMENT_PROVIDER: 'stripe',
           STRIPE_SECRET_KEY: 'sk_live_realmoney',
           STRIPE_WEBHOOK_SECRET: 'whsec_test',
         }),
@@ -176,7 +137,6 @@ describe('validateEnv', () => {
         validateEnv({
           ...base,
           NODE_ENV: 'development',
-          PAYMENT_PROVIDER: 'stripe',
           STRIPE_SECRET_KEY: 'rk_live_restricted',
           STRIPE_WEBHOOK_SECRET: 'whsec_test',
         }),
@@ -187,14 +147,13 @@ describe('validateEnv', () => {
       const env = validateEnv({
         ...base,
         NODE_ENV: 'production',
-        PAYMENT_PROVIDER: 'stripe',
         STRIPE_SECRET_KEY: 'sk_live_realmoney',
         STRIPE_WEBHOOK_SECRET: 'whsec_live',
       });
       expect(env.STRIPE_SECRET_KEY).toBe('sk_live_realmoney');
     });
 
-    it('refuses a live key even on the fake provider — it must not be lying around', () => {
+    it('refuses a live key outside production — it must not be lying around', () => {
       // Inert today, but one PAYMENT_PROVIDER=stripe away from charging real
       // cards from a developer's machine. Refuse the key, not just its use.
       expect(() =>
@@ -210,11 +169,9 @@ describe('validateEnv', () => {
       const env = validateEnv({
         ...base,
         NODE_ENV: 'test',
-        PAYMENT_PROVIDER: 'stripe',
         STRIPE_SECRET_KEY: 'sk_test_abc123',
-        STRIPE_WEBHOOK_SECRET: 'whsec_test',
       });
-      expect(env.PAYMENT_PROVIDER).toBe('stripe');
+      expect(env.STRIPE_SECRET_KEY).toBe('sk_test_abc123');
     });
   });
 });

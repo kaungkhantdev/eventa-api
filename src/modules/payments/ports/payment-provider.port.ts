@@ -110,6 +110,16 @@ export interface VerifiedWebhook {
   eventId: string;
   type: 'succeeded' | 'failed' | 'expired' | 'ignored';
   gatewayRef: string;
+  /**
+   * The reference the provider settled under, when it differs from the one we
+   * stored.
+   *
+   * A hosted Checkout Session has no PaymentIntent when it is created, so the
+   * reference kept at `start` is the SESSION id. The intent only exists once
+   * the buyer has paid, and it is what a refund needs — so settlement carries
+   * it out and the stored reference is reconciled onto it.
+   */
+  settledRef?: string | null;
   amountSatang: number;
   declineReason: string | null;
 }
@@ -125,8 +135,6 @@ export interface VerifiedWebhook {
  * out of SAQ-A scope.
  *
  * Two implementations: `StripePaymentAdapter` for real money, and
- * `FakePaymentAdapter` for tests and local development. The provider is chosen by
- * `PAYMENT_PROVIDER`, which defaults to `fake` so nothing charges a card by
  * accident.
  */
 export abstract class PaymentProviderPort {

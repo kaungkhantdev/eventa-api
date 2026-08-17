@@ -10,6 +10,8 @@ import { hash } from '@node-rs/argon2';
 import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { PaymentProviderPort } from '../src/modules/payments/ports/payment-provider.port';
+import { StubPaymentProvider } from './support/stub-payment.provider';
 import { buildValidationPipe } from '../src/common/http/validation';
 
 const PASSWORD = 'correct horse battery staple';
@@ -55,7 +57,13 @@ describe('Payment history (e2e — US-DISC-10)', () => {
 
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      // The shipped app has ONE payment provider and it is the real Stripe
+      // adapter. The suite must not reach Stripe's network, so it supplies its
+      // own stand-in here — in the test layer, where a double belongs.
+      .overrideProvider(PaymentProviderPort)
+      .useClass(StubPaymentProvider)
+      .compile();
     app = moduleRef.createNestApplication({ rawBody: true });
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());

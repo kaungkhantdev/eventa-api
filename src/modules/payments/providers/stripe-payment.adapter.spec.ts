@@ -117,6 +117,26 @@ function paymentIntentEvent(
   };
 }
 
+function checkoutSessionEvent(
+  session: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: 'evt_cs_1',
+    object: 'event',
+    type: 'checkout.session.completed',
+    data: {
+      object: {
+        id: 'cs_test_123',
+        object: 'checkout.session',
+        payment_status: 'paid',
+        amount_total: 210_000,
+        payment_intent: 'pi_123',
+        ...session,
+      },
+    },
+  };
+}
+
 describe('StripePaymentAdapter (US-DISC-05)', () => {
   /**
    * Card runs through a HOSTED Checkout Session, not a bare intent: the page
@@ -349,6 +369,71 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
         adapter.start(input({ method: 'PromptPay', currency: 'USD' })),
       ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
       expect(create).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * A hosted Session settles as `checkout.session.completed`.
+   *
+   * This is the event that MATTERS for a Checkout payment: `payment_intent`
+   * is null when the session is created, so the reference stored at `start` is
+   * the SESSION id — and `payment_intent.succeeded` carries a `pi_…` that
+   * matches nothing. Settling on the session is what closes that gap.
+   */
+  describe('verifyWebhook — hosted checkout', () => {
+    it('settles a completed session against the reference we stored', () => {
+      const { adapter } = harness();
+      const { raw, signature } = signed(checkoutSessionEvent());
+      expect(adapter.verifyWebhook(raw, signature)).toMatchObject({
+        eventId: 'evt_cs_1',
+        type: 'succeeded',
+        gatewayRef: 'cs_test_123',
+        amountSatang: 210_000,
+      });
+    });
+
+    /**
+     * The intent id arrives with the completed session, and it is what a
+     * refund needs later — so it is carried out for the service to reconcile
+     * the stored reference onto.
+     */
+    it('carries the PaymentIntent the session finally created', () => {
+      const { adapter } = harness();
+      const { raw, signature } = signed(checkoutSessionEvent());
+      expect(adapter.verifyWebhook(raw, signature).settledRef).toBe('pi_123');
+    });
+
+    it('reads the intent when Stripe expands it into an object', () => {
+      const { adapter } = harness();
+      const { raw, signature } = signed(
+        checkoutSessionEvent({ payment_intent: { id: 'pi_456' } }),
+      );
+      expect(adapter.verifyWebhook(raw, signature).settledRef).toBe('pi_456');
+    });
+
+    // A session can complete while the money is still in flight — an async
+    // method, or a delayed capture. Only `paid` is settled.
+    it('ignores a session that completed without being paid', () => {
+      const { adapter } = harness();
+      const { raw, signature } = signed(
+        checkoutSessionEvent({ payment_status: 'unpaid' }),
+      );
+      expect(adapter.verifyWebhook(raw, signature).type).toBe('ignored');
+    });
+
+    // The session lapsed before anybody paid: the hold should go back.
+    it('expires a session the buyer abandoned', () => {
+      const { adapter } = harness();
+      const { raw, signature } = signed({
+        id: 'evt_cs_2',
+        object: 'event',
+        type: 'checkout.session.expired',
+        data: { object: { id: 'cs_test_123', object: 'checkout.session' } },
+      });
+      expect(adapter.verifyWebhook(raw, signature)).toMatchObject({
+        type: 'expired',
+        gatewayRef: 'cs_test_123',
+      });
     });
   });
 

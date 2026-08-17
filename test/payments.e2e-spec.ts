@@ -9,6 +9,8 @@ import { Test } from '@nestjs/testing';
 import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { PaymentProviderPort } from '../src/modules/payments/ports/payment-provider.port';
+import { StubPaymentProvider } from './support/stub-payment.provider';
 import { buildValidationPipe } from '../src/common/http/validation';
 
 const ORG = { slug: 'pay-e2e', name: 'Pay E2E' };
@@ -29,6 +31,7 @@ interface Placed {
   tickets: unknown[];
 }
 interface Intent {
+  checkoutUrl: string | null;
   paymentId: string;
   orderId: string;
   status: string;
@@ -56,7 +59,13 @@ describe('Paying for an order (e2e — US-DISC-05)', () => {
 
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      // The shipped app has ONE payment provider and it is the real Stripe
+      // adapter. The suite must not reach Stripe's network, so it supplies its
+      // own stand-in here — in the test layer, where a double belongs.
+      .overrideProvider(PaymentProviderPort)
+      .useClass(StubPaymentProvider)
+      .compile();
     // rawBody: the webhook signature covers the exact bytes sent.
     app = moduleRef.createNestApplication({ rawBody: true });
     app.setGlobalPrefix('api/v1');
@@ -178,14 +187,16 @@ describe('Paying for an order (e2e — US-DISC-05)', () => {
   };
 
   describe('starting a payment', () => {
-    it('charges the order’s total and hands back the card hand-off', async () => {
+    // Card is paid on the provider's OWN page, so what comes back is where to
+    // send the buyer — not a field for this app to render.
+    it('charges the order’s total and hands back the hosted page', async () => {
       const orderId = await placeOrder();
       const res = await pay(orderId);
       expect(res.status).toBe(201);
       const intent = (res.body as Success<Intent>).data;
       expect(intent.amountSatang).toBe(ORDER_TOTAL);
       expect(intent.amountLabel).toBe('฿2,100');
-      expect(intent.clientSecret).toBeTruthy();
+      expect(intent.checkoutUrl).toBeTruthy();
       expect(intent.promptPayQr).toBeNull();
       expect(intent.status).toBe('pending');
     });

@@ -1,9 +1,9 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DomainException } from '../../../common/errors/domain.exception';
-import { Clock } from '../../../common/time/clock';
-import type { Env } from '../../../config/env.validation';
+import { DomainException } from '../../src/common/errors/domain.exception';
+import { Clock } from '../../src/common/time/clock';
+import type { Env } from '../../src/config/env.validation';
 import {
   PaymentProviderPort,
   type StartPaymentInput,
@@ -13,7 +13,7 @@ import {
   type RetryPayoutInput,
   type StartedPayment,
   type VerifiedWebhook,
-} from '../ports/payment-provider.port';
+} from '../../src/modules/payments/ports/payment-provider.port';
 
 const MS_PER_SECOND = 1000;
 const SIGNATURE_ALGORITHM = 'sha256';
@@ -29,7 +29,14 @@ const DECLINE_PREFIX = 'decline';
 const DECLINE_REASON = 'Your card was declined. Please try another card.';
 
 /**
- * The in-process payment provider used by tests and local development
+ * A TEST-ONLY stand-in for the payment provider.
+ *
+ * It lives here rather than in `src/` on purpose: a double that can mint a
+ * "paid" order has no business in the shipped app, and keeping it beside the
+ * suite means production has exactly one provider — the real one. Suites opt
+ * in with `.overrideProvider(PaymentProviderPort).useClass(StubPaymentProvider)`.
+ *
+ * The original in-process payment provider used by tests and local development
  * (`PAYMENT_PROVIDER=fake`, the default so nothing charges a card by accident).
  *
  * It is a genuine double, not a stub: references are stable for an idempotency
@@ -39,7 +46,7 @@ const DECLINE_REASON = 'Your card was declined. Please try another card.';
  * the real comparison rather than a method that always returns true.
  */
 @Injectable()
-export class FakePaymentAdapter extends PaymentProviderPort {
+export class StubPaymentProvider extends PaymentProviderPort {
   private readonly secret: string;
   private readonly promptPayTtlSeconds: number;
 
@@ -167,7 +174,7 @@ function declined(gatewayRef: string): StartedPayment {
   };
 }
 
-/** The fake's callback body — the same shape the Stripe adapter normalises to. */
+/** The stub's callback body — the same shape the Stripe adapter normalises to. */
 function parseEvent(rawBody: Buffer): VerifiedWebhook {
   const body = JSON.parse(rawBody.toString('utf8')) as Partial<VerifiedWebhook>;
   return {

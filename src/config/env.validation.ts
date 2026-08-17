@@ -64,14 +64,13 @@ export const envSchema = z
       .default('info'),
 
     // Payments (US-DISC-05). PCI SAQ-A: no card data ever reaches this service —
-    // the attendee enters it into the provider's own hosted fields, and we hold
-    // only references. `stripe` talks to the real provider; `fake` is the
-    // in-process double the test suite and local development run against.
-    PAYMENT_PROVIDER: z.enum(['stripe', 'fake']).default('fake'),
+    // Card payment runs through Stripe, and only Stripe. There is no in-process
+    // stand-in: a double that can mint a "paid" order has no business in the
+    // shipped app, so the suite supplies its own and this stays real.
     /** Platform secret key. Never logged, never returned — see the pino redact list. */
-    STRIPE_SECRET_KEY: z.string().min(1).optional(),
+    STRIPE_SECRET_KEY: z.string().min(1),
     /** Shared secret the webhook signature is verified against. */
-    STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
+    STRIPE_WEBHOOK_SECRET: z.string().min(1),
     /** How long a PromptPay QR stays scannable before the buyer must ask again. */
     PROMPTPAY_EXPIRY_SECONDS: z.coerce.number().int().positive().default(900), // 15m
 
@@ -103,38 +102,17 @@ export const envSchema = z
   })
   // Choosing the real provider without its keys would fail at the first charge,
   // in front of a buyer. Fail at boot instead.
-  .refine(
-    (env) =>
-      env.PAYMENT_PROVIDER !== 'stripe' ||
-      (!!env.STRIPE_SECRET_KEY && !!env.STRIPE_WEBHOOK_SECRET),
-    {
-      message:
-        'PAYMENT_PROVIDER=stripe requires STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET',
-      path: ['PAYMENT_PROVIDER'],
-    },
-  )
   // A live key outside production means a test run, a seed script or a local
   // experiment can charge a real card. Test-mode keys are the only ones that
   // belong anywhere but production.
   .refine(
     (env) =>
       env.NODE_ENV === 'production' ||
-      !LIVE_STRIPE_KEY.test(env.STRIPE_SECRET_KEY ?? ''),
+      !LIVE_STRIPE_KEY.test(env.STRIPE_SECRET_KEY),
     {
       message:
         'A live Stripe key (sk_live_/rk_live_) is only allowed when NODE_ENV=production — use a test-mode key from the Stripe dashboard.',
       path: ['STRIPE_SECRET_KEY'],
-    },
-  )
-  // The fake provider in production is the worst fail-open on the money path:
-  // it signs webhooks with a constant, so anyone who knows it can POST an order
-  // "paid" and collect real tickets. A dropped env var must not default into it.
-  .refine(
-    (env) => env.NODE_ENV !== 'production' || env.PAYMENT_PROVIDER === 'stripe',
-    {
-      message:
-        'PAYMENT_PROVIDER=fake cannot run in production — it would accept forged payment webhooks.',
-      path: ['PAYMENT_PROVIDER'],
     },
   )
   // A bucket that is not named cannot be written to; find out at boot, not at

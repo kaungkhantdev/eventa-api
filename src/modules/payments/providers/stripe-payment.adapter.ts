@@ -398,6 +398,19 @@ function toStartedStatus(
  */
 function toVerifiedWebhook(event: Stripe.Event): VerifiedWebhook {
   switch (event.type) {
+    // The settling event for a hosted checkout. `payment_intent.succeeded`
+    // also fires, but carries a `pi_…` that matches nothing: the reference
+    // stored at `start` is the session's, because the intent did not exist yet.
+    case 'checkout.session.completed':
+      return fromSession(event, sessionOf(event));
+    case 'checkout.session.expired':
+      return {
+        eventId: event.id,
+        type: 'expired',
+        gatewayRef: sessionOf(event).id,
+        amountSatang: 0,
+        declineReason: null,
+      };
     case 'payment_intent.succeeded':
       return settled(event, intentOf(event), 'succeeded');
     case 'payment_intent.payment_failed':
@@ -409,11 +422,44 @@ function toVerifiedWebhook(event: Stripe.Event): VerifiedWebhook {
   }
 }
 
-/** The Session's PaymentIntent id — a string once expanded, an object if not. */
+/**
+ * The Session's PaymentIntent id — a string, an expanded object, or absent.
+ *
+ * Absent is the NORMAL case at creation: Checkout does not mint the intent
+ * until the buyer pays. Falling back to the session id is what lets `start`
+ * store a reference at all, and `checkout.session.completed` is what later
+ * reconciles it onto the real `pi_…`.
+ */
 function intentIdOf(session: Stripe.Checkout.Session): string {
   const intent = session.payment_intent;
   if (typeof intent === 'string') return intent;
   return intent?.id ?? session.id;
+}
+
+function sessionOf(event: Stripe.Event): Stripe.Checkout.Session {
+  return event.data.object as Stripe.Checkout.Session;
+}
+
+/**
+ * A completed session, settled under the reference we actually stored.
+ *
+ * Only `paid` counts: a session can complete while the money is still in
+ * flight — an async method, or a delayed capture — and that is not settled.
+ */
+function fromSession(
+  event: Stripe.Event,
+  session: Stripe.Checkout.Session,
+): VerifiedWebhook {
+  if (session.payment_status !== 'paid') return IGNORED;
+  return {
+    eventId: event.id,
+    type: 'succeeded',
+    gatewayRef: session.id,
+    // What a refund will need; the stored reference is reconciled onto it.
+    settledRef: intentIdOf(session),
+    amountSatang: session.amount_total ?? 0,
+    declineReason: null,
+  };
 }
 
 function intentOf(event: Stripe.Event): Stripe.PaymentIntent {
