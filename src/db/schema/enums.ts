@@ -240,6 +240,13 @@ export const orderStatusEnum = pgEnum('order_status', [
    * registration can never be re-approved; the two must not be conflated.
    */
   'rejected',
+  /**
+   * The seat hold lapsed before the money arrived — nobody ever paid and the
+   * clock ran out. Distinct from `cancelled` (a decision somebody made) for the
+   * same reason `rejected` is: they read alike in a list and mean opposite
+   * things to whoever reconciles it.
+   */
+  'expired',
 ]);
 
 export const paymentStatusEnum = pgEnum('payment_status', [

@@ -80,4 +80,15 @@ export class GuestOrderDto {
 
   @ApiProperty({ format: 'date-time' })
   placedAt!: string;
+
+  @ApiProperty({
+    format: 'date-time',
+    nullable: true,
+    type: String,
+    description:
+      'When the seats stop being reserved — the deadline to pay. `null` once ' +
+      'no hold is live, which is either a settled order or one that already ' +
+      'ran out; `status` says which.',
+  })
+  holdExpiresAt!: string | null;
 }

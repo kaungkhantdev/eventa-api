@@ -178,6 +178,9 @@ export class CheckoutOrderService {
     const found = await this.repo.findGuestOrder(orderId);
     if (!found) throw DomainException.notFound(ORDER_NOT_FOUND);
     const { order, tickets, eventName, lines } = found;
+    // The buyer's actual deadline. Without it the page can only say "awaiting
+    // payment", which stays true and stops being useful the moment it lapses.
+    const holdExpiresAt = await this.repo.holdExpiryForOrder(order.id);
     return {
       orderId: order.id,
       reference: order.reference,
@@ -203,6 +206,7 @@ export class CheckoutOrderService {
       // when somebody comes looking for this page.
       paymentRequired: order.paymentStatus !== 'paid',
       placedAt: order.createdAt.toISOString(),
+      holdExpiresAt: holdExpiresAt?.toISOString() ?? null,
     };
   }
 

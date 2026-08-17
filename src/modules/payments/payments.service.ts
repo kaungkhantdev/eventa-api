@@ -241,6 +241,13 @@ export class PaymentsService {
     if (order.paymentStatus === 'paid') {
       throw DomainException.conflict('This order is already paid.');
     }
+    // Written for the person reading it: "expired" tells them what to do next
+    // (book again), where the generic line leaves them refreshing the page.
+    if (order.status === 'expired') {
+      throw DomainException.conflict(
+        'This order expired — the seats were released. Please book again.',
+      );
+    }
     if (order.status !== 'pending') {
       throw DomainException.conflict('This order can no longer be paid.');
     }

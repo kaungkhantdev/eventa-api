@@ -1,0 +1,11 @@
+-- An order whose seat hold lapsed before the money arrived.
+--
+-- Deliberately its own value rather than `cancelled`. Cancelled is a decision
+-- somebody made — the buyer withdrew, or a refund reversed the booking.
+-- Expired is the absence of one: nobody ever paid, and the clock ran out. The
+-- two read identically in a list and mean opposite things to whoever is
+-- reconciling it, so they must not be conflated.
+--
+-- Enum values are add-only; nothing below depends on this being present, so it
+-- is safe to apply ahead of the code that writes it.
+ALTER TYPE order_status ADD VALUE IF NOT EXISTS 'expired';
