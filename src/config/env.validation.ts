@@ -24,15 +24,6 @@ export const envSchema = z
     OUTBOX_POLL_MS: z.coerce.number().int().positive().default(1000),
     OUTBOX_BATCH: z.coerce.number().int().positive().default(100),
 
-    // Closing the orders nobody paid for (US-DISC-05). The sweep is idempotent
-    // — it selects by the data, holds no cursor — so every replica running it
-    // is harmless. A minute between sweeps is far below any deadline a buyer
-    // sees; the grace is the window a webhook still in flight needs to land
-    // before the sweep would call its order abandoned.
-    ORDER_EXPIRY_SWEEP_MS: z.coerce.number().int().positive().default(60_000),
-    ORDER_EXPIRY_GRACE_MS: z.coerce.number().int().positive().default(120_000),
-    ORDER_EXPIRY_BATCH: z.coerce.number().int().positive().default(200),
-
     // Auth (JWT — access + refresh)
     JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
     /** base64 of exactly 32 random bytes — AES-256-GCM key for recoverable secrets. */

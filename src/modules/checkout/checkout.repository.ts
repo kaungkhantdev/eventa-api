@@ -7,7 +7,6 @@ import {
   inArray,
   isNotNull,
   isNull,
-  lt,
   max,
   ne,
 } from 'drizzle-orm';
@@ -354,71 +353,6 @@ export class CheckoutRepository {
         and(eq(seatHolds.orderId, orderId), eq(seatHolds.status, ACTIVE_HOLD)),
       );
     return row?.expiresAt ?? null;
-  }
-
-  /**
-   * Close the orders whose hold lapsed and whose money never came (US-DISC-05).
-   *
-   * Only orders that HAVE a hold: the join is the proof that a deadline existed
-   * and passed. A pending order with no hold was never on the checkout clock —
-   * an organizer entered it by hand (US-REG-03) — and expiring it would delete
-   * somebody's work on a timer they never agreed to.
-   *
-   * `max(expires_at)` because every hold has to survive for the order to be
-   * honoured; the last one to die is the real deadline. The grace period is on
-   * top of that, so a webhook still in flight when the hold lapses settles the
-   * order before the sweep can touch it — and a buyer is never told their seats
-   * are gone while their money is arriving.
-   *
-   * Returns what it closed, so the caller can say so rather than guess.
-   */
-  async expireLapsedOrders(input: {
-    now: Date;
-    graceMs: number;
-    limit: number;
-  }): Promise<{ id: string; organizationId: number; reference: string }[]> {
-    const deadline = new Date(input.now.getTime() - input.graceMs);
-    return this.db.transaction(async (tx) => {
-      const lapsed = await tx
-        .select({
-          id: orders.id,
-          organizationId: orders.organizationId,
-          reference: orders.reference,
-        })
-        .from(orders)
-        .innerJoin(seatHolds, eq(seatHolds.orderId, orders.id))
-        .where(
-          and(
-            eq(orders.status, 'pending'),
-            eq(orders.paymentStatus, 'pending'),
-            isNull(orders.deletedAt),
-          ),
-        )
-        .groupBy(orders.id)
-        .having(lt(max(seatHolds.expiresAt), deadline))
-        .limit(input.limit);
-      if (lapsed.length === 0) return [];
-
-      const ids = lapsed.map((order) => order.id);
-      await tx
-        .update(orders)
-        .set({ status: 'expired', updatedAt: input.now })
-        .where(inArray(orders.id, ids));
-      // The holds go with them. They stopped reserving anything the moment they
-      // lapsed — availability filters on `expires_at` — but leaving them
-      // `active` means the table never stops growing and every count of live
-      // holds is a lie.
-      await tx
-        .update(seatHolds)
-        .set({ status: 'expired' })
-        .where(
-          and(
-            inArray(seatHolds.orderId, ids),
-            eq(seatHolds.status, ACTIVE_HOLD),
-          ),
-        );
-      return lapsed;
-    });
   }
 
   /**

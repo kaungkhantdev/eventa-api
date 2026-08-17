@@ -21,8 +21,6 @@ import { CheckoutPolicy } from './checkout.policy';
 import { CheckoutRepository } from './checkout.repository';
 import { CheckoutService } from './checkout.service';
 import { CheckoutViewService } from './checkout-view.service';
-import { OrderExpiryScheduler } from './order-expiry.scheduler';
-import { OrderExpiryService } from './order-expiry.service';
 
 /**
  * Checkout: the attendee's path from "Get tickets" to held inventory
@@ -57,8 +55,6 @@ import { OrderExpiryService } from './order-expiry.service';
     CheckoutOrderService,
     CheckoutRepository,
     CheckoutPolicy,
-    OrderExpiryService,
-    OrderExpiryScheduler,
     { provide: OrderPaymentPort, useClass: OrderPaymentAdapter },
     { provide: InvoiceOrderPort, useClass: InvoiceOrderAdapter },
     {
