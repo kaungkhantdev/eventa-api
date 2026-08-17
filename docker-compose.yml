@@ -44,5 +44,19 @@ services:
       timeout: 5s
       retries: 10
 
+  # A dev mail catcher: everything the worker sends lands here instead of the
+  # internet, and is read at http://localhost:8025. No account, no credentials,
+  # and no way to reach a real attendee from a developer's machine.
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - '1025:1025' # SMTP
+      - '8025:8025' # web inbox
+    healthcheck:
+      test: ['CMD', '/mailpit', 'readyz']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   pgdata:
