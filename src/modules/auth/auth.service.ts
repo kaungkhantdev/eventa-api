@@ -269,7 +269,7 @@ export class AuthService {
    */
   private async assertEligible(found: LoginUser): Promise<void> {
     if (found.user.status === 'Active') return;
-    if (found.user.status === 'Invited') {
+    if (found.user.status === 'Unconfirmed') {
       await this.signup.resendVerification({
         organizationId: found.org.id,
         userId: found.user.id,
@@ -279,6 +279,17 @@ export class AuthService {
       throw new DomainException(
         ErrorCode.EMAIL_NOT_CONFIRMED,
         'Please confirm your email — we’ve sent you a fresh link.',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    // Invited is a DIFFERENT event: an admin created this account and it is
+    // waiting on an invitation being accepted, not on an address being proven.
+    // No confirmation link is owed, and sending one would point at the wrong
+    // thing — the invite email holds the token that actually works.
+    if (found.user.status === 'Invited') {
+      throw new DomainException(
+        ErrorCode.EMAIL_NOT_CONFIRMED,
+        'Open the invitation we emailed you to finish setting up your account.',
         HttpStatus.FORBIDDEN,
       );
     }

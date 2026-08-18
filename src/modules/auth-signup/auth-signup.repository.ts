@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, isNull, like, sql } from 'drizzle-orm';
+import { PLATFORM_ORG_SLUG } from '../../common/tenancy/platform-org';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
   memberships,
@@ -15,10 +16,23 @@ import {
   OWNER_ROLE,
   PERMISSION_CATALOG,
 } from '../access/workspace-defaults';
+import type { Persona } from '../auth/auth.types';
 
 const ADMIN_PERSONA = 'admin';
-const PENDING_STATUS = 'Invited';
+const ATTENDEE_PERSONA = 'attendee';
+/**
+ * Signed up, email not yet proven — NOT `Invited`. Nobody invited someone who
+ * filled in the sign-up form themselves, and an organizer reading the members
+ * list should not be told otherwise.
+ */
+const PENDING_STATUS = 'Unconfirmed';
 const ACTIVE_STATUS = 'Active';
+
+export interface AttendeeAccountInput {
+  name: string;
+  email: string;
+  passwordHash: string;
+}
 
 export interface BootstrapInput {
   organizationName: string;
@@ -54,6 +68,67 @@ export class SignupRepository {
       )
       .limit(1);
     return row !== undefined;
+  }
+
+  /**
+   * Is this email already an ATTENDEE account? Persona-scoped like its organizer
+   * counterpart: `users` is unique on (organization_id, email, persona), so one
+   * person may hold both and neither blocks the other (US-DISC-08).
+   */
+  async attendeeEmailExists(email: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .where(
+        and(
+          eq(users.email, email),
+          eq(users.persona, ATTENDEE_PERSONA),
+          isNull(users.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
+  }
+
+  /**
+   * Create an attendee in the ONE platform organization (US-DISC-08).
+   *
+   * No organization, no roles, no membership — an attendee owns no workspace,
+   * and their tickets span every organizer on the platform. `Invited` until the
+   * emailed link is opened, exactly like an organizer.
+   *
+   * Null when the platform organization is missing: it is seeded by migration
+   * 0026, so its absence is a broken deployment for the caller to surface.
+   */
+  async createAttendeeAccount(
+    input: AttendeeAccountInput,
+  ): Promise<{ organizationId: number; userId: string } | null> {
+    const [org] = await this.db
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(
+        and(
+          eq(organizations.slug, PLATFORM_ORG_SLUG),
+          isNull(organizations.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!org) return null;
+
+    return withTenant(this.db, org.id, async (tx) => {
+      const [user] = await tx
+        .insert(users)
+        .values({
+          organizationId: org.id,
+          name: input.name,
+          email: input.email,
+          persona: ATTENDEE_PERSONA,
+          status: PENDING_STATUS,
+          passwordHash: input.passwordHash,
+        })
+        .returning({ id: users.id });
+      return { organizationId: org.id, userId: user.id };
+    });
   }
 
   /** First free workspace slug: `base`, then `base-2`, `base-3`, … (globally unique). */
@@ -116,14 +191,17 @@ export class SignupRepository {
   /**
    * Activate an account once its email link is opened. Idempotent: a second click
    * (already Active) still returns the workspace slug. Returns null if unknown.
+   *
+   * The persona comes back too: the two audiences sign in at different pages,
+   * and only an organizer's slug is ever typed into a workspace field.
    */
   async activateEmail(
     userId: string,
     organizationId: number,
-  ): Promise<{ orgSlug: string } | null> {
+  ): Promise<{ orgSlug: string; persona: Persona } | null> {
     return withTenant(this.db, organizationId, async (tx) => {
       const [user] = await tx
-        .select({ status: users.status })
+        .select({ status: users.status, persona: users.persona })
         .from(users)
         .where(
           and(
@@ -145,7 +223,7 @@ export class SignupRepository {
         .from(organizations)
         .where(eq(organizations.id, organizationId))
         .limit(1);
-      return org ? { orgSlug: org.slug } : null;
+      return org ? { orgSlug: org.slug, persona: user.persona } : null;
     });
   }
 

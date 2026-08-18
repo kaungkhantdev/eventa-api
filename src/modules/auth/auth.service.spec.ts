@@ -147,7 +147,7 @@ describe('AuthService', () => {
 
     it('refuses an unconfirmed account and re-sends a fresh confirmation email', async () => {
       users.findLoginUser.mockResolvedValue({
-        user: userRow({ status: 'Invited' }),
+        user: userRow({ status: 'Unconfirmed' }),
         org,
       });
       passwords.verify.mockResolvedValue(true);
@@ -155,6 +155,26 @@ describe('AuthService', () => {
         code: 'EMAIL_NOT_CONFIRMED',
       });
       expect(signup.resendVerification).toHaveBeenCalledTimes(1);
+      expect(repo.createSession).not.toHaveBeenCalled();
+    });
+
+    /**
+     * `Invited` and `Unconfirmed` both mean "cannot sign in yet" and are NOT
+     * the same event. An invited teammate never chose to sign up and has no
+     * confirmation link owed to them — they have an invitation to accept, and
+     * sending them a "confirm your email" message would point at the wrong
+     * thing entirely.
+     */
+    it('refuses an invited teammate WITHOUT sending a confirmation email', async () => {
+      users.findLoginUser.mockResolvedValue({
+        user: userRow({ status: 'Invited' }),
+        org,
+      });
+      passwords.verify.mockResolvedValue(true);
+      await expect(service.login(input)).rejects.toMatchObject({
+        code: 'EMAIL_NOT_CONFIRMED',
+      });
+      expect(signup.resendVerification).not.toHaveBeenCalled();
       expect(repo.createSession).not.toHaveBeenCalled();
     });
 

@@ -26,6 +26,7 @@ export class AuthSignupController {
       email: dto.email,
       password: dto.password,
       organizationName: dto.organizationName,
+      persona: dto.persona,
     });
   }
 

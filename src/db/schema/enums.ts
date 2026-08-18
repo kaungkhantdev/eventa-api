@@ -7,9 +7,20 @@ export const localeEnum = pgEnum('locale', ['en', 'th']);
 
 export const userPersonaEnum = pgEnum('user_persona', ['admin', 'attendee']);
 
+/**
+ * Used by BOTH `memberships.status` and `users.status`, which is why the two
+ * "not usable yet" values are distinct rather than one:
+ *
+ * - `Invited`     — somebody else created this account. On a membership it is
+ *                   the invite lifecycle; on a user it means an admin added
+ *                   them and they have not accepted.
+ * - `Unconfirmed` — they signed themselves up and the email is unproven. Only
+ *                   ever on a user; nobody invited them.
+ */
 export const memberStatusEnum = pgEnum('member_status', [
   'Active',
   'Invited',
+  'Unconfirmed',
   'Suspended',
 ]);
 
