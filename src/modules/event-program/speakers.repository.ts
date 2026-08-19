@@ -1,0 +1,224 @@
+import { Inject, Injectable } from '@nestjs/common';
+import {
+  and,
+  asc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  ne,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
+import { DRIZZLE, type Database } from '../../db/drizzle.constants';
+import { sessionSpeakers, sessions, speakers } from '../../db/schema';
+import { withTenant } from '../../db/tenant';
+import type {
+  NewSpeakerValues,
+  SpeakerFilters,
+  SpeakerRow,
+} from './speakers.types';
+
+/** Data access for speakers (Events & Program context). All queries tenant-scoped. */
+@Injectable()
+export class SpeakersRepository {
+  constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+
+  async insert(values: NewSpeakerValues): Promise<SpeakerRow> {
+    return withTenant(this.db, values.organizationId, async (tx) => {
+      const [row] = await tx.insert(speakers).values(values).returning();
+      return row;
+    });
+  }
+
+  /**
+   * How many LIVE sessions each of `speakerIds` is booked into (US-PROG-08).
+   * Soft-deleted sessions are excluded, which is what makes a removed session
+   * drop its speakers' counts by one (US-PROG-04) without touching any link
+   * row. Speakers with no sessions are simply absent from the map.
+   */
+  async sessionCounts(
+    organizationId: number,
+    speakerIds: string[],
+  ): Promise<Map<string, number>> {
+    if (speakerIds.length === 0) return new Map();
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({
+          speakerId: sessionSpeakers.speakerId,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(sessionSpeakers)
+        .innerJoin(sessions, eq(sessions.id, sessionSpeakers.sessionId))
+        .where(
+          and(
+            eq(sessions.organizationId, organizationId),
+            inArray(sessionSpeakers.speakerId, speakerIds),
+            isNull(sessions.deletedAt),
+          ),
+        )
+        .groupBy(sessionSpeakers.speakerId);
+      return new Map(rows.map((r) => [r.speakerId, Number(r.count)]));
+    });
+  }
+
+  /** The event's live speakers, ordered by name (card order). */
+  async listByEvent(
+    organizationId: number,
+    eventId: string,
+  ): Promise<SpeakerRow[]> {
+    const { items } = await this.page(organizationId, eventId, {
+      page: 1,
+      limit: Number.MAX_SAFE_INTEGER,
+    });
+    return items;
+  }
+
+  /**
+   * One page of the directory, narrowed by a free-text term across name, role
+   * and email (US-PROG-08). The total is the FILTERED total, so the count the
+   * console shows always describes the list beneath it.
+   */
+  async page(
+    organizationId: number,
+    eventId: string,
+    filters: SpeakerFilters,
+  ): Promise<{ items: SpeakerRow[]; total: number }> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const where = this.directoryWhere(organizationId, eventId, filters);
+      const [{ count }] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(speakers)
+        .where(where);
+      const items = await tx
+        .select()
+        .from(speakers)
+        .where(where)
+        .orderBy(asc(speakers.name), asc(speakers.id))
+        .limit(filters.limit)
+        .offset((filters.page - 1) * filters.limit);
+      return { items, total: count };
+    });
+  }
+
+  private directoryWhere(
+    organizationId: number,
+    eventId: string,
+    filters: SpeakerFilters,
+  ): SQL | undefined {
+    const clauses = [
+      eq(speakers.organizationId, organizationId),
+      eq(speakers.eventId, eventId),
+      isNull(speakers.deletedAt),
+    ];
+    if (filters.search) {
+      const term = `%${filters.search}%`;
+      clauses.push(
+        or(
+          ilike(speakers.name, term),
+          ilike(speakers.role, term),
+          // `email` is citext, so ilike would be redundant — but harmless, and
+          // it keeps all three branches reading the same way.
+          ilike(speakers.email, term),
+        ) as SQL,
+      );
+    }
+    return and(...clauses);
+  }
+
+  /**
+   * A live speaker on this event with the given email, ignoring `excludeId`
+   * (the row being edited). Case-insensitive because `email` is `citext`.
+   */
+  async findByEmail(
+    organizationId: number,
+    eventId: string,
+    email: string,
+    excludeId?: string,
+  ): Promise<SpeakerRow | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(speakers)
+        .where(
+          and(
+            eq(speakers.organizationId, organizationId),
+            eq(speakers.eventId, eventId),
+            eq(speakers.email, email),
+            isNull(speakers.deletedAt),
+            excludeId ? ne(speakers.id, excludeId) : undefined,
+          ),
+        )
+        .limit(1);
+      return row ?? null;
+    });
+  }
+
+  /** A single live speaker scoped to the org + event (null if absent). */
+  async findSpeaker(
+    organizationId: number,
+    eventId: string,
+    speakerId: string,
+  ): Promise<SpeakerRow | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(speakers)
+        .where(this.byId(organizationId, eventId, speakerId))
+        .limit(1);
+      return row ?? null;
+    });
+  }
+
+  /** Optimistic update: writes only when `version` still matches, bumping it. */
+  async update(
+    organizationId: number,
+    speakerId: string,
+    values: Partial<NewSpeakerValues>,
+    currentVersion: number,
+  ): Promise<SpeakerRow | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .update(speakers)
+        .set({ ...values, version: currentVersion + 1, updatedAt: new Date() })
+        .where(
+          and(
+            eq(speakers.id, speakerId),
+            eq(speakers.organizationId, organizationId),
+            eq(speakers.version, currentVersion),
+            isNull(speakers.deletedAt),
+          ),
+        )
+        .returning();
+      return row ?? null;
+    });
+  }
+
+  async softDelete(organizationId: number, speakerId: string): Promise<void> {
+    await withTenant(this.db, organizationId, async (tx) => {
+      await tx
+        .update(speakers)
+        .set({ deletedAt: new Date() })
+        .where(
+          and(
+            eq(speakers.id, speakerId),
+            eq(speakers.organizationId, organizationId),
+          ),
+        );
+    });
+  }
+
+  private byId(
+    organizationId: number,
+    eventId: string,
+    speakerId: string,
+  ): SQL {
+    return and(
+      eq(speakers.id, speakerId),
+      eq(speakers.organizationId, organizationId),
+      eq(speakers.eventId, eventId),
+      isNull(speakers.deletedAt),
+    ) as SQL;
+  }
+}

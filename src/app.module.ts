@@ -1,10 +1,124 @@
-import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
+import {
+  type MiddlewareConsumer,
+  Module,
+  type NestModule,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { LoggerModule } from 'nestjs-pino';
+import { CommonModule } from './common/common.module';
+import { CorrelationIdMiddleware } from './common/context/correlation-id.middleware';
+import { RedisModule } from './common/redis/redis.module';
+import { AppConfigModule } from './config/config.module';
+import type { Env } from './config/env.validation';
+import { buildLoggerOptions } from './config/logger.config';
+import { DatabaseModule } from './db/database.module';
+import { HealthModule } from './health/health.module';
+import { EventCategoriesModule } from './modules/event-categories/event-categories.module';
+import { EventDuplicationModule } from './modules/event-duplication/event-duplication.module';
+import { EventMonitoringModule } from './modules/event-monitoring/event-monitoring.module';
+import { EventPageModule } from './modules/event-page/event-page.module';
+import { EventPageContentModule } from './modules/event-page-content/event-page-content.module';
+import { DiscountsModule } from './modules/discounts/discounts.module';
+import { EventsModule } from './modules/events/events.module';
+import { NotificationPreferencesModule } from './modules/notification-preferences/notification-preferences.module';
+import { OrganizationModule } from './modules/organization/organization.module';
+import { ProfilePhotoModule } from './modules/profile-photo/profile-photo.module';
+import { PaymentSettingsModule } from './modules/payment-settings/payment-settings.module';
+import { EventProgramModule } from './modules/event-program/event-program.module';
+import { EventSeatingModule } from './modules/event-seating/event-seating.module';
+import { EventSharingModule } from './modules/event-sharing/event-sharing.module';
+import { AccessModule } from './modules/access/access.module';
+import { AccountDeletionModule } from './modules/account-deletion/account-deletion.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { AuthPasswordModule } from './modules/auth-password/auth-password.module';
+import { AttendeePaymentsModule } from './modules/attendee-payments/attendee-payments.module';
+import { AttendeeTicketsModule } from './modules/attendee-tickets/attendee-tickets.module';
+import { AuditModule } from './modules/audit/audit.module';
+import { AuthSessionsModule } from './modules/auth-sessions/auth-sessions.module';
+import { AuthTwoFactorModule } from './modules/auth-two-factor/auth-two-factor.module';
+import { AuthSignupModule } from './modules/auth-signup/auth-signup.module';
+import { AuthSocialModule } from './modules/auth-social/auth-social.module';
+import { UsersModule } from './modules/users/users.module';
+import { CheckoutModule } from './modules/checkout/checkout.module';
+import { CheckInModule } from './modules/check-in/check-in.module';
+import { InvoicesModule } from './modules/invoices/invoices.module';
+import { PaymentsModule } from './modules/payments/payments.module';
+import { PayoutsModule } from './modules/payouts/payouts.module';
+import { TaxPeriodsModule } from './modules/tax-periods/tax-periods.module';
+import { DiscoverModule } from './modules/discover/discover.module';
+import { SavedEventsModule } from './modules/saved-events/saved-events.module';
+import { PublicPagesModule } from './modules/public-pages/public-pages.module';
+import { RegistrationModule } from './modules/registration/registration.module';
+import { RegistrationStatsModule } from './modules/registration-stats/registration-stats.module';
+import { RegistrationsModule } from './modules/registrations/registrations.module';
+import { InvitationsModule } from './modules/invitations/invitations.module';
+import { AttendeeDirectoryModule } from './modules/attendee-directory/attendee-directory.module';
+import { TicketSharingModule } from './modules/ticket-sharing/ticket-sharing.module';
+import { TicketingModule } from './modules/ticketing/ticketing.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { MeetingsModule } from './modules/meetings/meetings.module';
 
 @Module({
-  imports: [],
-  controllers: [AppController],
-  providers: [AppService],
+  imports: [
+    MeetingsModule,
+    DashboardModule,
+    AppConfigModule,
+    LoggerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService<Env, true>) =>
+        buildLoggerOptions(config),
+    }),
+    DatabaseModule,
+    CommonModule,
+    RedisModule,
+    HealthModule,
+    AuthModule,
+    UsersModule,
+    AuthSignupModule,
+    AuthSocialModule,
+    AuthPasswordModule,
+    AuthSessionsModule,
+    AuthTwoFactorModule,
+    AuditModule,
+    AccessModule,
+    AccountDeletionModule,
+    ProfilePhotoModule,
+    OrganizationModule,
+    NotificationPreferencesModule,
+    PaymentSettingsModule,
+    EventsModule,
+    TicketingModule,
+    TicketSharingModule,
+    DiscountsModule,
+    EventCategoriesModule,
+    EventProgramModule,
+    EventSeatingModule,
+    EventDuplicationModule,
+    EventSharingModule,
+    EventMonitoringModule,
+    EventPageModule,
+    EventPageContentModule,
+    PublicPagesModule,
+    DiscoverModule,
+    SavedEventsModule,
+    AttendeeTicketsModule,
+    AttendeePaymentsModule,
+    RegistrationModule,
+    RegistrationStatsModule,
+    RegistrationsModule,
+    InvitationsModule,
+    AttendeeDirectoryModule,
+    CheckoutModule,
+    PaymentsModule,
+    InvoicesModule,
+    TaxPeriodsModule,
+    CheckInModule,
+    PayoutsModule,
+  ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    // Establish correlation id + request context for every request.
+    consumer.apply(CorrelationIdMiddleware).forRoutes('*');
+  }
+}

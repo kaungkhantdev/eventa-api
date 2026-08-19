@@ -1,0 +1,30 @@
+import { Injectable } from '@nestjs/common';
+import { TicketAvailabilityPort } from '../events/ports/ticket-availability.port';
+import { TicketingRepository } from './ticketing.repository';
+
+/** Ticketing's implementation of the Events-owned publish-gate ticket check. */
+@Injectable()
+export class TicketAvailabilityAdapter extends TicketAvailabilityPort {
+  constructor(private readonly repo: TicketingRepository) {
+    super();
+  }
+
+  activeCount(organizationId: number, eventId: string): Promise<number> {
+    return this.repo.countActive(organizationId, eventId);
+  }
+
+  totalQuantity(organizationId: number, eventId: string): Promise<number> {
+    return this.repo.sumQuantities(organizationId, eventId);
+  }
+
+  soldCount(organizationId: number, eventId: string): Promise<number> {
+    return this.repo.sumSold(organizationId, eventId);
+  }
+
+  salesByEvent(
+    organizationId: number,
+    eventIds: string[],
+  ): Promise<Map<string, { sold: number; quantity: number }>> {
+    return this.repo.salesByEvent(organizationId, eventIds);
+  }
+}

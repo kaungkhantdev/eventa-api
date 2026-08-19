@@ -1,0 +1,1 @@
+ALTER TYPE "public"."permission_key" ADD VALUE 'evProgramView' BEFORE 'regView';

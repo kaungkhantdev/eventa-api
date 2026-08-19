@@ -1,0 +1,1 @@
+ALTER TABLE "seat_holds" ADD CONSTRAINT "ck_seat_holds_qty" CHECK ("seat_holds"."quantity" >= 1);

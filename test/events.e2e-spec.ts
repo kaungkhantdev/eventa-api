@@ -1,0 +1,382 @@
+process.env.NODE_ENV = 'test';
+process.env.DATABASE_URL ??= 'postgres://eventa:eventa@localhost:5432/eventa';
+process.env.JWT_SECRET ??= 'test-secret-at-least-16-characters-long';
+
+import type { Server } from 'node:http';
+import type { INestApplication } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import { hash } from '@node-rs/argon2';
+import { Pool } from 'pg';
+import request from 'supertest';
+import { AppModule } from '../src/app.module';
+import { buildValidationPipe } from '../src/common/http/validation';
+
+const PASSWORD = 'correct horse battery staple';
+const ORG_A = { slug: 'evt-e2e-a', name: 'Events E2E A' };
+const ORG_B = { slug: 'evt-e2e-b', name: 'Events E2E B' };
+const ADMIN_A = 'admin@evt-e2e-a.test';
+const ADMIN_B = 'admin@evt-e2e-b.test';
+const ATTENDEE_A = 'attendee@evt-e2e-a.test';
+const LIMITED_A = 'limited@evt-e2e-a.test'; // admin persona, no evCreate
+
+interface SuccessBody<T> {
+  success: boolean;
+  statusCode: number;
+  message: string;
+  data: T;
+  meta?: { page: number; limit: number; total: number; totalPages: number };
+}
+interface EventData {
+  id: string;
+  slug: string;
+  name: string;
+  status: string;
+  bucket: string;
+}
+
+describe('Events (e2e — create draft + list)', () => {
+  let app: INestApplication;
+  let server: Server;
+  let pool: Pool;
+
+  beforeAll(async () => {
+    pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    await cleanup(pool);
+    await seedTenant(pool, ORG_A, [
+      {
+        email: ADMIN_A,
+        persona: 'admin',
+        roleName: 'Admin',
+        grants: ['evCreate'],
+      },
+      {
+        email: LIMITED_A,
+        persona: 'admin',
+        roleName: 'Staff',
+        grants: ['regView'],
+      },
+      { email: ATTENDEE_A, persona: 'attendee' },
+    ]);
+    await seedTenant(pool, ORG_B, [
+      {
+        email: ADMIN_B,
+        persona: 'admin',
+        roleName: 'Admin',
+        grants: ['evCreate'],
+      },
+    ]);
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+    app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api/v1');
+    app.useGlobalPipes(buildValidationPipe());
+    await app.init();
+    server = app.getHttpServer() as Server;
+  });
+
+  afterAll(async () => {
+    await cleanup(pool);
+    await pool.end();
+    await app.close();
+  });
+
+  const token = async (email: string, orgSlug: string, persona: string) => {
+    const res = await request(server)
+      .post('/api/v1/auth/login')
+      // Attendee sign-in has no workspace — it resolves to the platform org
+      // (US-DISC-08); JSON.stringify drops the undefined key.
+      .send({
+        email,
+        password: PASSWORD,
+        orgSlug: persona === 'attendee' ? undefined : orgSlug,
+        persona,
+      });
+    return (res.body as SuccessBody<{ accessToken: string }>).data.accessToken;
+  };
+
+  const createEvent = (jwt: string, body: Record<string, unknown>) =>
+    request(server)
+      .post('/api/v1/events')
+      .set('Authorization', `Bearer ${jwt}`)
+      .send(body);
+
+  it('rejects an unauthenticated create with 401', async () => {
+    const res = await request(server).post('/api/v1/events').send({
+      name: 'No Auth',
+      type: 'Conference',
+      startAt: '2026-09-01T02:00:00Z',
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it('creates a draft event and returns it in the success envelope', async () => {
+    const jwt = await token(ADMIN_A, ORG_A.slug, 'admin');
+    const res = await createEvent(jwt, {
+      name: 'Bangkok Tech Conference 2026',
+      type: 'Conference',
+      startAt: '2026-09-01T02:00:00Z',
+    });
+
+    expect(res.status).toBe(201);
+    const body = res.body as SuccessBody<EventData>;
+    expect(body.success).toBe(true);
+    expect(body.data.status).toBe('draft');
+    expect(body.data.bucket).toBe('active');
+    expect(body.data.slug).toBe('bangkok-tech-conference-2026');
+  });
+
+  it('lists my events as a Paginated envelope', async () => {
+    const jwt = await token(ADMIN_A, ORG_A.slug, 'admin');
+    const res = await request(server)
+      .get('/api/v1/events')
+      .set('Authorization', `Bearer ${jwt}`);
+
+    expect(res.status).toBe(200);
+    const body = res.body as SuccessBody<EventData[]>;
+    expect(Array.isArray(body.data)).toBe(true);
+    expect(body.meta).toMatchObject({ page: 1, limit: 20 });
+    expect(
+      body.data.some((e) => e.slug === 'bangkok-tech-conference-2026'),
+    ).toBe(true);
+  });
+
+  it('excludes active drafts from the completed bucket', async () => {
+    const jwt = await token(ADMIN_A, ORG_A.slug, 'admin');
+    const res = await request(server)
+      .get('/api/v1/events?bucket=completed')
+      .set('Authorization', `Bearer ${jwt}`);
+
+    expect(res.status).toBe(200);
+    const body = res.body as SuccessBody<EventData[]>;
+    expect(body.data.every((e) => e.bucket === 'completed')).toBe(true);
+  });
+
+  it('forbids an admin without the evCreate permission (403)', async () => {
+    const jwt = await token(LIMITED_A, ORG_A.slug, 'admin');
+    const res = await createEvent(jwt, {
+      name: 'No Permission',
+      type: 'Conference',
+      startAt: '2026-09-01T02:00:00Z',
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('forbids an attendee persona from creating events (403)', async () => {
+    const jwt = await token(ATTENDEE_A, ORG_A.slug, 'attendee');
+    const res = await createEvent(jwt, {
+      name: 'Attendee Attempt',
+      type: 'Conference',
+      startAt: '2026-09-01T02:00:00Z',
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('rejects a non-existent categoryId with 404, not 500', async () => {
+    const jwt = await token(ADMIN_A, ORG_A.slug, 'admin');
+    const res = await createEvent(jwt, {
+      name: 'Ghost Category',
+      type: 'Conference',
+      startAt: '2026-09-01T02:00:00Z',
+      categoryId: 999999,
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("refuses another tenant's category id (no cross-tenant reference)", async () => {
+    const { rows } = await pool.query<{ id: string }>(
+      `SELECT id FROM organizations WHERE slug = $1`,
+      [ORG_B.slug],
+    );
+    const cat = await pool.query<{ id: string }>(
+      `INSERT INTO categories (organization_id, name, icon, color)
+       VALUES ($1, 'Music', 'music', 'blue') RETURNING id`,
+      [Number(rows[0].id)],
+    );
+    const foreignCategoryId = Number(cat.rows[0].id);
+
+    const jwt = await token(ADMIN_A, ORG_A.slug, 'admin');
+    const res = await createEvent(jwt, {
+      name: 'Cross Tenant Category',
+      type: 'Conference',
+      startAt: '2026-09-01T02:00:00Z',
+      categoryId: foreignCategoryId,
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('does not leak events across tenants', async () => {
+    const jwtB = await token(ADMIN_B, ORG_B.slug, 'admin');
+    const res = await request(server)
+      .get('/api/v1/events')
+      .set('Authorization', `Bearer ${jwtB}`);
+
+    const body = res.body as SuccessBody<EventData[]>;
+    expect(
+      body.data.some((e) => e.slug === 'bangkok-tech-conference-2026'),
+    ).toBe(false);
+  });
+
+  describe('get + update (US-EVT-01/03/04)', () => {
+    interface FullEvent {
+      id: string;
+      name: string;
+      venueName: string | null;
+      endAt: string | null;
+      version: number;
+    }
+    let eventId: string;
+    let version: number;
+
+    const patch = (jwt: string, body: Record<string, unknown>) =>
+      request(server)
+        .patch(`/api/v1/events/${eventId}`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send(body);
+
+    it('creates an event to work with', async () => {
+      const jwt = await token(ADMIN_A, ORG_A.slug, 'admin');
+      const res = await createEvent(jwt, {
+        name: 'Editable Event',
+        type: 'Conference',
+        startAt: '2026-09-01T02:00:00Z',
+      });
+      expect(res.status).toBe(201);
+      const data = (res.body as SuccessBody<FullEvent>).data;
+      eventId = data.id;
+      version = data.version;
+      expect(version).toBe(1);
+    });
+
+    it('GET /events/:id returns the event', async () => {
+      const jwt = await token(ADMIN_A, ORG_A.slug, 'admin');
+      const res = await request(server)
+        .get(`/api/v1/events/${eventId}`)
+        .set('Authorization', `Bearer ${jwt}`);
+      expect(res.status).toBe(200);
+      expect((res.body as SuccessBody<FullEvent>).data.id).toBe(eventId);
+    });
+
+    it("404 for another tenant's event", async () => {
+      const jwtB = await token(ADMIN_B, ORG_B.slug, 'admin');
+      const res = await request(server)
+        .get(`/api/v1/events/${eventId}`)
+        .set('Authorization', `Bearer ${jwtB}`);
+      expect(res.status).toBe(404);
+    });
+
+    it('updates fields and bumps the version', async () => {
+      const jwt = await token(ADMIN_A, ORG_A.slug, 'admin');
+      const res = await patch(jwt, {
+        name: 'Renamed Event',
+        venueName: 'Hall A',
+        endAt: '2026-09-01T05:00:00Z',
+      });
+      expect(res.status).toBe(200);
+      const data = (res.body as SuccessBody<FullEvent>).data;
+      expect(data.name).toBe('Renamed Event');
+      expect(data.venueName).toBe('Hall A');
+      expect(data.version).toBe(version + 1);
+      version = data.version;
+    });
+
+    it('rejects an end time before the start (422)', async () => {
+      const jwt = await token(ADMIN_A, ORG_A.slug, 'admin');
+      expect((await patch(jwt, { endAt: '2026-08-01T00:00:00Z' })).status).toBe(
+        422,
+      );
+    });
+
+    it('rejects a stale version with 409', async () => {
+      const jwt = await token(ADMIN_A, ORG_A.slug, 'admin');
+      expect((await patch(jwt, { name: 'Nope', version: 1 })).status).toBe(409);
+    });
+  });
+});
+
+interface SeedPerson {
+  email: string;
+  persona: 'admin' | 'attendee';
+  roleName?: 'Admin' | 'Staff';
+  grants?: string[];
+}
+
+const PERM_GROUP: Record<string, string> = {
+  evCreate: 'Events',
+  regView: 'Registrations',
+};
+
+async function seedTenant(
+  pool: Pool,
+  org: { slug: string; name: string },
+  people: SeedPerson[],
+): Promise<void> {
+  const res = await pool.query<{ id: string }>(
+    `INSERT INTO organizations (name, slug) VALUES ($1, $2) RETURNING id`,
+    [org.name, org.slug],
+  );
+  const orgId = Number(res.rows[0].id);
+  const platform = await pool.query<{ id: string }>(
+    `SELECT id FROM organizations WHERE slug = 'eventa'`,
+  );
+  const passwordHash = await hash(PASSWORD);
+  for (const p of people) {
+    // Attendee accounts live in the platform org (US-DISC-08), never the workspace.
+    const home = p.persona === 'attendee' ? Number(platform.rows[0].id) : orgId;
+    const user = await pool.query<{ id: string }>(
+      `INSERT INTO users (organization_id, name, email, persona, status, password_hash)
+       VALUES ($1, 'Seed User', $2, $3, 'Active', $4) RETURNING id`,
+      [home, p.email, p.persona, passwordHash],
+    );
+    if (p.roleName && p.grants) {
+      await grantRole(pool, orgId, user.rows[0].id, p.roleName, p.grants);
+    }
+  }
+}
+
+/** Create a role with the given permission grants and attach the user to it. */
+async function grantRole(
+  pool: Pool,
+  orgId: number,
+  userId: string,
+  roleName: string,
+  grants: string[],
+): Promise<void> {
+  for (const key of grants) {
+    await pool.query(
+      `INSERT INTO permissions (key, "group", label) VALUES ($1, $2, $3)
+       ON CONFLICT (key) DO NOTHING`,
+      [key, PERM_GROUP[key], key],
+    );
+  }
+  const role = await pool.query<{ id: string }>(
+    `INSERT INTO roles (organization_id, name, description) VALUES ($1, $2, 'seed') RETURNING id`,
+    [orgId, roleName],
+  );
+  const roleId = Number(role.rows[0].id);
+  for (const key of grants) {
+    await pool.query(
+      `INSERT INTO role_permissions (role_id, permission_key, granted) VALUES ($1, $2, true)`,
+      [roleId, key],
+    );
+  }
+  await pool.query(
+    `INSERT INTO memberships (organization_id, user_id, role_id, role, status)
+     VALUES ($1, $2, $3, $4, 'Active')`,
+    [orgId, userId, roleId, roleName],
+  );
+}
+
+async function cleanup(pool: Pool): Promise<void> {
+  // The attendee user lives in the shared platform org — remove it by email.
+  await pool.query(
+    `DELETE FROM outbox_events WHERE aggregate_id IN
+       (SELECT id::text FROM users WHERE email = $1)`,
+    [ATTENDEE_A],
+  );
+  await pool.query(`DELETE FROM users WHERE email = $1`, [ATTENDEE_A]);
+  await pool.query(`DELETE FROM organizations WHERE slug = ANY($1)`, [
+    [ORG_A.slug, ORG_B.slug],
+  ]);
+}
