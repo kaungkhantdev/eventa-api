@@ -115,4 +115,14 @@ export class AttendanceCountsDto {
   @ApiProperty() checkedIn!: number;
 
   @ApiProperty() expected!: number;
+
+  @ApiProperty({
+    description: 'Inside, and arrived before the event started.',
+  })
+  onSite!: number;
+
+  @ApiProperty({
+    description: 'Inside, but walked in after the event had started.',
+  })
+  late!: number;
 }

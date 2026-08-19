@@ -77,4 +77,8 @@ export interface AttendanceCounts {
   total: number;
   checkedIn: number;
   expected: number;
+  /** Already inside, and arrived before the event's start time. */
+  onSite: number;
+  /** Already inside, but walked in after it had started. */
+  late: number;
 }

@@ -15,6 +15,7 @@ import {
   attendees,
   auditEvents,
   checkIns,
+  events,
   orders,
   ticketTypes,
   tickets,
@@ -205,14 +206,31 @@ export class CheckInRepository {
         .select({
           total: sql<number>`count(*)::int`,
           checkedIn: sql<number>`count(${checkIns.id})::int`,
+          // Walked in after the doors were due to open. Counted in SQL over the
+          // whole event, never derived from the page on screen — the station
+          // shows eight arrivals out of a thousand and these are event totals.
+          late: sql<number>`count(*) FILTER (
+            WHERE ${checkIns.id} IS NOT NULL
+              AND ${checkIns.checkedInAt} > ${events.startAt}
+          )::int`,
         })
         .from(tickets)
         .leftJoin(checkIns, eq(checkIns.ticketId, tickets.id))
+        .innerJoin(events, eq(events.id, tickets.eventId))
         .where(this.admissible(organizationId, eventId));
 
       const total = row?.total ?? 0;
       const checkedIn = row?.checkedIn ?? 0;
-      return { total, checkedIn, expected: total - checkedIn };
+      const late = row?.late ?? 0;
+      return {
+        total,
+        checkedIn,
+        expected: total - checkedIn,
+        late,
+        // Everyone already inside who was not late. Derived rather than counted
+        // a second time, so the two can never disagree.
+        onSite: checkedIn - late,
+      };
     });
   }
 

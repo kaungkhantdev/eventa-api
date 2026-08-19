@@ -39,6 +39,8 @@ interface Counts {
   total: number;
   checkedIn: number;
   expected: number;
+  onSite: number;
+  late: number;
 }
 
 describe('Check-in at the door (e2e — US-REG-11/12/13)', () => {
@@ -384,11 +386,43 @@ describe('Check-in at the door (e2e — US-REG-11/12/13)', () => {
 
       expect(body.data).toHaveLength(1);
       expect(body.meta.total).toBe(3);
-      // The station's headline figures, whatever page is on screen.
+      // The station's headline figures, whatever page is on screen. This
+      // event began an hour ago, so the one arrival is a late one.
       expect(body.meta.counts).toEqual({
         total: 3,
         checkedIn: 1,
         expected: 2,
+        onSite: 0,
+        late: 1,
+      });
+    });
+
+    it('splits arrivals at the start time — before it is on-site, after it is late', async () => {
+      const early = await seedTicket();
+      const arrival = await seedTicket();
+      await seedTicket();
+
+      // Both scans happen now, and the event started an hour ago, so one is
+      // moved back behind the start time to put an arrival on each side of it.
+      await scan(staffJwt, eventId, { qrToken: early.qrToken });
+      await pool.query(
+        `UPDATE check_ins SET checked_in_at =
+           (SELECT start_at FROM events WHERE id = $1) - interval '10 minutes'
+         WHERE ticket_id = $2`,
+        [eventId, early.ticketId],
+      );
+      await scan(staffJwt, eventId, { qrToken: arrival.qrToken });
+
+      const body = (await roll(staffJwt, eventId)).body as Success<
+        AttendanceRow[]
+      > & { meta: { counts: Counts } };
+
+      expect(body.meta.counts).toEqual({
+        total: 3,
+        checkedIn: 2,
+        expected: 1,
+        onSite: 1,
+        late: 1,
       });
     });
 
