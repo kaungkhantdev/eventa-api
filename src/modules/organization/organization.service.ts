@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { DomainException } from '../../common/errors/domain.exception';
+import {
+  UQ_ORGANIZATIONS_NAME,
+  isUniqueViolation,
+} from '../../common/errors/unique-violation';
 import { OrganizationResponseDto } from './dto/organization-response.dto';
 import { toOrganizationResponse } from './organization.mapper';
 import { OrganizationRepository } from './organization.repository';
@@ -59,7 +63,9 @@ export class OrganizationService {
       throw DomainException.conflict(NAME_TAKEN_MESSAGE);
     }
     const values = pickProvided(input);
-    const saved = await this.repo.update(
+    // The name can be taken between the check above and this write; the index
+    // is what stops it, and its refusal is the same answer, not a 500.
+    const saved = await this.writeOrRefuse(
       organizationId,
       values,
       current.version,
@@ -68,6 +74,21 @@ export class OrganizationService {
     // the write, which is the same fact as a form opened too long ago.
     if (!saved) throw this.stale();
     return toOrganizationResponse(saved);
+  }
+
+  private async writeOrRefuse(
+    organizationId: number,
+    values: Partial<OrganizationRow>,
+    currentVersion: number,
+  ): Promise<OrganizationRow | null> {
+    try {
+      return await this.repo.update(organizationId, values, currentVersion);
+    } catch (cause) {
+      if (isUniqueViolation(cause, UQ_ORGANIZATIONS_NAME)) {
+        throw DomainException.conflict(NAME_TAKEN_MESSAGE);
+      }
+      throw cause;
+    }
   }
 
   private stale(): DomainException {

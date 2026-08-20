@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiForbiddenResponse, ApiTags } from '@nestjs/swagger';
 import { CurrentAuth } from '../../common/decorators/current-auth.decorator';
 import {
@@ -12,6 +22,13 @@ import { ApiData } from '../../common/http/api-data.decorator';
 import type { AuthContext } from '../auth/auth.types';
 import { OrganizationResponseDto } from './dto/organization-response.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
+import {
+  ConfirmLogoDto,
+  LogoDto,
+  LogoUploadDto,
+  RequestLogoUploadDto,
+} from './dto/logo.dto';
+import { OrganizationLogoService } from './organization-logo.service';
 import { OrganizationService } from './organization.service';
 
 /**
@@ -24,7 +41,10 @@ import { OrganizationService } from './organization.service';
 @UseGuards(PermissionsGuard)
 @Controller('organization')
 export class OrganizationController {
-  constructor(private readonly organization: OrganizationService) {}
+  constructor(
+    private readonly organization: OrganizationService,
+    private readonly logo: OrganizationLogoService,
+  ) {}
 
   @Get()
   @ResponseMessage('Organization retrieved.')
@@ -46,5 +66,53 @@ export class OrganizationController {
     @Body() dto: UpdateOrganizationDto,
   ): Promise<OrganizationResponseDto> {
     return this.organization.update(auth.organizationId, dto);
+  }
+
+  /**
+   * Two steps, because the bytes never pass through this API: ask for a URL,
+   * PUT the file to it, then confirm. The key is issued from the token's
+   * organization, never taken from the path.
+   */
+  @Post('logo/upload-url')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(Permission.setSettings)
+  @ResponseMessage('Upload URL issued.')
+  @ApiData(LogoUploadDto)
+  @ApiForbiddenResponse({
+    description: 'Requires setSettings',
+    type: ApiErrorDto,
+  })
+  requestLogoUpload(
+    @CurrentAuth() auth: AuthContext,
+    @Body() dto: RequestLogoUploadDto,
+  ): Promise<LogoUploadDto> {
+    return this.logo.requestUpload(auth.organizationId, dto);
+  }
+
+  @Post('logo')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(Permission.setSettings)
+  @ResponseMessage('Logo updated.')
+  @ApiData(LogoDto)
+  @ApiForbiddenResponse({
+    description: 'Requires setSettings',
+    type: ApiErrorDto,
+  })
+  confirmLogo(
+    @CurrentAuth() auth: AuthContext,
+    @Body() dto: ConfirmLogoDto,
+  ): Promise<LogoDto> {
+    return this.logo.confirm(auth.organizationId, dto.key);
+  }
+
+  @Delete('logo')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermissions(Permission.setSettings)
+  @ApiForbiddenResponse({
+    description: 'Requires setSettings',
+    type: ApiErrorDto,
+  })
+  removeLogo(@CurrentAuth() auth: AuthContext): Promise<void> {
+    return this.logo.remove(auth.organizationId);
   }
 }

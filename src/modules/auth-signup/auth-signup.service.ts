@@ -3,6 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import { Clock } from '../../common/time/clock';
 import { DomainException } from '../../common/errors/domain.exception';
 import { ErrorCode } from '../../common/errors/error-codes';
+import {
+  UQ_ORGANIZATIONS_NAME,
+  isUniqueViolation,
+} from '../../common/errors/unique-violation';
 import { slugify } from '../../common/util/slugify';
 import type { Env } from '../../config/env.validation';
 import { Persona } from '../auth/auth.types';
@@ -84,13 +88,14 @@ export class SignupService {
       slugify(organizationName, 'workspace'),
     );
     const passwordHash = await this.passwords.hash(input.password);
-    const { organizationId, userId } = await this.repo.bootstrapWorkspace({
+    const created = await this.bootstrapOrRefuse({
       organizationName,
       slug,
       name: input.name,
       email: input.email,
       passwordHash,
     });
+    const { organizationId, userId } = created;
     await this.resendVerification({
       organizationId,
       userId,
@@ -98,6 +103,27 @@ export class SignupService {
       email: input.email,
     });
     return { message: CHECK_INBOX_MESSAGE };
+  }
+
+  /**
+   * Create the workspace, or turn the index's refusal into the same answer the
+   * check above would have given.
+   *
+   * Between that check and this write, somebody else can take the name. The
+   * index is what actually stops the second one; without this it would surface
+   * as a 500 and read as a bug rather than as a name already spoken for.
+   */
+  private async bootstrapOrRefuse(
+    input: Parameters<SignupRepository['bootstrapWorkspace']>[0],
+  ): Promise<Awaited<ReturnType<SignupRepository['bootstrapWorkspace']>>> {
+    try {
+      return await this.repo.bootstrapWorkspace(input);
+    } catch (cause) {
+      if (isUniqueViolation(cause, UQ_ORGANIZATIONS_NAME)) {
+        throw DomainException.conflict(NAME_TAKEN_MESSAGE);
+      }
+      throw cause;
+    }
   }
 
   /**
