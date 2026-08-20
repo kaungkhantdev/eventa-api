@@ -66,12 +66,14 @@ describe('ImageUploadService', () => {
     });
 
     it('refuses a size beyond the limit, naming what was being uploaded', async () => {
-      await expect(
-        service.requestUpload(SCOPE, {
-          contentType: 'image/png',
-          byteSize: MAX_BYTES + 1,
-        }),
-      ).rejects.toMatchObject({ message: expect.stringContaining('logo') });
+      const attempt = service.requestUpload(SCOPE, {
+        contentType: 'image/png',
+        byteSize: MAX_BYTES + 1,
+      });
+
+      await expect(attempt).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      // The noun is the scope's, so one message serves every kind of upload.
+      await expect(attempt).rejects.toThrow(/workspace logo/);
     });
   });
 
