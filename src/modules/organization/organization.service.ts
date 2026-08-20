@@ -42,10 +42,28 @@ export class OrganizationService {
     input: UpdateOrganizationInput,
   ): Promise<OrganizationResponseDto> {
     this.assertValid(input);
+    // Read first, so the version the write is guarded by is the row's own and
+    // not the caller's word for it.
+    const current = await this.load(organizationId);
+    if (input.version !== undefined && input.version !== current.version) {
+      throw this.stale();
+    }
     const values = pickProvided(input);
-    const saved = await this.repo.update(organizationId, values);
-    if (!saved) throw DomainException.notFound('Workspace not found.');
+    const saved = await this.repo.update(
+      organizationId,
+      values,
+      current.version,
+    );
+    // The guarded UPDATE matched nothing: the row moved between the read and
+    // the write, which is the same fact as a form opened too long ago.
+    if (!saved) throw this.stale();
     return toOrganizationResponse(saved);
+  }
+
+  private stale(): DomainException {
+    return DomainException.conflict(
+      'This workspace changed elsewhere. Reload and try again.',
+    );
   }
 
   private assertValid(input: UpdateOrganizationInput): void {

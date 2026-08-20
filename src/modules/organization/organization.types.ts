@@ -12,4 +12,9 @@ export interface UpdateOrganizationInput {
   logoUrl?: string | null;
   timezone?: string;
   statementDescriptor?: string | null;
+  /**
+   * The version the caller's form was built from. Not a column to write — it
+   * is compared, and the write is guarded by it.
+   */
+  version?: number;
 }

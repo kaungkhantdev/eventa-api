@@ -25,15 +25,26 @@ export class OrganizationRepository {
   }
 
   /** Apply the given columns and return the saved row. */
+  /** Optimistic update: writes only when `version` still matches, bumping it. */
   async update(
     organizationId: number,
     values: Partial<OrganizationRow>,
+    currentVersion: number,
   ): Promise<OrganizationRow | null> {
     return withTenant(this.db, organizationId, async (tx) => {
       const [row] = await tx
         .update(organizations)
-        .set({ ...values, updatedAt: new Date() })
-        .where(eq(organizations.id, organizationId))
+        .set({
+          ...values,
+          version: currentVersion + 1,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(organizations.id, organizationId),
+            eq(organizations.version, currentVersion),
+          ),
+        )
         .returning();
       return row ?? null;
     });
