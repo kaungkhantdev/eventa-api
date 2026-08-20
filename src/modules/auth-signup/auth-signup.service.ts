@@ -12,6 +12,7 @@ import { VerifyEmailResponseDto } from './dto/verify-email-response.dto';
 import { emailVerificationRequestedEvent } from './events/email-verification-requested.event';
 import { PasswordService } from '../auth-password/auth-password.service';
 import { SignupRepository } from './auth-signup.repository';
+import { ResendThrottleService } from './resend-throttle.service';
 import { TokenService } from '../auth/token.service';
 
 const CHECK_INBOX_MESSAGE =
@@ -43,6 +44,7 @@ export class SignupService {
     private readonly tokens: TokenService,
     private readonly outbox: OutboxPort,
     private readonly clock: Clock,
+    private readonly throttle: ResendThrottleService,
     config: ConfigService<Env, true>,
   ) {
     this.publicWebUrl = config.getOrThrow('PUBLIC_WEB_URL', { infer: true });
@@ -145,6 +147,37 @@ export class SignupService {
       orgSlug: activated.orgSlug,
       persona: activated.persona,
     };
+  }
+
+  /**
+   * Send the confirmation link again (US-ACC-01).
+   *
+   * Mail goes missing — a typo'd address, a spam folder, an SMTP outage — and
+   * without this the only way back is to sign up again, which the API refuses
+   * because the account already exists. That is a dead end for somebody who did
+   * everything right.
+   *
+   * The answer is the same sentence whichever branch runs. The endpoint is
+   * public and the address is typed by whoever is asking, so a response that
+   * differed for a real account would be an account-existence oracle.
+   */
+  async requestResend(input: {
+    email: string;
+    persona?: Persona;
+  }): Promise<RegisterResponseDto> {
+    const persona = input.persona ?? Persona.Admin;
+    const identity = `${persona}|${input.email.toLowerCase()}`;
+
+    await this.throttle.assertAllowed(identity);
+    // Started before the lookup, and whether or not anything is sent: a
+    // cool-off that only applied to real accounts would answer the question
+    // the response refuses to.
+    await this.throttle.remember(identity);
+
+    const pending = await this.repo.pendingVerification(input.email, persona);
+    if (pending) await this.resendVerification(pending);
+
+    return { message: CHECK_INBOX_MESSAGE };
   }
 
   /** Sign a fresh verify token and enqueue the confirmation email (sign-up + resend). */

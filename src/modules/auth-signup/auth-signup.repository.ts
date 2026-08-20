@@ -28,6 +28,14 @@ const ATTENDEE_PERSONA = 'attendee';
 const PENDING_STATUS = 'Unconfirmed';
 const ACTIVE_STATUS = 'Active';
 
+/** Just enough to sign a fresh token and address the email to a person. */
+export interface PendingVerification {
+  organizationId: number;
+  userId: string;
+  name: string;
+  email: string;
+}
+
 export interface AttendeeAccountInput {
   name: string;
   email: string;
@@ -53,6 +61,38 @@ export interface BootstrapResult {
 @Injectable()
 export class SignupRepository {
   constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+
+  /**
+   * The account this address is still waiting to confirm, if there is one.
+   *
+   * Only `Unconfirmed` matches: an active account has nothing to resend, and an
+   * invited one was sent a different link by somebody else. Returns null for
+   * every other case — including no account at all — so the caller answers
+   * identically either way and the endpoint reveals nothing.
+   */
+  async pendingVerification(
+    email: string,
+    persona: 'admin' | 'attendee',
+  ): Promise<PendingVerification | null> {
+    const [row] = await this.db
+      .select({
+        organizationId: users.organizationId,
+        userId: users.id,
+        name: users.name,
+        email: users.email,
+      })
+      .from(users)
+      .where(
+        and(
+          eq(users.email, email),
+          eq(users.persona, persona),
+          eq(users.status, PENDING_STATUS),
+          isNull(users.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
 
   /** Is this email already an organizer account anywhere? (Global, persona-scoped.) */
   async organizerEmailExists(email: string): Promise<boolean> {

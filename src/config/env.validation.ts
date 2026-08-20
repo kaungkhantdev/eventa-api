@@ -51,6 +51,15 @@ export const envSchema = z
     LOGIN_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
     LOGIN_LOCK_SECONDS: z.coerce.number().int().positive().default(900), // 15m
 
+    // How long before a confirmation link can be asked for again. Long enough
+    // that a slow mail server is not mistaken for a lost message, short enough
+    // that somebody who really did lose one is not stuck waiting.
+    VERIFY_RESEND_COOLDOWN_SECONDS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(60),
+
     // Public web app base URL — used to build shareable/public event links.
     PUBLIC_WEB_URL: z
       .string()

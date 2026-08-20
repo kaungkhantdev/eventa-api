@@ -5,6 +5,7 @@ import { ResponseMessage } from '../../common/decorators/response-message.decora
 import { ApiData } from '../../common/http/api-data.decorator';
 import { RegisterDto } from './dto/register.dto';
 import { RegisterResponseDto } from './dto/register-response.dto';
+import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { VerifyEmailResponseDto } from './dto/verify-email-response.dto';
 import { SignupService } from './auth-signup.service';
@@ -26,6 +27,24 @@ export class AuthSignupController {
       email: dto.email,
       password: dto.password,
       organizationName: dto.organizationName,
+      persona: dto.persona,
+    });
+  }
+
+  /**
+   * Rate-limited server-side, not just in the page: a browser countdown is a
+   * courtesy that a reload steps straight past.
+   */
+  @Public()
+  @Post('auth/verify-email/resend')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ResponseMessage('Check your inbox to confirm your email.')
+  @ApiData(RegisterResponseDto, HttpStatus.ACCEPTED)
+  resendVerification(
+    @Body() dto: ResendVerificationDto,
+  ): Promise<RegisterResponseDto> {
+    return this.signup.requestResend({
+      email: dto.email,
       persona: dto.persona,
     });
   }
