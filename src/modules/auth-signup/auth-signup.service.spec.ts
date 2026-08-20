@@ -42,6 +42,7 @@ describe('SignupService', () => {
         .fn()
         .mockResolvedValue({ organizationId: 1, userId: 'a1' }),
       pendingVerification: jest.fn().mockResolvedValue(null),
+      nameTaken: jest.fn().mockResolvedValue(false),
     } as unknown as jest.Mocked<SignupRepository>;
     throttle = {
       assertAllowed: jest.fn().mockResolvedValue(undefined),
@@ -110,6 +111,39 @@ describe('SignupService', () => {
       expect(res.message).toMatch(/check your inbox/i);
       expect(repo.bootstrapWorkspace).not.toHaveBeenCalled();
       expect(outbox.enqueue).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Workspace names are unique across the platform. Two "Acme Events" on an
+     * attendee's ticket, invoice and receipt is a real confusion, and a name is
+     * what people give and remember — unlike the slug, which is generated.
+     */
+    describe('workspace name', () => {
+      it('refuses a name another workspace already has', async () => {
+        repo.nameTaken.mockResolvedValue(true);
+
+        await expect(
+          service.register({ ...newAccount, organizationName: 'Acme Events' }),
+        ).rejects.toMatchObject({ code: 'CONFLICT' });
+        expect(repo.bootstrapWorkspace).not.toHaveBeenCalled();
+      });
+
+      it('checks the name before creating anything', async () => {
+        await service.register({
+          ...newAccount,
+          organizationName: 'Acme Events',
+        });
+
+        expect(repo.nameTaken).toHaveBeenCalledWith('Acme Events');
+      });
+
+      // Nobody typed this one, so it cannot be refused for being taken — it is
+      // made unique instead, the way the slug always has been.
+      it('does not refuse the fallback name it invents itself', async () => {
+        repo.nameTaken.mockResolvedValue(true);
+
+        await expect(service.register(newAccount)).resolves.toBeDefined();
+      });
     });
   });
 

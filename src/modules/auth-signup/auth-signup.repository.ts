@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, isNull, like, sql } from 'drizzle-orm';
+import { and, eq, isNull, like, ne, sql } from 'drizzle-orm';
 import { PLATFORM_ORG_SLUG } from '../../common/tenancy/platform-org';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
@@ -92,6 +92,31 @@ export class SignupRepository {
       )
       .limit(1);
     return row ?? null;
+  }
+
+  /**
+   * Is another live workspace already called this?
+   *
+   * Compared the way `uq_organizations_name` compares — lowercased and
+   * trimmed — because "Acme Events", "acme events" and " Acme Events " are one
+   * name to everybody except a byte comparison. The index is the guarantee;
+   * this exists so somebody gets a sentence rather than a 500.
+   */
+  async nameTaken(name: string, exceptOrgId?: number): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(
+        and(
+          sql`lower(btrim(${organizations.name})) = lower(btrim(${name}))`,
+          isNull(organizations.deletedAt),
+          exceptOrgId === undefined
+            ? undefined
+            : ne(organizations.id, exceptOrgId),
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
   }
 
   /** Is this email already an organizer account anywhere? (Global, persona-scoped.) */

@@ -13,6 +13,8 @@ const THAI_TAX_ID = /^\d{13}$/;
 /** Only http(s) — never a `javascript:`/`data:` URL on a branded surface. */
 const HTTP_URL = /^https?:\/\/[^\s]+$/i;
 
+const NAME_TAKEN_MESSAGE = 'That workspace name is already taken. Try another.';
+
 /** Fields an Admin may change; anything else in the payload is ignored. */
 const UPDATABLE_KEYS = [
   'name',
@@ -47,6 +49,14 @@ export class OrganizationService {
     const current = await this.load(organizationId);
     if (input.version !== undefined && input.version !== current.version) {
       throw this.stale();
+    }
+    // Only when it is actually changing: saving the form untouched must not
+    // refuse the name the workspace already holds.
+    if (
+      input.name !== undefined &&
+      (await this.repo.nameTaken(input.name, organizationId))
+    ) {
+      throw DomainException.conflict(NAME_TAKEN_MESSAGE);
     }
     const values = pickProvided(input);
     const saved = await this.repo.update(

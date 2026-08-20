@@ -31,6 +31,7 @@ describe('OrganizationService', () => {
   beforeEach(() => {
     repo = {
       find: jest.fn().mockResolvedValue(orgRow()),
+      nameTaken: jest.fn().mockResolvedValue(false),
       update: jest
         .fn()
         .mockImplementation((_id, values: object) =>
@@ -145,6 +146,35 @@ describe('OrganizationService', () => {
         await service.update(orgId, { name: 'Renamed', version: 1 });
         const [, values] = repo.update.mock.calls[0];
         expect(Object.keys(values)).toEqual(['name']);
+      });
+    });
+
+    /**
+     * Renaming into somebody else's name is refused for the same reason
+     * sign-up refuses it: the name is what an attendee reads on a ticket, an
+     * invoice and a receipt, and two of them make all three ambiguous.
+     */
+    describe('name', () => {
+      it('refuses a name another workspace already has', async () => {
+        repo.nameTaken.mockResolvedValue(true);
+
+        await expect(
+          service.update(orgId, { name: 'Someone Else Ltd.' }),
+        ).rejects.toMatchObject({ code: 'CONFLICT' });
+        expect(repo.update).not.toHaveBeenCalled();
+      });
+
+      // Or saving the form unchanged would refuse the name it already holds.
+      it('does not count the workspace against itself', async () => {
+        await service.update(orgId, { name: 'Acme Events' });
+
+        expect(repo.nameTaken).toHaveBeenCalledWith('Acme Events', orgId);
+      });
+
+      it('asks nothing when the name is not being changed', async () => {
+        await service.update(orgId, { address: 'Somewhere else' });
+
+        expect(repo.nameTaken).not.toHaveBeenCalled();
       });
     });
   });

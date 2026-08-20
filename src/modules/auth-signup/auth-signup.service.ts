@@ -21,6 +21,7 @@ const INVALID_LINK_MESSAGE =
   'This confirmation link is invalid or has expired. Request a new one.';
 const NO_ATTENDEE_WORKSPACE_MESSAGE =
   "An attendee account doesn't have a workspace — leave organizationName out.";
+const NAME_TAKEN_MESSAGE = 'That workspace name is already taken. Try another.';
 const NO_PLATFORM_ORG_MESSAGE =
   'Attendee accounts are unavailable right now. Please try again later.';
 
@@ -67,6 +68,15 @@ export class SignupService {
     }
     if (await this.repo.organizerEmailExists(input.email)) {
       return { message: CHECK_INBOX_MESSAGE };
+    }
+    // Only a name somebody actually typed can be refused for being taken. The
+    // fallback below is invented here, so it is made unique instead — exactly
+    // as the slug always has been.
+    if (
+      input.organizationName &&
+      (await this.repo.nameTaken(input.organizationName))
+    ) {
+      throw DomainException.conflict(NAME_TAKEN_MESSAGE);
     }
     const organizationName =
       input.organizationName ?? `${input.name}’s Workspace`;
