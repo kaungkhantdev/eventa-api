@@ -50,7 +50,25 @@ export interface TwoFactorChallenge {
   expiresIn: number;
 }
 
-export type LoginOutcome = LoginResult | TwoFactorChallenge;
+/**
+ * The password fits more than one workspace, so the person must say which.
+ *
+ * Only ever returned after the password has been verified — otherwise this
+ * would be a way to ask which workspaces an address belongs to.
+ */
+export interface WorkspaceChoice {
+  chooseWorkspace: true;
+  workspaces: { slug: string; name: string }[];
+}
+
+export type LoginOutcome = LoginResult | TwoFactorChallenge | WorkspaceChoice;
+
+/**
+ * How many accounts on one address are checked before sign-in asks which
+ * workspace instead. Each one costs an argon2 verification, which is expensive
+ * on purpose, so the work an anonymous caller can provoke stays bounded.
+ */
+const MAX_LOGIN_CANDIDATES = 10;
 
 export interface AcceptInviteResult {
   userId: string;
@@ -63,9 +81,18 @@ type LoginUser = { user: UserRow; org: OrganizationRow };
 /** A login whose workspace has been resolved — what the private steps consume. */
 type ResolvedLoginInput = LoginInput & { orgSlug: string };
 
-/** Brute-force throttle key for a sign-in attempt: realm + audience + email. */
-function throttleIdentity(input: ResolvedLoginInput): string {
-  return `${input.orgSlug}|${input.persona ?? 'admin'}|${input.email.toLowerCase()}`;
+/**
+ * Brute-force throttle key for a sign-in attempt: realm + audience + email.
+ *
+ * `*` when no workspace was named — one bucket for the address across every
+ * workspace, which is the stricter reading and the right one: the attempts are
+ * against the person, not against a realm they never chose.
+ */
+function throttleIdentity(
+  input: Omit<LoginInput, 'orgSlug'> & { orgSlug: string | null },
+): string {
+  const realm = input.orgSlug ?? '*';
+  return `${realm}|${input.persona ?? 'admin'}|${input.email.toLowerCase()}`;
 }
 
 /**
@@ -75,7 +102,7 @@ function throttleIdentity(input: ResolvedLoginInput): string {
  * sends a workspace for an attendee is confused, and should fail loudly rather
  * than be silently redirected.
  */
-function resolveRealm(input: LoginInput): string {
+function resolveRealm(input: LoginInput): string | null {
   if ((input.persona ?? 'admin') === 'attendee') {
     if (input.orgSlug) {
       throw DomainException.validation(
@@ -84,12 +111,9 @@ function resolveRealm(input: LoginInput): string {
     }
     return PLATFORM_ORG_SLUG;
   }
-  if (!input.orgSlug) {
-    throw DomainException.validation(
-      'Organizer sign-in requires your workspace slug.',
-    );
-  }
-  return input.orgSlug;
+  // An organizer who names no workspace is resolved by their password instead
+  // (see resolveByPassword) — nobody knows the slug the product invented.
+  return input.orgSlug ?? null;
 }
 
 @Injectable()
@@ -107,13 +131,20 @@ export class AuthService {
   ) {}
 
   async login(input: LoginInput): Promise<LoginOutcome> {
-    const resolved: ResolvedLoginInput = {
-      ...input,
-      orgSlug: resolveRealm(input),
-    };
-    const throttleId = throttleIdentity(resolved);
+    const realm = resolveRealm(input);
+    const throttleId = throttleIdentity({ ...input, orgSlug: realm });
     await this.throttle.assertNotLocked(throttleId);
-    const found = await this.authenticateThrottled(resolved, throttleId);
+
+    const found =
+      realm === null
+        ? await this.resolveByPassword(input, throttleId)
+        : await this.authenticateThrottled(
+            { ...input, orgSlug: realm },
+            throttleId,
+          );
+    // More than one workspace fits: nothing is issued until they say which.
+    if ('chooseWorkspace' in found) return found;
+
     await this.assertEligible(found);
     // A correct password is necessary but not sufficient (US-ACC-05): with 2FA
     // on, no session exists until the code checks out — the challenge token is
@@ -122,6 +153,54 @@ export class AuthService {
       return this.issueTwoFactorChallenge(found, input);
     }
     return this.startSession(found, input);
+  }
+
+  /**
+   * Which workspace, decided by the password rather than by asking.
+   *
+   * Every account on the address is fetched and the password checked against
+   * each. One match signs in; several — the same address AND the same password
+   * in two workspaces — is the only case anyone is asked, and by then they have
+   * already proved they own the credentials.
+   *
+   * A wrong password is refused exactly as a named-workspace sign-in refuses
+   * it, and names nothing, so this cannot be used to enumerate workspaces.
+   */
+  private async resolveByPassword(
+    input: LoginInput,
+    throttleId: string,
+  ): Promise<LoginUser | WorkspaceChoice> {
+    const candidates = await this.users.findLoginCandidates(
+      input.email,
+      input.persona ?? 'admin',
+      MAX_LOGIN_CANDIDATES,
+    );
+
+    const matched: LoginUser[] = [];
+    for (const candidate of candidates) {
+      if (!candidate.user.passwordHash) continue;
+      const ok = await this.passwords.verify(
+        candidate.user.passwordHash,
+        input.password,
+      );
+      if (ok) matched.push(candidate);
+    }
+
+    if (matched.length === 0) {
+      await this.throttle.recordFailure(throttleId);
+      // The same refusal an unknown address gets, for the same reason.
+      throw this.invalidCredentials();
+    }
+    await this.throttle.recordSuccess(throttleId);
+
+    if (matched.length === 1) return matched[0];
+    return {
+      chooseWorkspace: true,
+      workspaces: matched.map(({ org }) => ({
+        slug: org.slug,
+        name: org.name,
+      })),
+    };
   }
 
   private async issueTwoFactorChallenge(

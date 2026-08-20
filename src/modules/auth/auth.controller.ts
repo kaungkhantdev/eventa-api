@@ -61,6 +61,15 @@ export class AuthController {
       device,
       ip: req.ip ?? null,
     });
+    // The password fits more than one workspace. No session yet: the caller
+    // shows the list and sends one of these slugs straight back.
+    if ('chooseWorkspace' in result) {
+      return {
+        twoFactorRequired: false,
+        chooseWorkspace: true,
+        workspaces: result.workspaces,
+      };
+    }
     if ('twoFactorRequired' in result) {
       return {
         twoFactorRequired: true,

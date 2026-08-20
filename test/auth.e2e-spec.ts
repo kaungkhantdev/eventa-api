@@ -166,6 +166,35 @@ describe('Auth (e2e — envelope + passport)', () => {
       .send({ refreshToken })
       .expect(401);
   });
+
+  /**
+   * The workspace slug is generated at sign-up and shown nowhere, so sign-in
+   * stopped asking for it (US-ACC-02). The password resolves the workspace.
+   */
+  describe('signing in without naming a workspace', () => {
+    const loginWithout = (password: string) =>
+      request(server)
+        .post('/api/v1/auth/login')
+        .send({ email: EMAIL, password });
+
+    it('signs in on email and password alone', async () => {
+      const res = await loginWithout(PASSWORD);
+
+      expect(res.status).toBe(200);
+      const data = (res.body as SuccessBody<LoginData>).data;
+      expect(data.accessToken).toEqual(expect.any(String));
+      expect(data.user.email).toBe(EMAIL);
+    });
+
+    // Identical to the refusal an unknown address gets: no workspace is named,
+    // so this cannot be used to ask which workspaces an address belongs to.
+    it('refuses a wrong password without naming a workspace', async () => {
+      const res = await loginWithout('not the password');
+
+      expect(res.status).toBe(401);
+      expect(JSON.stringify(res.body)).not.toContain(SLUG);
+    });
+  });
 });
 
 async function seed(pool: Pool): Promise<number> {

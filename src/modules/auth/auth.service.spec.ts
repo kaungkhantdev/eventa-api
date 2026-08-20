@@ -1,6 +1,6 @@
 import { DomainException } from '../../common/errors/domain.exception';
 import { Clock } from '../../common/time/clock';
-import { AuthService, type LoginInput } from './auth.service';
+import { AuthService, type LoginInput, type LoginUser } from './auth.service';
 import type {
   OrganizationRow,
   RefreshTokenClaims,
@@ -70,6 +70,7 @@ describe('AuthService', () => {
     } as unknown as jest.Mocked<AuthRepository>;
     users = {
       findLoginUser: jest.fn(),
+      findLoginCandidates: jest.fn().mockResolvedValue([]),
       findProfile: jest.fn(),
       touchLastActive: jest.fn(),
     } as unknown as jest.Mocked<UsersRepository>;
@@ -186,9 +187,10 @@ describe('AuthService', () => {
 
       const result = await service.login(input);
 
-      // No challenge here — 2FA is off for this account.
+      // No challenge here — 2FA is off — and one workspace, so no picker.
       if ('twoFactorRequired' in result)
         throw new Error('unexpected challenge');
+      if ('chooseWorkspace' in result) throw new Error('unexpected picker');
       expect(result.accessToken).toBe('access.jwt');
       expect(result.refreshToken).toBe('refresh.jwt');
       expect(result.expiresIn).toBe(900);
@@ -290,10 +292,18 @@ describe('AuthService', () => {
       expect(users.findLoginUser).not.toHaveBeenCalled();
     });
 
-    it('still requires the workspace slug for an organizer login', async () => {
+    /**
+     * It used to refuse an organizer who named no workspace. That asked for
+     * the one thing they cannot know — the slug is generated at sign-up and
+     * shown nowhere — so the password resolves it instead.
+     */
+    it('resolves an organizer login by password when no workspace is named', async () => {
+      users.findLoginCandidates.mockResolvedValue([]);
+
       await expect(
         service.login({ ...input, orgSlug: undefined }),
-      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+      expect(users.findLoginCandidates).toHaveBeenCalled();
       expect(users.findLoginUser).not.toHaveBeenCalled();
     });
 
@@ -382,6 +392,104 @@ describe('AuthService', () => {
         email: 'new@acme.test',
         status: 'Active',
       });
+    });
+  });
+
+  /**
+   * Signing in without naming a workspace (US-ACC-02).
+   *
+   * A user row belongs to one organization, so a person invited into a second
+   * workspace has a second account sharing only an email. Asking which is the
+   * one thing they cannot answer — the slug is invented by the product and
+   * shown nowhere — so the password decides instead.
+   */
+  describe('login without a workspace', () => {
+    const noWorkspace = { email: input.email, password: input.password };
+
+    function candidate(slug: string, name: string): LoginUser {
+      return { user: userRow(), org: { ...org, slug, name } };
+    }
+
+    it('signs in when the address has one account', async () => {
+      users.findLoginCandidates.mockResolvedValue([
+        candidate('acme-events', 'Acme Events'),
+      ]);
+      passwords.verify.mockResolvedValue(true);
+
+      const res = await service.login(noWorkspace);
+
+      expect(res).toHaveProperty('accessToken', 'access.jwt');
+      expect(users.findLoginUser).not.toHaveBeenCalled();
+    });
+
+    // The password is itself the disambiguator: two accounts on one address
+    // rarely share one, and where they differ nobody needs to be asked.
+    it('picks the workspace whose password matches', async () => {
+      users.findLoginCandidates.mockResolvedValue([
+        candidate('other-co', 'Other Co'),
+        candidate('acme-events', 'Acme Events'),
+      ]);
+      passwords.verify.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+      const res = await service.login(noWorkspace);
+
+      expect(res).toHaveProperty('accessToken', 'access.jwt');
+      expect(repo.createSession).toHaveBeenCalledWith(
+        expect.objectContaining({ organizationId: org.id }),
+      );
+    });
+
+    it('asks which workspace only when the password fits both', async () => {
+      users.findLoginCandidates.mockResolvedValue([
+        candidate('acme-events', 'Acme Events'),
+        candidate('acme-bkk', 'Acme Bangkok'),
+      ]);
+      passwords.verify.mockResolvedValue(true);
+
+      await expect(service.login(noWorkspace)).resolves.toMatchObject({
+        chooseWorkspace: true,
+        workspaces: [
+          { slug: 'acme-events', name: 'Acme Events' },
+          { slug: 'acme-bkk', name: 'Acme Bangkok' },
+        ],
+      });
+      // Nothing is issued until they say which.
+      expect(repo.createSession).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The workspace list is only ever shown to somebody who has already proved
+     * the password. A wrong one is refused exactly as before, so this is not a
+     * way to ask which workspaces an address belongs to.
+     */
+    it('refuses a wrong password without naming any workspace', async () => {
+      users.findLoginCandidates.mockResolvedValue([
+        candidate('acme-events', 'Acme Events'),
+        candidate('acme-bkk', 'Acme Bangkok'),
+      ]);
+      passwords.verify.mockResolvedValue(false);
+
+      await expect(service.login(noWorkspace)).rejects.toMatchObject({
+        code: 'UNAUTHORIZED',
+      });
+    });
+
+    it('refuses an address with no account at all, the same way', async () => {
+      users.findLoginCandidates.mockResolvedValue([]);
+
+      await expect(service.login(noWorkspace)).rejects.toMatchObject({
+        code: 'UNAUTHORIZED',
+      });
+    });
+
+    // Naming one still works: it is what the picker sends back.
+    it('goes straight to the named workspace when one is given', async () => {
+      users.findLoginUser.mockResolvedValue({ user: userRow(), org });
+      passwords.verify.mockResolvedValue(true);
+
+      await service.login(input);
+
+      expect(users.findLoginCandidates).not.toHaveBeenCalled();
     });
   });
 });
