@@ -90,6 +90,38 @@ describe('PaymentSettingsService', () => {
       expect(repo.update).not.toHaveBeenCalled();
     });
 
+    /**
+     * The refusal belongs under the box the organizer typed into. There is one
+     * field they could have got wrong, and a message stranded at the foot of
+     * the form makes them guess which.
+     */
+    it('blames the account id, so the message lands on that field', async () => {
+      provider.verify.mockResolvedValue({
+        ok: false,
+        reason: 'No such account',
+      });
+      const failure = await service
+        .connect(orgId, { accountId: 'acct_bad', mode: 'test' })
+        .catch((e: DomainException) => e);
+      const [refused] = (failure as DomainException).errors ?? [];
+      expect(refused?.field).toBe('accountId');
+      expect(refused?.message).toContain('No such account');
+    });
+
+    // Checkout is hosted, so nothing in the browser loads Stripe.js: asking for
+    // a publishable key would be demanding a value this product never reads.
+    it('connects without a publishable key', async () => {
+      const res = await service.connect(orgId, {
+        accountId: 'acct_123',
+        mode: 'test',
+      });
+      expect(res.status).toBe('connected');
+      expect(repo.update).toHaveBeenCalledWith(
+        orgId,
+        expect.objectContaining({ publishableKey: null }),
+      );
+    });
+
     it('never stores or returns a secret — only the account ref + publishable key', async () => {
       const res = await service.connect(orgId, {
         accountId: 'acct_123',

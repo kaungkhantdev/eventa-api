@@ -3,11 +3,9 @@ import Stripe from 'stripe';
 import { DomainException } from '../../../common/errors/domain.exception';
 import type { Clock } from '../../../common/time/clock';
 import type { Env } from '../../../config/env.validation';
+import { STRIPE_API_VERSION } from '../../../common/stripe/stripe-api-version';
 import type { StartPaymentInput } from '../ports/payment-provider.port';
-import {
-  STRIPE_API_VERSION,
-  StripePaymentAdapter,
-} from './stripe-payment.adapter';
+import { StripePaymentAdapter } from './stripe-payment.adapter';
 
 const NOW = new Date('2026-06-01T00:00:00Z');
 const SECRET_KEY = 'sk_test_dummy';

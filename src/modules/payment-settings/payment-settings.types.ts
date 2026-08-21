@@ -8,7 +8,8 @@ export type PaymentMode = PaymentSettingsRow['mode'];
 /** Connect a provider account (US-SET-08). No secret is ever accepted or stored. */
 export interface ConnectInput {
   accountId: string;
-  publishableKey: string;
+  /** Browser-safe, and unread: checkout is hosted, so nothing loads Stripe.js. */
+  publishableKey?: string;
   mode: PaymentMode;
 }
 

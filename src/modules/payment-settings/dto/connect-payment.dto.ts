@@ -1,5 +1,11 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsIn, IsString, Matches, MaxLength } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsIn,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+} from 'class-validator';
 import { paymentModeEnum } from '../../../db/schema';
 
 const MODES = paymentModeEnum.enumValues;
@@ -16,10 +22,19 @@ export class ConnectPaymentDto {
   })
   accountId!: string;
 
-  @ApiProperty({ example: 'pk_test_51A2b3C' })
+  /**
+   * Optional, and unused by this product. Checkout happens on Stripe's own
+   * hosted page, so the browser never loads Stripe.js and never needs a
+   * publishable key — demanding one would be asking an organizer to go and
+   * fetch a value nothing reads. Kept because it is cheap to record for a
+   * future embedded flow, and because dropping the field outright would break
+   * callers already sending it.
+   */
+  @ApiPropertyOptional({ example: 'pk_test_51A2b3C' })
+  @IsOptional()
   @IsString()
   @MaxLength(255)
-  publishableKey!: string;
+  publishableKey?: string;
 
   @ApiProperty({ enum: MODES, example: 'test' })
   @IsIn([...MODES])

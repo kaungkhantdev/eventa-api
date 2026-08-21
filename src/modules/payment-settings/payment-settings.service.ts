@@ -51,7 +51,10 @@ export class PaymentSettingsService {
   ): Promise<PaymentSettingsResponseDto> {
     const check = await this.provider.verify(input.accountId);
     if (!check.ok) {
-      throw DomainException.validation(
+      // Named against the field, so the reason lands under the box it was
+      // typed into rather than at the foot of the form.
+      throw DomainException.invalidField(
+        'accountId',
         `That payment account could not be verified: ${check.reason ?? 'unknown reason'}`,
       );
     }
@@ -59,7 +62,7 @@ export class PaymentSettingsService {
     const saved = await this.repo.update(organizationId, {
       status: 'connected',
       accountId: input.accountId,
-      publishableKey: input.publishableKey,
+      publishableKey: input.publishableKey ?? null,
       mode: input.mode,
       connectedAt: this.clock.now(),
       disconnectedAt: null,

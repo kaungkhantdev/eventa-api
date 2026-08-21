@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Stripe from 'stripe';
 import { DomainException } from '../../../common/errors/domain.exception';
+import { STRIPE_API_VERSION } from '../../../common/stripe/stripe-api-version';
 import { Clock } from '../../../common/time/clock';
 import type { Env } from '../../../config/env.validation';
 import {
@@ -15,9 +16,6 @@ import {
   type StartedPayment,
   type VerifiedWebhook,
 } from '../ports/payment-provider.port';
-
-/** Pinned by the installed SDK — `Stripe.LatestApiVersion` accepts nothing else. */
-export const STRIPE_API_VERSION = '2026-07-29.dahlia';
 
 const MS_PER_SECOND = 1000;
 const THB = 'thb';
