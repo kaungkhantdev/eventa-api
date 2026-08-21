@@ -6,7 +6,11 @@ import { Clock } from '../../common/time/clock';
 import { PaymentCredentialsRepository } from './payment-credentials.repository';
 import { PaymentSettingsRepository } from './payment-settings.repository';
 import type { PaymentMode } from './payment-settings.types';
-import { assertKeysMatchMode, maskedTail } from './stripe-keys';
+import {
+  assertKeysMatchMode,
+  assertWebhookSecret,
+  maskedTail,
+} from './stripe-keys';
 import {
   PaymentProviderPort,
   type VerifyResult,
@@ -76,6 +80,7 @@ export class PaymentKeysService {
     input: SaveKeysInput,
   ): Promise<StoredKeysView> {
     assertKeysMatchMode(input.mode, input.publishableKey, input.secretKey);
+    assertWebhookSecret(input.webhookSecret);
     this.assertModeAllowedHere(input.mode);
     const verified = await this.assertKeyWorks(input.secretKey);
     const current = await this.settings.findOrCreate(organizationId);

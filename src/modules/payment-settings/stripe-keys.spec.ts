@@ -1,4 +1,9 @@
-import { assertKeysMatchMode, maskedTail, modeOfKey } from './stripe-keys';
+import {
+  assertKeysMatchMode,
+  assertWebhookSecret,
+  maskedTail,
+  modeOfKey,
+} from './stripe-keys';
 
 const TEST_PK = 'pk_test_51P9xEventa0aB3kY7cQ';
 const TEST_SK = 'sk_test_51P9xEventa7hV6tL1pX';
@@ -98,6 +103,35 @@ describe('stripe key rules (US-SET-08)', () => {
       expect(
         refusal(() => assertKeysMatchMode('test', 'nonsense', TEST_SK)),
       ).toBeTruthy();
+    });
+  });
+
+  /**
+   * The signing secret comes from a different page in Stripe to the API keys,
+   * and pasting the wrong thing there fails in the worst way available: keys
+   * save, checkout works, money moves, and no ticket is ever issued — because
+   * every callback fails verification silently.
+   */
+  describe('assertWebhookSecret', () => {
+    it('accepts a signing secret', () => {
+      expect(() =>
+        assertWebhookSecret('whsec_51P9xEventaSigningSecret'),
+      ).not.toThrow();
+    });
+
+    // The likeliest mistake: grabbing the API key page instead.
+    it('refuses a secret key pasted into the webhook box', () => {
+      expect(refusal(() => assertWebhookSecret(TEST_SK))).toMatch(/whsec_/i);
+    });
+
+    it('refuses anything that is not a signing secret', () => {
+      expect(refusal(() => assertWebhookSecret('hunter2'))).toBeTruthy();
+    });
+
+    // Absent is a real answer — it means "leave the stored one alone".
+    it('accepts an absent secret without complaint', () => {
+      expect(() => assertWebhookSecret(undefined)).not.toThrow();
+      expect(() => assertWebhookSecret('')).not.toThrow();
     });
   });
 

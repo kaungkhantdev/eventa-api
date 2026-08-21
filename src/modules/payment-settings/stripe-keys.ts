@@ -14,6 +14,9 @@ const MASK = '•'.repeat(VISIBLE_TAIL);
 /** `pk_` is designed to be public; the other two authorise real money. */
 const SECRET_KINDS = ['sk', 'rk'];
 
+/** Stripe's shape for an endpoint's signing secret. */
+const WEBHOOK_SECRET_SHAPE = /^whsec_[A-Za-z0-9]+$/;
+
 export function modeOfKey(key: string): PaymentMode | null {
   const mode = KEY_SHAPE.exec(key.trim())?.groups?.mode;
   return mode === 'test' || mode === 'live' ? mode : null;
@@ -108,6 +111,26 @@ function nameOfKind(kind: string): string {
 
 function fieldOf(label: string): string {
   return label === 'publishable key' ? 'publishableKey' : 'secretKey';
+}
+
+/**
+ * Refuse a signing secret that is not one (US-SET-08).
+ *
+ * It comes from a different page in Stripe to the API keys, and the likeliest
+ * mistake is grabbing the key page instead. That failure is the worst shape
+ * available: the keys save, checkout works, the money moves, and no ticket is
+ * ever issued — because every callback fails verification, silently.
+ *
+ * Absent is not a mistake: it means "leave the stored one alone".
+ */
+export function assertWebhookSecret(secret: string | undefined): void {
+  if (!secret) return;
+  if (!WEBHOOK_SECRET_SHAPE.test(secret.trim())) {
+    throw DomainException.invalidField(
+      'webhookSecret',
+      'That does not look like a signing secret. It starts with whsec_, and comes from Developers → Webhooks → your endpoint — not the API keys page.',
+    );
+  }
 }
 
 /**
