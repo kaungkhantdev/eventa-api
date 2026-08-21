@@ -4,9 +4,7 @@ import type Redis from 'ioredis';
 import { DomainException } from '../../common/errors/domain.exception';
 import { REDIS } from '../../common/redis/redis.constants';
 import type { Env } from '../../config/env.validation';
-
-const LOCKED_MESSAGE =
-  'Too many sign-in attempts. Please try again later or reset your password.';
+import { lockedMessage } from './lock-message';
 
 /**
  * Brute-force protection for sign-in (US-ACC-12). Counts consecutive failures per
@@ -29,11 +27,19 @@ export class LoginThrottleService {
     this.lockSeconds = config.get('LOGIN_LOCK_SECONDS', { infer: true });
   }
 
-  /** Refuse (429) while the identity is in a cool-off lock. */
+  /**
+   * Refuse (429) while the identity is in a cool-off lock, saying how long is
+   * left.
+   *
+   * `ttl` answers "is it locked" and "for how long" in one round trip, so the
+   * message costs nothing over the old existence check. A negative reply means
+   * the key went away between asking and reading — the lock has expired, so the
+   * attempt is allowed rather than refused with a time of -2.
+   */
   async assertNotLocked(identity: string): Promise<void> {
-    let locked = 0;
+    let secondsLeft = -2;
     try {
-      locked = await this.redis.exists(this.lockKey(identity));
+      secondsLeft = await this.redis.ttl(this.lockKey(identity));
     } catch (err) {
       this.logger.warn(
         { err },
@@ -41,7 +47,9 @@ export class LoginThrottleService {
       );
       return;
     }
-    if (locked) throw DomainException.tooManyRequests(LOCKED_MESSAGE);
+    // -2 is no such key, -1 is a key with no expiry. Only the second is a lock.
+    if (secondsLeft === -2) return;
+    throw DomainException.tooManyRequests(lockedMessage(secondsLeft));
   }
 
   /** Count a failed attempt; lock the identity once the limit is reached. */
