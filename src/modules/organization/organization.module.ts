@@ -3,6 +3,8 @@ import { AccessModule } from '../access/access.module';
 import { UploadsModule } from '../uploads/uploads.module';
 import { OrganizationController } from './organization.controller';
 import { OrganizationRepository } from './organization.repository';
+import { OrganizationSetupPort } from '../dashboard/ports/workspace-setup.port';
+import { OrganizationSetupAdapter } from './organization-setup.adapter';
 import { OrganizationLogoService } from './organization-logo.service';
 import { OrganizationService } from './organization.service';
 
@@ -15,10 +17,11 @@ import { OrganizationService } from './organization.service';
   imports: [AccessModule, UploadsModule],
   controllers: [OrganizationController],
   providers: [
+    { provide: OrganizationSetupPort, useClass: OrganizationSetupAdapter },
     OrganizationService,
     OrganizationLogoService,
     OrganizationRepository,
   ],
-  exports: [OrganizationService],
+  exports: [OrganizationService, OrganizationSetupPort],
 })
 export class OrganizationModule {}

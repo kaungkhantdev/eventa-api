@@ -139,6 +139,52 @@ export class HomeDto {
   generatedAt!: Date;
 }
 
+/**
+ * How far the workspace has been set up (US-DASH-01), one fact per step.
+ *
+ * Every field is nullable and null means WITHHELD, never "not done". A caller
+ * who may not see the payment settings is told nothing about them rather than
+ * being told to connect an account that is already connected.
+ */
+export class WorkspaceSetupDto {
+  @ApiProperty({
+    type: Boolean,
+    nullable: true,
+    description:
+      'Invoice details (address and tax ID) are filled in. Null when withheld.',
+  })
+  organizationConfigured!: boolean | null;
+
+  @ApiProperty({
+    type: Boolean,
+    nullable: true,
+    description: 'A payment account is connected. Null when withheld.',
+  })
+  paymentsConnected!: boolean | null;
+
+  @ApiProperty({
+    type: Boolean,
+    nullable: true,
+    description:
+      'At least one event exists, drafts included. Null when withheld.',
+  })
+  eventCreated!: boolean | null;
+
+  @ApiProperty({
+    type: Boolean,
+    nullable: true,
+    description: 'At least one ticket type exists. Null when withheld.',
+  })
+  ticketTypeAdded!: boolean | null;
+
+  @ApiProperty({
+    type: Boolean,
+    nullable: true,
+    description: 'At least one event page is published. Null when withheld.',
+  })
+  eventPublished!: boolean | null;
+}
+
 class RevenuePointDto {
   @ApiProperty({ format: 'date-time' })
   at!: Date;

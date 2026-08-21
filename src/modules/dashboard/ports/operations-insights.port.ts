@@ -23,6 +23,13 @@ export abstract class InventoryInsightsPort {
     organizationId: number,
     limit: number,
   ): Promise<SellingFastTier[]>;
+
+  /**
+   * Whether anything is on sale at all — the setup checklist's fourth step.
+   * An existence check, not a count: the question is "has this been done", and
+   * a number would invite the caller to render one that means nothing.
+   */
+  abstract hasTicketType(organizationId: number): Promise<boolean>;
 }
 
 export interface EventReach {
@@ -32,8 +39,23 @@ export interface EventReach {
   capacityFilledPercent: number | null;
 }
 
+/** How far the event side of setup has got (US-DASH-01, the first-run path). */
+export interface EventMilestones {
+  /** Anything at all, including a draft — step three is "save as a draft". */
+  created: boolean;
+  /** Anything with a live public page — where registrations come from. */
+  published: boolean;
+}
+
 export abstract class EventInsightsPort {
   abstract reach(organizationId: number): Promise<EventReach>;
+
+  /**
+   * Two existence checks in one round trip, because they are read together and
+   * a workspace that has published necessarily created — asking separately
+   * invites a caller to render a state that cannot exist.
+   */
+  abstract setupMilestones(organizationId: number): Promise<EventMilestones>;
 }
 
 export interface CheckInRate {

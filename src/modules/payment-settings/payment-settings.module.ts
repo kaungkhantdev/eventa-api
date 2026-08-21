@@ -8,6 +8,8 @@ import { PayoutAccountAdapter } from './payout-account.adapter';
 import { PaymentSettingsController } from './payment-settings.controller';
 import { PaymentSettingsRepository } from './payment-settings.repository';
 import { PaymentSettingsService } from './payment-settings.service';
+import { PaymentSetupPort } from '../dashboard/ports/workspace-setup.port';
+import { PaymentSetupAdapter } from './payment-setup.adapter';
 import { PaymentProviderPort } from './ports/payment-provider.port';
 import { StubPaymentProvider } from './stub-payment.provider';
 
@@ -30,7 +32,8 @@ import { StubPaymentProvider } from './stub-payment.provider';
     PaymentSettingsRepository,
     { provide: PaymentProviderPort, useClass: StubPaymentProvider },
     { provide: PayoutAccountPort, useClass: PayoutAccountAdapter },
+    { provide: PaymentSetupPort, useClass: PaymentSetupAdapter },
   ],
-  exports: [PaymentSettingsService, PayoutAccountPort],
+  exports: [PaymentSettingsService, PayoutAccountPort, PaymentSetupPort],
 })
 export class PaymentSettingsModule {}
