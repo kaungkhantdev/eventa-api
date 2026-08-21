@@ -30,11 +30,14 @@ export class PaymentSettingsService {
     private readonly repo: PaymentSettingsRepository,
     private readonly organization: OrganizationService,
     private readonly clock: Clock,
+    /** `PUBLIC_API_URL` — where Stripe can reach this service. */
+    private readonly publicApiUrl: string,
   ) {}
 
   async get(organizationId: number): Promise<PaymentSettingsResponseDto> {
     return toPaymentSettingsResponse(
       await this.repo.findOrCreate(organizationId),
+      this.publicApiUrl,
     );
   }
 
@@ -47,7 +50,7 @@ export class PaymentSettingsService {
     const warnings = await this.currencyWarnings(organizationId, input);
     await this.repo.findOrCreate(organizationId);
     const saved = await this.repo.update(organizationId, pickProvided(input));
-    return { ...toPaymentSettingsResponse(saved), warnings };
+    return { ...toPaymentSettingsResponse(saved, this.publicApiUrl), warnings };
   }
 
   private assertValidPreferences(input: UpdatePreferencesInput): void {

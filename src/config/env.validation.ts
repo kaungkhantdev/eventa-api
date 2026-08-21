@@ -64,6 +64,18 @@ export const envSchema = z
       .default('http://localhost:5173')
       .transform((v) => v.replace(/\/+$/, '')),
 
+    // Where THIS service is reachable from the internet. Shown to organizers so
+    // they can register their workspace's webhook endpoint in Stripe, so it has
+    // to be the address Stripe can actually reach — a tunnel in dev, the real
+    // host in deployment. Not derivable from a request: a callback arrives at
+    // whatever proxy sits in front, and guessing from Host is how you end up
+    // telling somebody to register a URL that only resolves inside the cluster.
+    PUBLIC_API_URL: z
+      .string()
+      .url()
+      .default('http://localhost:3000')
+      .transform((v) => v.replace(/\/+$/, '')),
+
     // Observability
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])

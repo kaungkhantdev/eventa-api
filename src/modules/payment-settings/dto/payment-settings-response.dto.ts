@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { PaymentSettingsRow } from '../payment-settings.types';
+import { webhookUrlFor } from '../webhook-url';
 
 /**
  * A workspace's payment connection + checkout preferences. Carries **no secret**
@@ -23,6 +24,12 @@ export class PaymentSettingsResponseDto {
     description: 'True while in test mode — no real charges happen yet',
   })
   testMode!: boolean;
+  @ApiProperty({
+    nullable: true,
+    description:
+      "This workspace's own webhook endpoint, to register in Stripe. Null until keys are first saved.",
+  })
+  webhookUrl!: string | null;
   @ApiPropertyOptional({
     type: [String],
     description: 'Non-blocking advisories',
@@ -32,6 +39,7 @@ export class PaymentSettingsResponseDto {
 
 export function toPaymentSettingsResponse(
   row: PaymentSettingsRow,
+  publicApiUrl = '',
 ): PaymentSettingsResponseDto {
   return {
     provider: row.provider,
@@ -45,6 +53,7 @@ export function toPaymentSettingsResponse(
     saveCards: row.saveCards,
     emailReceipts: row.emailReceipts,
     testMode: row.mode === 'test',
+    webhookUrl: webhookUrlFor(publicApiUrl, row.webhookToken),
     warnings: [],
   };
 }

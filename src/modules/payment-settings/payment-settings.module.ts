@@ -4,6 +4,7 @@ import { Clock } from '../../common/time/clock';
 import type { Env } from '../../config/env.validation';
 import { AccessModule } from '../access/access.module';
 import { OrganizationModule } from '../organization/organization.module';
+import { OrganizationService } from '../organization/organization.service';
 import { TicketingModule } from '../ticketing/ticketing.module';
 import { GatewayCredentialsPort } from '../payments/ports/gateway-credentials.port';
 import { MerchantAccountPort } from '../payments/ports/merchant-account.port';
@@ -40,7 +41,27 @@ import { StripeAccountAdapter } from './providers/stripe-account.adapter';
   imports: [AccessModule, OrganizationModule, TicketingModule],
   controllers: [PaymentSettingsController],
   providers: [
-    PaymentSettingsService,
+    {
+      provide: PaymentSettingsService,
+      useFactory: (
+        repo: PaymentSettingsRepository,
+        organization: OrganizationService,
+        clock: Clock,
+        config: ConfigService<Env, true>,
+      ) =>
+        new PaymentSettingsService(
+          repo,
+          organization,
+          clock,
+          config.getOrThrow('PUBLIC_API_URL', { infer: true }),
+        ),
+      inject: [
+        PaymentSettingsRepository,
+        OrganizationService,
+        Clock,
+        ConfigService,
+      ],
+    },
     {
       provide: PaymentKeysService,
       useFactory: (
