@@ -129,6 +129,67 @@ describe('AccessService', () => {
     });
   });
 
+  /**
+   * The Users screen offers a search box, a role filter and status tabs, and
+   * the list is paged SERVER-side — so every one of them has to reach the
+   * query. Filtering a page in the browser would leave the tab counts and the
+   * paginator describing a different set of people from the rows on screen.
+   */
+  describe('listMembers — filters', () => {
+    beforeEach(() => {
+      repo.listMembers.mockResolvedValue({ items: [], total: 0 });
+    });
+
+    const listedWith = async (query: Record<string, unknown>) => {
+      await service.listMembers(1, query);
+      return repo.listMembers.mock.calls[0][1];
+    };
+
+    it('passes a search term through', async () => {
+      expect(await listedWith({ search: 'anong' })).toMatchObject({
+        search: 'anong',
+      });
+    });
+
+    // A box somebody typed into and cleared must not become a filter for the
+    // empty string, which matches nobody.
+    it('drops a blank search rather than filtering on nothing', async () => {
+      expect(await listedWith({ search: '   ' })).toMatchObject({
+        search: undefined,
+      });
+    });
+
+    it('trims a pasted term', async () => {
+      expect(await listedWith({ search: '  anong  ' })).toMatchObject({
+        search: 'anong',
+      });
+    });
+
+    it('passes a status filter through', async () => {
+      expect(await listedWith({ status: 'Suspended' })).toMatchObject({
+        status: 'Suspended',
+      });
+    });
+
+    it('passes a role filter through', async () => {
+      expect(await listedWith({ roleId: 3 })).toMatchObject({ roleId: 3 });
+    });
+
+    it('applies all three together', async () => {
+      expect(
+        await listedWith({ search: 'ploy', status: 'Active', roleId: 2 }),
+      ).toMatchObject({ search: 'ploy', status: 'Active', roleId: 2 });
+    });
+
+    it('asks for everybody when nothing is filtered', async () => {
+      expect(await listedWith({})).toMatchObject({
+        search: undefined,
+        status: undefined,
+        roleId: undefined,
+      });
+    });
+  });
+
   describe('listMembers', () => {
     it('returns a mapped Paginated with default paging', async () => {
       repo.listMembers.mockResolvedValue({

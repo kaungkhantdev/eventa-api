@@ -1,3 +1,4 @@
+import { memberStatusEnum } from '../../db/schema';
 export interface PermissionCatalogItem {
   key: string;
   group: string;
@@ -26,14 +27,32 @@ export interface MemberRow {
   status: string;
 }
 
+/** Derived from the schema, never re-typed — the enum is the source of truth. */
+export type MemberStatus = (typeof memberStatusEnum.enumValues)[number];
+
 export interface ListMembersQuery {
   page?: number;
   limit?: number;
+  search?: string;
+  status?: MemberStatus;
+  roleId?: number;
 }
 
 export interface ListMembersOptions {
   limit: number;
   offset: number;
+  /** Already trimmed; undefined means "do not filter", never "match nothing". */
+  search?: string;
+  status?: MemberStatus;
+  roleId?: number;
+}
+
+/** How many members sit in each status — the Users tabs' counts. */
+export interface MemberStatusCounts {
+  all: number;
+  active: number;
+  invited: number;
+  suspended: number;
 }
 
 /** Payload to invite a teammate (admin side). */
