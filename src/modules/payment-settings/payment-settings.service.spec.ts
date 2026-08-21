@@ -4,7 +4,6 @@ import type { OrganizationService } from '../organization/organization.service';
 import { PaymentSettingsRepository } from './payment-settings.repository';
 import { PaymentSettingsService } from './payment-settings.service';
 import type { PaymentSettingsRow } from './payment-settings.types';
-import type { PaymentProviderPort } from './ports/payment-provider.port';
 
 const orgId = 1;
 const NOW = new Date('2026-08-01T00:00:00Z');
@@ -31,9 +30,13 @@ function settingsRow(
   } as PaymentSettingsRow;
 }
 
+/**
+ * Checkout and receipt preferences only. Connecting, testing and disconnecting
+ * moved to `PaymentKeysService` when credentials became per-workspace — a
+ * secret should have exactly one door, and this is not it.
+ */
 describe('PaymentSettingsService', () => {
   let repo: jest.Mocked<PaymentSettingsRepository>;
-  let provider: jest.Mocked<PaymentProviderPort>;
   let organization: jest.Mocked<OrganizationService>;
   let service: PaymentSettingsService;
 
@@ -46,139 +49,11 @@ describe('PaymentSettingsService', () => {
           Promise.resolve(settingsRow(values as Partial<PaymentSettingsRow>)),
         ),
     } as unknown as jest.Mocked<PaymentSettingsRepository>;
-    provider = {
-      verify: jest.fn().mockResolvedValue({ ok: true }),
-    };
     organization = {
       get: jest.fn().mockResolvedValue({ currency: 'THB' }),
     } as unknown as jest.Mocked<OrganizationService>;
     const clock: Clock = { now: () => NOW };
-    service = new PaymentSettingsService(repo, provider, organization, clock);
-  });
-
-  describe('connect (US-SET-08)', () => {
-    it('marks the workspace connected and stamps when', async () => {
-      const res = await service.connect(orgId, {
-        accountId: 'acct_123',
-        publishableKey: 'pk_test_abc',
-        mode: 'test',
-      });
-      expect(repo.update).toHaveBeenCalledWith(
-        orgId,
-        expect.objectContaining({
-          status: 'connected',
-          accountId: 'acct_123',
-          mode: 'test',
-          connectedAt: NOW,
-        }),
-      );
-      expect(res.status).toBe('connected');
-    });
-
-    it('refuses to connect when the provider rejects the account', async () => {
-      provider.verify.mockResolvedValue({
-        ok: false,
-        reason: 'No such account',
-      });
-      await expect(
-        service.connect(orgId, {
-          accountId: 'acct_bad',
-          publishableKey: 'pk_test_x',
-          mode: 'test',
-        }),
-      ).rejects.toBeInstanceOf(DomainException);
-      expect(repo.update).not.toHaveBeenCalled();
-    });
-
-    /**
-     * The refusal belongs under the box the organizer typed into. There is one
-     * field they could have got wrong, and a message stranded at the foot of
-     * the form makes them guess which.
-     */
-    it('blames the account id, so the message lands on that field', async () => {
-      provider.verify.mockResolvedValue({
-        ok: false,
-        reason: 'No such account',
-      });
-      const failure = await service
-        .connect(orgId, { accountId: 'acct_bad', mode: 'test' })
-        .catch((e: DomainException) => e);
-      const [refused] = (failure as DomainException).errors ?? [];
-      expect(refused?.field).toBe('accountId');
-      expect(refused?.message).toContain('No such account');
-    });
-
-    // Checkout is hosted, so nothing in the browser loads Stripe.js: asking for
-    // a publishable key would be demanding a value this product never reads.
-    it('connects without a publishable key', async () => {
-      const res = await service.connect(orgId, {
-        accountId: 'acct_123',
-        mode: 'test',
-      });
-      expect(res.status).toBe('connected');
-      expect(repo.update).toHaveBeenCalledWith(
-        orgId,
-        expect.objectContaining({ publishableKey: null }),
-      );
-    });
-
-    it('never stores or returns a secret — only the account ref + publishable key', async () => {
-      const res = await service.connect(orgId, {
-        accountId: 'acct_123',
-        publishableKey: 'pk_test_abc',
-        mode: 'live',
-      });
-      expect(JSON.stringify(res)).not.toMatch(/sk_|secret/i);
-      const [, values] = repo.update.mock.calls[0];
-      expect(Object.keys(values)).not.toContain('secretKey');
-    });
-  });
-
-  describe('testConnection (US-SET-08)', () => {
-    it('reports success without moving money', async () => {
-      repo.findOrCreate.mockResolvedValue(
-        settingsRow({ status: 'connected', accountId: 'acct_123' }),
-      );
-      const res = await service.testConnection(orgId);
-      expect(res).toMatchObject({ ok: true });
-      expect(provider.verify).toHaveBeenCalledWith('acct_123');
-    });
-
-    it('gives the reason when the credentials do not work', async () => {
-      repo.findOrCreate.mockResolvedValue(
-        settingsRow({ status: 'connected', accountId: 'acct_123' }),
-      );
-      provider.verify.mockResolvedValue({ ok: false, reason: 'Key revoked' });
-      expect(await service.testConnection(orgId)).toMatchObject({
-        ok: false,
-        reason: 'Key revoked',
-      });
-    });
-
-    it('refuses when nothing is connected yet', async () => {
-      await expect(service.testConnection(orgId)).rejects.toBeInstanceOf(
-        DomainException,
-      );
-    });
-  });
-
-  describe('disconnect (US-SET-08)', () => {
-    it('switches paid checkout off and stamps when, leaving history alone', async () => {
-      repo.findOrCreate.mockResolvedValue(
-        settingsRow({ status: 'connected', accountId: 'acct_123' }),
-      );
-      const res = await service.disconnect(orgId);
-      expect(repo.update).toHaveBeenCalledWith(
-        orgId,
-        expect.objectContaining({
-          status: 'disconnected',
-          accountId: null,
-          publishableKey: null,
-          disconnectedAt: NOW,
-        }),
-      );
-      expect(res.status).toBe('disconnected');
-    });
+    service = new PaymentSettingsService(repo, organization, clock);
   });
 
   describe('updatePreferences (US-SET-10)', () => {

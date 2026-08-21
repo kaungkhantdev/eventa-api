@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import type { Env } from '../../config/env.validation';
 import { AccessModule } from '../access/access.module';
 import { OrganizationModule } from '../organization/organization.module';
 import { TicketingModule } from '../ticketing/ticketing.module';
 import { MerchantAccountPort } from '../payments/ports/merchant-account.port';
 import { PayoutAccountPort } from '../payouts/ports/payout-account.port';
 import { MerchantAccountAdapter } from './merchant-account.adapter';
+import { SecretCipher } from '../../common/crypto/secret-cipher';
+import { PaymentCredentialsRepository } from './payment-credentials.repository';
+import { PaymentKeysService } from './payment-keys.service';
 import { PaymentMethodsService } from './payment-methods.service';
 import { PayoutAccountAdapter } from './payout-account.adapter';
 import { PaymentSettingsController } from './payment-settings.controller';
@@ -35,16 +36,17 @@ import { StripeAccountAdapter } from './providers/stripe-account.adapter';
   controllers: [PaymentSettingsController],
   providers: [
     PaymentSettingsService,
+    PaymentKeysService,
     PaymentMethodsService,
     PaymentSettingsRepository,
+    PaymentCredentialsRepository,
+    SecretCipher,
     {
       provide: PaymentProviderPort,
-      // A factory, not `useClass`: the adapter takes an optional Stripe client
-      // so a test can pass its own, and Nest would try to resolve that as a
-      // dependency. Same reason as PaymentsModule's provider.
-      useFactory: (config: ConfigService<Env, true>) =>
-        new StripeAccountAdapter(config),
-      inject: [ConfigService],
+      // A factory, not `useClass`: the adapter takes an optional client
+      // factory so a test can supply its own, and Nest would try to resolve
+      // that as a dependency. Same reason as PaymentsModule's provider.
+      useFactory: () => new StripeAccountAdapter(),
     },
     { provide: PayoutAccountPort, useClass: PayoutAccountAdapter },
     { provide: MerchantAccountPort, useClass: MerchantAccountAdapter },
@@ -52,6 +54,7 @@ import { StripeAccountAdapter } from './providers/stripe-account.adapter';
   ],
   exports: [
     PaymentSettingsService,
+    PaymentKeysService,
     PayoutAccountPort,
     MerchantAccountPort,
     PaymentSetupPort,

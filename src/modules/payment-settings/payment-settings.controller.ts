@@ -20,18 +20,22 @@ import { ResponseMessage } from '../../common/decorators/response-message.decora
 import { ApiErrorDto } from '../../common/errors/error-envelope';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { ApiData, ApiList } from '../../common/http/api-data.decorator';
-import { paymentMethodEnum } from '../../db/schema';
+import { paymentMethodEnum, paymentModeEnum } from '../../db/schema';
 import type { AuthContext } from '../auth/auth.types';
-import { ConnectPaymentDto } from './dto/connect-payment.dto';
 import { PaymentSettingsResponseDto } from './dto/payment-settings-response.dto';
+import { SaveKeysDto } from './dto/save-keys.dto';
 import { SetPaymentMethodDto } from './dto/set-payment-method.dto';
 import { UpdatePaymentPreferencesDto } from './dto/update-payment-preferences.dto';
 import {
   PaymentMethodsService,
   type PaymentMethodView,
 } from './payment-methods.service';
+import {
+  PaymentKeysService,
+  type StoredKeysView,
+} from './payment-keys.service';
 import { PaymentSettingsService } from './payment-settings.service';
-import type { PaymentMethod } from './payment-settings.types';
+import type { PaymentMethod, PaymentMode } from './payment-settings.types';
 import type { VerifyResult } from './ports/payment-provider.port';
 
 /**
@@ -47,6 +51,7 @@ import type { VerifyResult } from './ports/payment-provider.port';
 export class PaymentSettingsController {
   constructor(
     private readonly settings: PaymentSettingsService,
+    private readonly keys: PaymentKeysService,
     private readonly methods: PaymentMethodsService,
   ) {}
 
@@ -58,16 +63,33 @@ export class PaymentSettingsController {
     return this.settings.get(auth.organizationId);
   }
 
-  @Post('connect')
+  /**
+   * Save this workspace's own Stripe keys. The secret is stored encrypted and
+   * never comes back — the response carries a masked tail, which is all the
+   * screen needs to say WHICH key is saved.
+   */
+  @Post('keys')
   @RequirePermissions(Permission.setIntegrations)
   @HttpCode(HttpStatus.OK)
-  @ResponseMessage('Payment account connected.')
-  @ApiData(PaymentSettingsResponseDto)
-  connect(
+  @ResponseMessage('Payment keys saved.')
+  @ApiData(Object)
+  saveKeys(
     @CurrentAuth() auth: AuthContext,
-    @Body() dto: ConnectPaymentDto,
-  ): Promise<PaymentSettingsResponseDto> {
-    return this.settings.connect(auth.organizationId, dto);
+    @Body() dto: SaveKeysDto,
+  ): Promise<StoredKeysView> {
+    return this.keys.saveKeys(auth.organizationId, dto);
+  }
+
+  /** What is stored for one mode — masked. Never the key itself. */
+  @Get('keys/:mode')
+  @RequirePermissions(Permission.setIntegrations)
+  @ResponseMessage('Payment keys retrieved.')
+  @ApiData(Object)
+  storedKeys(
+    @CurrentAuth() auth: AuthContext,
+    @Param('mode') mode: string,
+  ): Promise<StoredKeysView> {
+    return this.keys.describe(auth.organizationId, assertKnownMode(mode));
   }
 
   @Post('test')
@@ -75,7 +97,7 @@ export class PaymentSettingsController {
   @HttpCode(HttpStatus.OK)
   @ResponseMessage('Connection tested.')
   test(@CurrentAuth() auth: AuthContext): Promise<VerifyResult> {
-    return this.settings.testConnection(auth.organizationId);
+    return this.keys.testConnection(auth.organizationId);
   }
 
   @Post('disconnect')
@@ -83,10 +105,11 @@ export class PaymentSettingsController {
   @HttpCode(HttpStatus.OK)
   @ResponseMessage('Payment account disconnected.')
   @ApiData(PaymentSettingsResponseDto)
-  disconnect(
+  async disconnect(
     @CurrentAuth() auth: AuthContext,
   ): Promise<PaymentSettingsResponseDto> {
-    return this.settings.disconnect(auth.organizationId);
+    await this.keys.disconnect(auth.organizationId);
+    return this.settings.get(auth.organizationId);
   }
 
   @Patch()
@@ -123,6 +146,13 @@ export class PaymentSettingsController {
       dto.enabled,
     );
   }
+}
+
+/** Path params are strings; narrow to the schema enum or 404. */
+function assertKnownMode(value: string): PaymentMode {
+  const known = paymentModeEnum.enumValues.find((m) => m === value);
+  if (!known) throw DomainException.notFound(`Unknown payment mode "${value}".`);
+  return known;
 }
 
 /** Path params are strings; narrow to the schema enum or 404. */

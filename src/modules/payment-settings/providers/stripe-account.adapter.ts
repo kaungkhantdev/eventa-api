@@ -1,48 +1,50 @@
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import Stripe from 'stripe';
 import { STRIPE_API_VERSION } from '../../../common/stripe/stripe-api-version';
-import type { Env } from '../../../config/env.validation';
 import {
   PaymentProviderPort,
   type VerifyResult,
 } from '../ports/payment-provider.port';
 
+/** How a Stripe client is made from a key. Injected so a test can supply its own. */
+export type StripeClientFactory = (secretKey: string) => Stripe;
+
+export const defaultStripeClient: StripeClientFactory = (secretKey) =>
+  new Stripe(secretKey, { apiVersion: STRIPE_API_VERSION, typescript: true });
+
 /**
  * Stripe, behind PaymentSettings' `PaymentProviderPort` — proving a workspace's
- * connected account is real and able to take money (US-SET-08).
+ * own key is real and able to take money (US-SET-08).
  *
  * Read-only by design: "Test connection" must never move money, so this asks
- * Stripe about the account and nothing more.
+ * Stripe about the account behind the key and nothing more.
  *
- * The platform key is what makes the check meaningful. `accounts.retrieve` on a
- * connected account only succeeds for accounts connected to THIS platform, so
- * an organizer cannot paste a stranger's `acct_…` and have it accepted — Stripe
- * refuses the lookup, and a refusal is an answer rather than an error.
+ * The key is the identity here. There is no platform key that could look up an
+ * arbitrary account, so `accounts.retrieve()` is called with **no argument** —
+ * "the account this key belongs to". That is what makes the check meaningful:
+ * an organizer cannot verify their way into somebody else's standing.
  *
- * **PCI SAQ-A:** no card data, and no tenant secret. `acct_…` is a reference.
+ * **The key is borrowed, never kept.** It arrives decrypted for the length of
+ * one call, is used to build one client, and is never stored, logged, or
+ * returned — including in a failure reason.
+ *
+ * **PCI SAQ-A:** no card data passes through here.
  */
 @Injectable()
 export class StripeAccountAdapter extends PaymentProviderPort {
-  private readonly stripe: Stripe;
-
-  constructor(config: ConfigService<Env, true>, client?: Stripe) {
+  constructor(
+    private readonly clientFor: StripeClientFactory = defaultStripeClient,
+  ) {
     super();
-    this.stripe =
-      client ??
-      new Stripe(config.getOrThrow('STRIPE_SECRET_KEY', { infer: true }), {
-        apiVersion: STRIPE_API_VERSION,
-        typescript: true,
-      });
   }
 
-  async verify(accountId: string): Promise<VerifyResult> {
+  async verifyKey(secretKey: string): Promise<VerifyResult> {
     try {
-      const account = await this.stripe.accounts.retrieve(accountId);
+      const account = await this.clientFor(secretKey).accounts.retrieveCurrent();
       if (!account.charges_enabled) {
         return { ok: false, reason: whyNotChargeable(account) };
       }
-      return { ok: true };
+      return { ok: true, accountId: account.id };
     } catch (error) {
       return { ok: false, reason: refusalReason(error) };
     }
@@ -68,11 +70,12 @@ function whyNotChargeable(account: Stripe.Account): string {
 }
 
 /**
- * Stripe's own message is written for the person who typed the account id — "No
- * such account: acct_…" is exactly what they need. Anything else is our
- * problem, not theirs, and its detail does not belong in an API response.
+ * Stripe's own message is written for the person who pasted the key — "Invalid
+ * API Key provided" is exactly what they need, and Stripe truncates the key in
+ * it. Anything else is our problem, not theirs: its detail does not belong in
+ * an API response, and an arbitrary error could carry the key verbatim.
  */
 function refusalReason(error: unknown): string {
   if (error instanceof Stripe.errors.StripeError) return error.message;
-  return 'Stripe could not be reached to check this account. Please try again.';
+  return 'Stripe could not be reached to check this key. Please try again.';
 }

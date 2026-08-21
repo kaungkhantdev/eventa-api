@@ -1,6 +1,11 @@
-import type { paymentMethodSettings, paymentSettings } from '../../db/schema';
+import type {
+  paymentCredentials,
+  paymentMethodSettings,
+  paymentSettings,
+} from '../../db/schema';
 
 export type PaymentSettingsRow = typeof paymentSettings.$inferSelect;
+export type PaymentCredentialsRow = typeof paymentCredentials.$inferSelect;
 export type PaymentMethodSettingRow = typeof paymentMethodSettings.$inferSelect;
 export type PaymentMethod = PaymentMethodSettingRow['method'];
 export type PaymentMode = PaymentSettingsRow['mode'];

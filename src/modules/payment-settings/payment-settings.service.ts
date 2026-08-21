@@ -8,14 +8,9 @@ import {
 } from './dto/payment-settings-response.dto';
 import { PaymentSettingsRepository } from './payment-settings.repository';
 import type {
-  ConnectInput,
   PaymentSettingsRow,
   UpdatePreferencesInput,
 } from './payment-settings.types';
-import {
-  PaymentProviderPort,
-  type VerifyResult,
-} from './ports/payment-provider.port';
 
 /** Stripe's hard limit on what fits a card statement line. */
 const MAX_DESCRIPTOR = 22;
@@ -23,17 +18,16 @@ const DESCRIPTOR_PATTERN = /^[A-Za-z0-9 .,'-]*$/;
 const CURRENCY_PATTERN = /^[A-Z]{3}$/;
 
 /**
- * A workspace's payment connection and checkout preferences (US-SET-08/10).
+ * A workspace's checkout and receipt preferences (US-SET-10).
  *
- * **PCI SAQ-A:** no card data and no provider secret ever passes through here.
- * Connecting stores only the provider's account reference and its publishable
- * key, so there is nothing sensitive to show back after saving.
+ * Reads the connection state but never changes it: the keys themselves belong to
+ * `PaymentKeysService`, which is the only place a credential is handled. Keeping
+ * that in one file is the point — a secret should have exactly one door.
  */
 @Injectable()
 export class PaymentSettingsService {
   constructor(
     private readonly repo: PaymentSettingsRepository,
-    private readonly provider: PaymentProviderPort,
     private readonly organization: OrganizationService,
     private readonly clock: Clock,
   ) {}
@@ -42,60 +36,6 @@ export class PaymentSettingsService {
     return toPaymentSettingsResponse(
       await this.repo.findOrCreate(organizationId),
     );
-  }
-
-  /** Connect a provider account, proving it works before recording it. */
-  async connect(
-    organizationId: number,
-    input: ConnectInput,
-  ): Promise<PaymentSettingsResponseDto> {
-    const check = await this.provider.verify(input.accountId);
-    if (!check.ok) {
-      // Named against the field, so the reason lands under the box it was
-      // typed into rather than at the foot of the form.
-      throw DomainException.invalidField(
-        'accountId',
-        `That payment account could not be verified: ${check.reason ?? 'unknown reason'}`,
-      );
-    }
-    await this.repo.findOrCreate(organizationId);
-    const saved = await this.repo.update(organizationId, {
-      status: 'connected',
-      accountId: input.accountId,
-      publishableKey: input.publishableKey ?? null,
-      mode: input.mode,
-      connectedAt: this.clock.now(),
-      disconnectedAt: null,
-    });
-    return toPaymentSettingsResponse(saved);
-  }
-
-  /** Prove the saved credentials work — read-only, no money moves. */
-  async testConnection(organizationId: number): Promise<VerifyResult> {
-    const current = await this.repo.findOrCreate(organizationId);
-    if (current.status !== 'connected' || !current.accountId) {
-      throw DomainException.validation(
-        'Connect a payment account before testing the connection.',
-      );
-    }
-    return this.provider.verify(current.accountId);
-  }
-
-  /**
-   * Disconnect: paid checkout stops, free events keep working, and past orders
-   * and payouts are untouched (nothing here writes to them).
-   */
-  async disconnect(
-    organizationId: number,
-  ): Promise<PaymentSettingsResponseDto> {
-    await this.repo.findOrCreate(organizationId);
-    const saved = await this.repo.update(organizationId, {
-      status: 'disconnected',
-      accountId: null,
-      publishableKey: null,
-      disconnectedAt: this.clock.now(),
-    });
-    return toPaymentSettingsResponse(saved);
   }
 
   /** Checkout & receipt preferences (US-SET-10). */

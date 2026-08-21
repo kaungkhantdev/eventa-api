@@ -1,20 +1,8 @@
-import type { ConfigService } from '@nestjs/config';
 import Stripe from 'stripe';
-import type { Env } from '../../../config/env.validation';
 import { StripeAccountAdapter } from './stripe-account.adapter';
 
+const SECRET = 'sk_test_51P9xEventa7hV6tL1pX';
 const ACCOUNT = 'acct_1A2b3C';
-
-function config(): ConfigService<Env, true> {
-  return {
-    getOrThrow: () => 'sk_test_dummy',
-  } as unknown as ConfigService<Env, true>;
-}
-
-function harness(retrieve: jest.Mock): StripeAccountAdapter {
-  const client = { accounts: { retrieve } } as unknown as Stripe;
-  return new StripeAccountAdapter(config(), client);
-}
 
 const answering = (account: Partial<Stripe.Account>) =>
   jest.fn().mockResolvedValue(account);
@@ -22,37 +10,74 @@ const answering = (account: Partial<Stripe.Account>) =>
 const refusing = (error: unknown) => jest.fn().mockRejectedValue(error);
 
 /**
- * "Connected" has to mean Stripe agrees, not that a string looked plausible.
+ * A harness that records which key the client was built with, so the adapter
+ * cannot quietly authenticate as somebody else.
+ */
+function harness(retrieve: jest.Mock) {
+  const built: string[] = [];
+  const adapter = new StripeAccountAdapter((key) => {
+    built.push(key);
+    return { accounts: { retrieveCurrent: retrieve } } as unknown as Stripe;
+  });
+  return { adapter, built };
+}
+
+/**
+ * "Connected" has to mean Stripe agrees, and it has to mean Stripe agrees
+ * **with this workspace's own key**.
  *
- * This replaced a regex that only checked the reference began `acct_`. A typo,
- * an account from another platform, or one whose onboarding was never finished
- * all passed it — and the workspace was then marked connected, shown as ready
- * to take money, and only found out at the till when a real buyer's charge
- * failed. Asking Stripe is the whole job of this adapter.
+ * This replaced a regex that only checked a reference began `acct_`. A typo, an
+ * account belonging to somebody else, or one whose onboarding was never
+ * finished all passed it — the workspace was marked connected, shown as ready
+ * to take money, and found out at the till, by a buyer.
  */
 describe('StripeAccountAdapter', () => {
-  it('accepts an account Stripe will let take money', async () => {
-    const adapter = harness(answering({ charges_enabled: true }));
-    await expect(adapter.verify(ACCOUNT)).resolves.toEqual({ ok: true });
+  it('accepts a key Stripe will let take money, and reports whose it is', async () => {
+    const { adapter } = harness(
+      answering({ id: ACCOUNT, charges_enabled: true }),
+    );
+    await expect(adapter.verifyKey(SECRET)).resolves.toEqual({
+      ok: true,
+      accountId: ACCOUNT,
+    });
   });
 
-  it('asks Stripe about the account it was given', async () => {
-    const retrieve = answering({ charges_enabled: true });
-    await harness(retrieve).verify(ACCOUNT);
-    expect(retrieve).toHaveBeenCalledWith(ACCOUNT);
+  /**
+   * The key is the identity. Building the client with anything else would
+   * verify the wrong account and mark a workspace ready on somebody else's
+   * standing.
+   */
+  it('authenticates as the key it was given, not a shared one', async () => {
+    const { adapter, built } = harness(
+      answering({ id: ACCOUNT, charges_enabled: true }),
+    );
+    await adapter.verifyKey(SECRET);
+    expect(built).toEqual([SECRET]);
+  });
+
+  /**
+   * `retrieveCurrent` is Stripe's own name for "the account this key belongs
+   * to". `retrieve(id)` would ask a different, weaker question — and under
+   * per-workspace keys there is no key that could name anyone else's account.
+   */
+  it('asks about the key’s own account', async () => {
+    const retrieve = answering({ id: ACCOUNT, charges_enabled: true });
+    await harness(retrieve).adapter.verifyKey(SECRET);
+    expect(retrieve).toHaveBeenCalledWith();
   });
 
   describe('an account that cannot take money', () => {
     it('refuses one Stripe has disabled, and says which reason', async () => {
-      const adapter = harness(
+      const { adapter } = harness(
         answering({
+          id: ACCOUNT,
           charges_enabled: false,
           requirements: {
             disabled_reason: 'requirements.past_due',
           } as Stripe.Account.Requirements,
         }),
       );
-      const result = await adapter.verify(ACCOUNT);
+      const result = await adapter.verifyKey(SECRET);
       expect(result.ok).toBe(false);
       expect(result.reason).toContain('requirements.past_due');
     });
@@ -60,12 +85,13 @@ describe('StripeAccountAdapter', () => {
     /**
      * Mid-onboarding is the common case, and the count is the actionable part:
      * the field paths Stripe returns (`business_profile.mcc`) are not written
-     * for the person reading them, but "still needs 3 details" tells an
-     * organizer to go back and finish.
+     * for the person reading them, but "still needs 2 details" tells an
+     * organizer to go back to Stripe and finish.
      */
     it('counts what Stripe is still waiting for', async () => {
-      const adapter = harness(
+      const { adapter } = harness(
         answering({
+          id: ACCOUNT,
           charges_enabled: false,
           requirements: {
             disabled_reason: null,
@@ -73,47 +99,59 @@ describe('StripeAccountAdapter', () => {
           } as Stripe.Account.Requirements,
         }),
       );
-      const result = await adapter.verify(ACCOUNT);
+      const result = await adapter.verifyKey(SECRET);
       expect(result.ok).toBe(false);
       expect(result.reason).toContain('2');
     });
 
     it('still refuses when Stripe offers no reason at all', async () => {
-      const adapter = harness(answering({ charges_enabled: false }));
-      const result = await adapter.verify(ACCOUNT);
+      const { adapter } = harness(answering({ id: ACCOUNT }));
+      const result = await adapter.verifyKey(SECRET);
       expect(result.ok).toBe(false);
       expect(result.reason).toBeTruthy();
     });
   });
 
   /**
-   * A rejected lookup is an ANSWER — "no" — not a server fault. Retrieving an
-   * account id that does not exist, or belongs to another platform, throws
-   * here; letting that escape would turn an organizer's typo into a 500.
+   * A rejected lookup is an ANSWER — "no" — not a server fault. A revoked or
+   * mistyped key throws here; letting that escape would turn a paste error into
+   * a 500 on a settings page.
    */
-  describe('when Stripe rejects the lookup', () => {
+  describe('when Stripe rejects the key', () => {
     it('reports Stripe’s own words rather than throwing', async () => {
-      const adapter = harness(
+      const { adapter } = harness(
         refusing(
-          new Stripe.errors.StripeInvalidRequestError({
+          new Stripe.errors.StripeAuthenticationError({
             type: 'invalid_request_error',
-            message: 'No such account: acct_1A2b3C',
+            message: 'Invalid API Key provided: sk_test_***',
           }),
         ),
       );
-      const result = await adapter.verify(ACCOUNT);
+      const result = await adapter.verifyKey(SECRET);
       expect(result.ok).toBe(false);
-      expect(result.reason).toContain('No such account');
+      expect(result.reason).toContain('Invalid API Key');
     });
 
     it('survives a failure that is not a Stripe error', async () => {
-      const adapter = harness(refusing(new Error('ECONNREFUSED')));
-      const result = await adapter.verify(ACCOUNT);
+      const { adapter } = harness(refusing(new Error('ECONNREFUSED')));
+      const result = await adapter.verifyKey(SECRET);
       expect(result.ok).toBe(false);
-      // Not the raw connection error: that says nothing to an organizer, and
+      // Not the raw connection error: it says nothing to an organizer, and
       // internal failure detail does not belong in an API response.
       expect(result.reason).not.toContain('ECONNREFUSED');
       expect(result.reason).toBeTruthy();
+    });
+
+    /**
+     * Whatever goes wrong, the key must not come back out. Stripe truncates it
+     * in its own messages; this proves we never widen that.
+     */
+    it('never echoes the key back in the reason', async () => {
+      const { adapter } = harness(
+        refusing(new Error(`bad key ${SECRET} rejected`)),
+      );
+      const result = await adapter.verifyKey(SECRET);
+      expect(result.reason).not.toContain(SECRET);
     });
   });
 });
