@@ -4,6 +4,7 @@ import { Clock } from '../../common/time/clock';
 import type { Env } from '../../config/env.validation';
 import { AccessModule } from '../access/access.module';
 import { CheckoutModule } from '../checkout/checkout.module';
+import { PaymentSettingsModule } from '../payment-settings/payment-settings.module';
 import { InvoicePaymentPort } from '../invoices/ports/invoice-payment.port';
 import { SettledFundsPort } from '../payouts/ports/settled-funds.port';
 import { TaxableSalesPort } from '../tax-periods/ports/taxable-sales.port';
@@ -34,7 +35,10 @@ import { RevenueInsightsAdapter } from './revenue-insights.adapter';
  * boot rather than discovered at the till.
  */
 @Module({
-  imports: [AccessModule, CheckoutModule],
+  // PaymentSettings binds `MerchantAccountPort` — whose connected account a
+  // charge is made on. Without it every workspace's money lands in the
+  // platform's own Stripe balance.
+  imports: [AccessModule, CheckoutModule, PaymentSettingsModule],
   controllers: [PaymentsController, FinanceController],
   providers: [
     { provide: RevenueInsightsPort, useClass: RevenueInsightsAdapter },

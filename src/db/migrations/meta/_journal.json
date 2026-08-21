@@ -351,6 +351,13 @@
       "when": 1786400000000,
       "tag": "0049_unique_organization_name",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1787500000000,
+      "tag": "0050_payment_gateway_account",
+      "breakpoints": true
     }
   ]
 }

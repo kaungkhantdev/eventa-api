@@ -2,7 +2,9 @@ import { Module } from '@nestjs/common';
 import { AccessModule } from '../access/access.module';
 import { OrganizationModule } from '../organization/organization.module';
 import { TicketingModule } from '../ticketing/ticketing.module';
+import { MerchantAccountPort } from '../payments/ports/merchant-account.port';
 import { PayoutAccountPort } from '../payouts/ports/payout-account.port';
+import { MerchantAccountAdapter } from './merchant-account.adapter';
 import { PaymentMethodsService } from './payment-methods.service';
 import { PayoutAccountAdapter } from './payout-account.adapter';
 import { PaymentSettingsController } from './payment-settings.controller';
@@ -32,8 +34,14 @@ import { StubPaymentProvider } from './stub-payment.provider';
     PaymentSettingsRepository,
     { provide: PaymentProviderPort, useClass: StubPaymentProvider },
     { provide: PayoutAccountPort, useClass: PayoutAccountAdapter },
+    { provide: MerchantAccountPort, useClass: MerchantAccountAdapter },
     { provide: PaymentSetupPort, useClass: PaymentSetupAdapter },
   ],
-  exports: [PaymentSettingsService, PayoutAccountPort, PaymentSetupPort],
+  exports: [
+    PaymentSettingsService,
+    PayoutAccountPort,
+    MerchantAccountPort,
+    PaymentSetupPort,
+  ],
 })
 export class PaymentSettingsModule {}

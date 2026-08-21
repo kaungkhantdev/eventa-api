@@ -7,6 +7,7 @@ import { ticketsUrlFor } from '../checkout/ticket-links';
 import type { Env } from '../../config/env.validation';
 import type { PayOrderDto } from './dto/pay-order.dto';
 import type { PaymentIntentDto } from './dto/payment-intent.dto';
+import { MerchantAccountPort } from './ports/merchant-account.port';
 import {
   OrderPaymentPort,
   type PayableOrder,
@@ -22,6 +23,13 @@ import { PaymentsRepository, type PaymentRow } from './payments.repository';
 export interface WebhookAck {
   received: boolean;
 }
+
+/**
+ * Written for the buyer, who cannot fix this and did nothing wrong: it names
+ * the organizer's setup rather than implying the attempt was at fault.
+ */
+const NO_MERCHANT_ACCOUNT =
+  'This event cannot take payment yet — the organizer has not finished connecting their payment account.';
 
 /**
  * Paying for an order (US-DISC-05): start collecting by card or PromptPay, and
@@ -45,6 +53,7 @@ export class PaymentsService {
     private readonly repo: PaymentsRepository,
     private readonly provider: PaymentProviderPort,
     private readonly orders: OrderPaymentPort,
+    private readonly merchants: MerchantAccountPort,
     private readonly clock: Clock,
     config: ConfigService<Env, true>,
   ) {
@@ -54,6 +63,7 @@ export class PaymentsService {
   /** Start collecting. Safe to replay — the idempotency key finds its own attempt. */
   async pay(input: PayOrderDto): Promise<PaymentIntentDto> {
     const order = await this.requirePayable(input.orderId);
+    const accountId = await this.requireMerchantAccount(order.organizationId);
     const started = await this.provider.start({
       orderId: order.id,
       organizationId: order.organizationId,
@@ -64,7 +74,7 @@ export class PaymentsService {
       statementDescriptor: await this.repo.orgStatementDescriptor(
         order.organizationId,
       ),
-      accountId: null,
+      accountId,
       description: order.eventName,
       // Where the provider sends the buyer back: their own copy of the order,
       // which reads correctly whether or not the money has landed yet.
@@ -80,6 +90,9 @@ export class PaymentsService {
       amountSatang: order.totalSatang,
       currency: order.currency,
       gatewayRef: started.gatewayRef,
+      // Stamped now, so the refund reverses on this account however the
+      // workspace's settings row changes later.
+      gatewayAccountId: accountId,
       statementDescriptor: null,
       idempotencyKey: input.idempotencyKey,
       status: started.status === 'failed' ? 'failed' : 'pending',
@@ -233,6 +246,28 @@ export class PaymentsService {
       amountSatang: payment.amountSatang,
       reason: 'duplicate_payment',
     });
+  }
+
+  /**
+   * Whose account this charge lands in — and a refusal when there isn't one.
+   *
+   * Collecting into the platform account instead would take a buyer's money
+   * into a balance the organizer cannot reach, issue a valid ticket against it,
+   * and leave a payout that can never settle. Stopping the checkout is the
+   * smaller failure by a wide margin, and the only one that can be undone.
+   *
+   * Both halves are checked: a row can be marked connected and still name no
+   * account, and charging "on behalf of" nothing is a platform charge wearing
+   * a workspace's label.
+   */
+  private async requireMerchantAccount(
+    organizationId: number,
+  ): Promise<string> {
+    const account = await this.merchants.findAccount(organizationId);
+    if (!account.connected || !account.accountId) {
+      throw DomainException.conflict(NO_MERCHANT_ACCOUNT);
+    }
+    return account.accountId;
   }
 
   private async requirePayable(orderId: string): Promise<PayableOrder> {

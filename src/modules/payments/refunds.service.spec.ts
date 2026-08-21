@@ -20,6 +20,9 @@ const auth: AuthContext = {
   persona: 'admin',
 };
 
+/** The account the original charge was made on. */
+const ACCOUNT = 'acct_workspace7';
+
 const payment = (o: Partial<PaymentRow> = {}) =>
   ({
     id: PAYMENT_ID,
@@ -29,6 +32,7 @@ const payment = (o: Partial<PaymentRow> = {}) =>
     currency: 'THB',
     status: 'paid',
     gatewayRef: 'pi_123',
+    gatewayAccountId: ACCOUNT,
     ...o,
   }) as PaymentRow;
 
@@ -87,6 +91,34 @@ describe('RefundsService (US-FIN-02)', () => {
     await refund({ amountSatang: 1 });
     expect(provider.refund).toHaveBeenCalledWith(
       expect.objectContaining({ amountSatang: TOTAL, gatewayRef: 'pi_123' }),
+    );
+  });
+
+  /**
+   * A refund reverses on the account that took the money — read from the
+   * PAYMENT, never from today's settings row. Stripe holds the charge on the
+   * connected account; asking the platform account to reverse a charge it never
+   * made fails, and asking a DIFFERENT connected account to would be worse.
+   */
+  it('reverses on the account the charge was made on', async () => {
+    await refund();
+    expect(provider.refund).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: ACCOUNT }),
+    );
+  });
+
+  /**
+   * Every payment taken before `gateway_account_id` existed was genuinely
+   * charged on the platform account, so null is the correct answer for them and
+   * must be passed through rather than substituted.
+   */
+  it('reverses a pre-Connect payment on the platform account', async () => {
+    repo.findPaymentForRefund.mockResolvedValue(
+      payment({ gatewayAccountId: null }),
+    );
+    await refund();
+    expect(provider.refund).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: null }),
     );
   });
 

@@ -77,6 +77,8 @@ export interface RecordAttemptInput {
   amountSatang: number;
   currency: string;
   gatewayRef: string;
+  /** The connected account the charge was made on; null = the platform's own. */
+  gatewayAccountId: string | null;
   statementDescriptor: string | null;
   idempotencyKey: string;
   status: 'pending' | 'failed';
@@ -216,6 +218,7 @@ export class PaymentsRepository {
           currency: input.currency,
           status: input.status,
           gatewayRef: input.gatewayRef,
+          gatewayAccountId: input.gatewayAccountId,
           statementDescriptor: input.statementDescriptor,
           idempotencyKey: input.idempotencyKey,
         })
