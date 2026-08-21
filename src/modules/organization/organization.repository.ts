@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, isNull, ne, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
-import { organizations } from '../../db/schema';
+import { events, memberships, organizations } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
 import type { OrganizationRow } from './organization.types';
 
@@ -9,6 +9,42 @@ import type { OrganizationRow } from './organization.types';
 @Injectable()
 export class OrganizationRepository {
   constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+
+  /**
+   * The two figures the Organization card shows beside the logo.
+   *
+   * Counted, not stored — a cached tally is a second source of truth that goes
+   * stale the moment somebody is removed or an event is deleted, and nothing
+   * here is hot enough to need one.
+   *
+   * Deleted rows are excluded from both: a workspace that removed a colleague
+   * should not still be told it has them.
+   */
+  async summarise(
+    organizationId: number,
+  ): Promise<{ eventsHosted: number; teamMembers: number }> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [hosted] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(events)
+        .where(
+          and(
+            eq(events.organizationId, organizationId),
+            isNull(events.deletedAt),
+          ),
+        );
+      const [team] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(memberships)
+        .where(
+          and(
+            eq(memberships.organizationId, organizationId),
+            isNull(memberships.deletedAt),
+          ),
+        );
+      return { eventsHosted: hosted.count, teamMembers: team.count };
+    });
+  }
 
   async find(organizationId: number): Promise<OrganizationRow | null> {
     const [row] = await this.db

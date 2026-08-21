@@ -18,3 +18,9 @@ export interface UpdateOrganizationInput {
    */
   version?: number;
 }
+
+/** Counts shown beside the logo — derived, never stored. */
+export interface OrganizationSummary {
+  eventsHosted: number;
+  teamMembers: number;
+}

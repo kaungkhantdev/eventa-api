@@ -20,6 +20,7 @@ import { ApiErrorDto } from '../../common/errors/error-envelope';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { ApiData } from '../../common/http/api-data.decorator';
 import type { AuthContext } from '../auth/auth.types';
+import type { OrganizationSummary } from './organization.types';
 import { OrganizationResponseDto } from './dto/organization-response.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import {
@@ -51,6 +52,14 @@ export class OrganizationController {
   @ApiData(OrganizationResponseDto)
   get(@CurrentAuth() auth: AuthContext): Promise<OrganizationResponseDto> {
     return this.organization.get(auth.organizationId);
+  }
+
+  /** Counts for the identity card. Its own call: `get` is the editable profile. */
+  @Get('summary')
+  @ResponseMessage('Organization summary retrieved.')
+  @ApiData(Object)
+  summary(@CurrentAuth() auth: AuthContext): Promise<OrganizationSummary> {
+    return this.organization.summarise(auth.organizationId);
   }
 
   @Patch()

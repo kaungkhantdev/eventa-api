@@ -10,6 +10,7 @@ import { OrganizationRepository } from './organization.repository';
 import type {
   OrganizationRow,
   UpdateOrganizationInput,
+  OrganizationSummary,
 } from './organization.types';
 
 /** A Thai VAT registration number is exactly 13 digits. */
@@ -38,6 +39,22 @@ const UPDATABLE_KEYS = [
 @Injectable()
 export class OrganizationService {
   constructor(private readonly repo: OrganizationRepository) {}
+
+  /**
+   * The figures beside the logo (US-SET-06).
+   *
+   * Deliberately NOT on `get`: those are the editable profile, these are counts
+   * of other tables. Keeping them apart means a save of the profile does not
+   * have to recount anything, and neither call answers a question it was not
+   * asked.
+   *
+   * There is no plan or tier here, and the kit's "Pro" badge has no counterpart:
+   * this product has no billing concept, so showing one would be a claim about
+   * the workspace that nothing backs.
+   */
+  async summarise(organizationId: number): Promise<OrganizationSummary> {
+    return this.repo.summarise(organizationId);
+  }
 
   async get(organizationId: number): Promise<OrganizationResponseDto> {
     return toOrganizationResponse(await this.load(organizationId));
