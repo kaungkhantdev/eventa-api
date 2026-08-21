@@ -95,30 +95,14 @@ describe('RefundsService (US-FIN-02)', () => {
   });
 
   /**
-   * A refund reverses on the account that took the money — read from the
-   * PAYMENT, never from today's settings row. Stripe holds the charge on the
-   * connected account; asking the platform account to reverse a charge it never
-   * made fails, and asking a DIFFERENT connected account to would be worse.
+   * The reversal is made with the same workspace's key that took the money —
+   * the provider authenticates AS the organizer, so naming the account is
+   * neither needed nor possible. What it does need is whose key to use.
    */
-  it('reverses on the account the charge was made on', async () => {
+  it('reverses as the workspace that took the money', async () => {
     await refund();
     expect(provider.refund).toHaveBeenCalledWith(
-      expect.objectContaining({ accountId: ACCOUNT }),
-    );
-  });
-
-  /**
-   * Every payment taken before `gateway_account_id` existed was genuinely
-   * charged on the platform account, so null is the correct answer for them and
-   * must be passed through rather than substituted.
-   */
-  it('reverses a pre-Connect payment on the platform account', async () => {
-    repo.findPaymentForRefund.mockResolvedValue(
-      payment({ gatewayAccountId: null }),
-    );
-    await refund();
-    expect(provider.refund).toHaveBeenCalledWith(
-      expect.objectContaining({ accountId: null }),
+      expect.objectContaining({ organizationId: ORG }),
     );
   });
 

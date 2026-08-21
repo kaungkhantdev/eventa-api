@@ -40,7 +40,8 @@ export class StripeAccountAdapter extends PaymentProviderPort {
 
   async verifyKey(secretKey: string): Promise<VerifyResult> {
     try {
-      const account = await this.clientFor(secretKey).accounts.retrieveCurrent();
+      const account =
+        await this.clientFor(secretKey).accounts.retrieveCurrent();
       if (!account.charges_enabled) {
         return { ok: false, reason: whyNotChargeable(account) };
       }

@@ -15,6 +15,9 @@ import {
 /** Long enough that a webhook URL cannot be found by guessing. */
 const WEBHOOK_TOKEN_BYTES = 18;
 
+/** The one environment where charging a real card is the intended outcome. */
+const PRODUCTION = 'production';
+
 /** What a workspace submits from the API keys card. */
 export interface SaveKeysInput {
   mode: PaymentMode;
@@ -63,6 +66,8 @@ export class PaymentKeysService {
     private readonly provider: PaymentProviderPort,
     private readonly cipher: SecretCipher,
     private readonly clock: Clock,
+    /** `NODE_ENV`, for the live-key guard below. */
+    private readonly environment: string,
   ) {}
 
   /** Validate, prove against Stripe, then encrypt and store — in that order. */
@@ -71,6 +76,7 @@ export class PaymentKeysService {
     input: SaveKeysInput,
   ): Promise<StoredKeysView> {
     assertKeysMatchMode(input.mode, input.publishableKey, input.secretKey);
+    this.assertModeAllowedHere(input.mode);
     const verified = await this.assertKeyWorks(input.secretKey);
     const current = await this.settings.findOrCreate(organizationId);
     const now = this.clock.now();
@@ -142,10 +148,7 @@ export class PaymentKeysService {
   }
 
   /** The decrypted key for one call. Callers hold it no longer than that. */
-  async secretFor(
-    organizationId: number,
-    mode: PaymentMode,
-  ): Promise<string> {
+  async secretFor(organizationId: number, mode: PaymentMode): Promise<string> {
     const row = await this.credentials.find(organizationId, mode);
     const secret = row && this.plaintextOf(row.secretKeyCipher);
     if (!secret) {
@@ -163,6 +166,24 @@ export class PaymentKeysService {
   ): Promise<string | null> {
     const row = await this.credentials.find(organizationId, mode);
     return row ? this.plaintextOf(row.webhookSecretCipher) : null;
+  }
+
+  /**
+   * Refuse a live key anywhere but production.
+   *
+   * This guard used to live in env validation, against the single platform key.
+   * It moved here with the credential: the hazard is identical and so is the
+   * reason. Outside production, a live key means a seed script, a test run or
+   * somebody clicking around a staging box can charge a real card belonging to
+   * a real person — and nothing about the screen would show it had happened.
+   */
+  private assertModeAllowedHere(mode: PaymentMode): void {
+    if (mode === 'live' && this.environment !== PRODUCTION) {
+      throw DomainException.invalidField(
+        'mode',
+        `Live keys are only accepted in production; this server is running as "${this.environment}". Use your Stripe test keys here.`,
+      );
+    }
   }
 
   /**

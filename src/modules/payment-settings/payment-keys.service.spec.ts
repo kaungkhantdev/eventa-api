@@ -86,7 +86,14 @@ describe('PaymentKeysService (US-SET-08)', () => {
       verifyKey: jest.fn().mockResolvedValue({ ok: true, accountId: ACCOUNT }),
     };
     const clock: Clock = { now: () => NOW };
-    service = new PaymentKeysService(credentials, settings, provider, cipher, clock);
+    service = new PaymentKeysService(
+      credentials,
+      settings,
+      provider,
+      cipher,
+      clock,
+      'development',
+    );
   });
 
   const save = (o: Record<string, unknown> = {}) =>
@@ -119,7 +126,10 @@ describe('PaymentKeysService (US-SET-08)', () => {
     });
 
     it('blames the secret key field, so the reason lands under that box', async () => {
-      provider.verifyKey.mockResolvedValue({ ok: false, reason: 'Key revoked' });
+      provider.verifyKey.mockResolvedValue({
+        ok: false,
+        reason: 'Key revoked',
+      });
       const failure = await save().catch((e: DomainException) => e);
       const [refused] = (failure as DomainException).errors ?? [];
       expect(refused?.field).toBe('secretKey');
@@ -158,8 +168,17 @@ describe('PaymentKeysService (US-SET-08)', () => {
       expect(input.webhookSecretCipher).toBeUndefined();
     });
 
+    // Live keys are refused outside production, so this runs as production —
+    // which is the only place the live half of the pair is reachable at all.
     it('keeps each mode’s pair separate', async () => {
-      await save({
+      await new PaymentKeysService(
+        credentials,
+        settings,
+        provider,
+        cipher,
+        { now: () => NOW },
+        'production',
+      ).saveKeys(ORG, {
         mode: 'live',
         publishableKey: LIVE_PK,
         secretKey: LIVE_SK,
@@ -202,6 +221,55 @@ describe('PaymentKeysService (US-SET-08)', () => {
    * Everything the page may know about stored keys. The secret is never among
    * it — only enough to answer "which key is saved".
    */
+  /**
+   * The guard that used to live in env validation, moved to where the key now
+   * enters. It is the same hazard for the same reason: outside production, a
+   * live key means a seed script, a test run or somebody clicking around a
+   * staging box can charge a real card belonging to a real person.
+   */
+  describe('a live key outside production', () => {
+    const saveLive = (env: string) =>
+      new PaymentKeysService(
+        credentials,
+        settings,
+        provider,
+        cipher,
+        { now: () => NOW },
+        env,
+      ).saveKeys(ORG, {
+        mode: 'live',
+        publishableKey: LIVE_PK,
+        secretKey: LIVE_SK,
+      });
+
+    it('is refused in development', async () => {
+      await expect(saveLive('development')).rejects.toBeInstanceOf(
+        DomainException,
+      );
+      expect(credentials.save).not.toHaveBeenCalled();
+    });
+
+    it('is refused on staging, which is not production', async () => {
+      await expect(saveLive('staging')).rejects.toBeInstanceOf(DomainException);
+    });
+
+    it('says why, naming the environment', async () => {
+      const failure = await saveLive('development').catch(
+        (e: DomainException) => e,
+      );
+      expect((failure as DomainException).message).toMatch(/production/i);
+    });
+
+    it('is allowed in production — that is the whole point of live keys', async () => {
+      await expect(saveLive('production')).resolves.toBeDefined();
+      expect(credentials.save).toHaveBeenCalled();
+    });
+
+    it('never blocks a test key, wherever it is running', async () => {
+      await expect(save()).resolves.toBeDefined();
+    });
+  });
+
   describe('describe — what the screen is allowed to see', () => {
     it('shows the publishable key and a masked tail of the secret', async () => {
       const view = await service.describe(ORG, 'test');
@@ -213,7 +281,9 @@ describe('PaymentKeysService (US-SET-08)', () => {
     it('never returns the secret key, at any depth', async () => {
       const view = await service.describe(ORG, 'test');
       expect(JSON.stringify(view)).not.toContain(TEST_SK);
-      expect(JSON.stringify(view)).not.toContain(sealed(TEST_SK).toString('utf8'));
+      expect(JSON.stringify(view)).not.toContain(
+        sealed(TEST_SK).toString('utf8'),
+      );
     });
 
     it('never returns the webhook signing secret', async () => {
@@ -274,7 +344,10 @@ describe('PaymentKeysService (US-SET-08)', () => {
     });
 
     it('passes Stripe’s reason through when the key stopped working', async () => {
-      provider.verifyKey.mockResolvedValue({ ok: false, reason: 'Key revoked' });
+      provider.verifyKey.mockResolvedValue({
+        ok: false,
+        reason: 'Key revoked',
+      });
       expect(await service.testConnection(ORG)).toMatchObject({
         ok: false,
         reason: 'Key revoked',

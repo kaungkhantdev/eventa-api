@@ -99,15 +99,11 @@ export class RefundsService {
     refund: RefundRow,
   ): Promise<RefundResult> {
     const outcome = await this.provider.refund({
+      organizationId: payment.organizationId,
       gatewayRef: payment.gatewayRef,
       // The payment's own amount, never a number from the request.
       amountSatang: payment.amountSatang,
       idempotencyKey: refund.idempotencyKey,
-      // The account the CHARGE was made on, read off the payment — not
-      // whichever account the workspace happens to have connected today.
-      // Null is a real answer: it means the platform account, where every
-      // payment taken before Connect was wired genuinely landed.
-      accountId: payment.gatewayAccountId,
     });
     if (outcome.status === 'failed') {
       await this.repo.markRefundFailed(refund.id, outcome.failureReason);

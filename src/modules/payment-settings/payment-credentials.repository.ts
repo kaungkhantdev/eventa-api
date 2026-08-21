@@ -75,10 +75,7 @@ export class PaymentCredentialsRepository {
           ...webhook,
         })
         .onConflictDoUpdate({
-          target: [
-            paymentCredentials.organizationId,
-            paymentCredentials.mode,
-          ],
+          target: [paymentCredentials.organizationId, paymentCredentials.mode],
           set: {
             publishableKey: input.publishableKey,
             secretKeyCipher: input.secretKeyCipher,

@@ -1,8 +1,5 @@
 import { z } from 'zod';
 
-/** Stripe's live-mode secret and restricted keys — real money moves on these. */
-const LIVE_STRIPE_KEY = /^(sk|rk)_live/;
-
 /**
  * Environment schema — the single source of truth for process config.
  * `validateEnv` runs at ConfigModule bootstrap; the app refuses to start on an invalid env.
@@ -72,14 +69,13 @@ export const envSchema = z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
       .default('info'),
 
-    // Payments (US-DISC-05). PCI SAQ-A: no card data ever reaches this service —
-    // Card payment runs through Stripe, and only Stripe. There is no in-process
-    // stand-in: a double that can mint a "paid" order has no business in the
-    // shipped app, so the suite supplies its own and this stays real.
-    /** Platform secret key. Never logged, never returned — see the pino redact list. */
-    STRIPE_SECRET_KEY: z.string().min(1),
-    /** Shared secret the webhook signature is verified against. */
-    STRIPE_WEBHOOK_SECRET: z.string().min(1),
+    // Payments (US-DISC-05). PCI SAQ-A: no card data ever reaches this service.
+    //
+    // There is deliberately NO Stripe key here. Credentials are per workspace:
+    // each organizer pastes their own on Settings → Payments, and the API
+    // stores them encrypted (`payment_credentials`). A platform key would be a
+    // fallback that silently took one workspace's money into another's account,
+    // so its absence is the safety property.
     /** How long a PromptPay QR stays scannable before the buyer must ask again. */
     PROMPTPAY_EXPIRY_SECONDS: z.coerce.number().int().positive().default(900), // 15m
 
@@ -109,21 +105,6 @@ export const envSchema = z
       .default('false')
       .transform((v) => v === 'true'),
   })
-  // Choosing the real provider without its keys would fail at the first charge,
-  // in front of a buyer. Fail at boot instead.
-  // A live key outside production means a test run, a seed script or a local
-  // experiment can charge a real card. Test-mode keys are the only ones that
-  // belong anywhere but production.
-  .refine(
-    (env) =>
-      env.NODE_ENV === 'production' ||
-      !LIVE_STRIPE_KEY.test(env.STRIPE_SECRET_KEY),
-    {
-      message:
-        'A live Stripe key (sk_live_/rk_live_) is only allowed when NODE_ENV=production — use a test-mode key from the Stripe dashboard.',
-      path: ['STRIPE_SECRET_KEY'],
-    },
-  )
   // A bucket that is not named cannot be written to; find out at boot, not at
   // the first upload.
   .refine(

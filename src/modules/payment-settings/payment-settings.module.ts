@@ -1,9 +1,14 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Clock } from '../../common/time/clock';
+import type { Env } from '../../config/env.validation';
 import { AccessModule } from '../access/access.module';
 import { OrganizationModule } from '../organization/organization.module';
 import { TicketingModule } from '../ticketing/ticketing.module';
+import { GatewayCredentialsPort } from '../payments/ports/gateway-credentials.port';
 import { MerchantAccountPort } from '../payments/ports/merchant-account.port';
 import { PayoutAccountPort } from '../payouts/ports/payout-account.port';
+import { GatewayCredentialsAdapter } from './gateway-credentials.adapter';
 import { MerchantAccountAdapter } from './merchant-account.adapter';
 import { SecretCipher } from '../../common/crypto/secret-cipher';
 import { PaymentCredentialsRepository } from './payment-credentials.repository';
@@ -36,7 +41,33 @@ import { StripeAccountAdapter } from './providers/stripe-account.adapter';
   controllers: [PaymentSettingsController],
   providers: [
     PaymentSettingsService,
-    PaymentKeysService,
+    {
+      provide: PaymentKeysService,
+      useFactory: (
+        credentials: PaymentCredentialsRepository,
+        settings: PaymentSettingsRepository,
+        provider: PaymentProviderPort,
+        cipher: SecretCipher,
+        clock: Clock,
+        config: ConfigService<Env, true>,
+      ) =>
+        new PaymentKeysService(
+          credentials,
+          settings,
+          provider,
+          cipher,
+          clock,
+          config.getOrThrow('NODE_ENV', { infer: true }),
+        ),
+      inject: [
+        PaymentCredentialsRepository,
+        PaymentSettingsRepository,
+        PaymentProviderPort,
+        SecretCipher,
+        Clock,
+        ConfigService,
+      ],
+    },
     PaymentMethodsService,
     PaymentSettingsRepository,
     PaymentCredentialsRepository,
@@ -50,13 +81,41 @@ import { StripeAccountAdapter } from './providers/stripe-account.adapter';
     },
     { provide: PayoutAccountPort, useClass: PayoutAccountAdapter },
     { provide: MerchantAccountPort, useClass: MerchantAccountAdapter },
+    { provide: GatewayCredentialsPort, useClass: GatewayCredentialsAdapter },
     { provide: PaymentSetupPort, useClass: PaymentSetupAdapter },
   ],
   exports: [
     PaymentSettingsService,
-    PaymentKeysService,
+    {
+      provide: PaymentKeysService,
+      useFactory: (
+        credentials: PaymentCredentialsRepository,
+        settings: PaymentSettingsRepository,
+        provider: PaymentProviderPort,
+        cipher: SecretCipher,
+        clock: Clock,
+        config: ConfigService<Env, true>,
+      ) =>
+        new PaymentKeysService(
+          credentials,
+          settings,
+          provider,
+          cipher,
+          clock,
+          config.getOrThrow('NODE_ENV', { infer: true }),
+        ),
+      inject: [
+        PaymentCredentialsRepository,
+        PaymentSettingsRepository,
+        PaymentProviderPort,
+        SecretCipher,
+        Clock,
+        ConfigService,
+      ],
+    },
     PayoutAccountPort,
     MerchantAccountPort,
+    GatewayCredentialsPort,
     PaymentSetupPort,
   ],
 })

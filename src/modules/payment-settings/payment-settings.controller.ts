@@ -151,7 +151,8 @@ export class PaymentSettingsController {
 /** Path params are strings; narrow to the schema enum or 404. */
 function assertKnownMode(value: string): PaymentMode {
   const known = paymentModeEnum.enumValues.find((m) => m === value);
-  if (!known) throw DomainException.notFound(`Unknown payment mode "${value}".`);
+  if (!known)
+    throw DomainException.notFound(`Unknown payment mode "${value}".`);
   return known;
 }
 

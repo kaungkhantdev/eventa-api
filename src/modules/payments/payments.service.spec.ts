@@ -7,6 +7,7 @@ import type {
   OrderPaymentPort,
   PayableOrder,
 } from './ports/order-payment.port';
+import type { GatewayCredentialsPort } from './ports/gateway-credentials.port';
 import type {
   MerchantAccount,
   MerchantAccountPort,
@@ -90,6 +91,18 @@ function merchantPort(
   };
 }
 
+/** The webhook token this workspace's own callback URL carries. */
+const WEBHOOK_TOKEN = 'tok_workspace7';
+
+function credentialsPort(): jest.Mocked<GatewayCredentialsPort> {
+  return {
+    secretKeyFor: jest.fn().mockResolvedValue('sk_test_workspace7'),
+    webhookIdentityFor: jest
+      .fn()
+      .mockResolvedValue({ organizationId: ORG, signingSecrets: ['whsec_x'] }),
+  };
+}
+
 const message = (e: unknown) => (e as DomainException).message;
 
 describe('PaymentsService (US-DISC-05)', () => {
@@ -97,6 +110,7 @@ describe('PaymentsService (US-DISC-05)', () => {
   let provider: jest.Mocked<PaymentProviderPort>;
   let orders: jest.Mocked<OrderPaymentPort>;
   let merchants: jest.Mocked<MerchantAccountPort>;
+  let credentials: jest.Mocked<GatewayCredentialsPort>;
   let service: PaymentsService;
 
   beforeEach(() => {
@@ -126,6 +140,7 @@ describe('PaymentsService (US-DISC-05)', () => {
       queueRefund: jest.fn().mockResolvedValue(undefined),
     };
     merchants = merchantPort();
+    credentials = credentialsPort();
     const clock: Clock = { now: () => NOW };
     const config = {
       getOrThrow: () => 'fake',
@@ -135,6 +150,7 @@ describe('PaymentsService (US-DISC-05)', () => {
       provider,
       orders,
       merchants,
+      credentials,
       clock,
       config,
     );
@@ -195,19 +211,14 @@ describe('PaymentsService (US-DISC-05)', () => {
     });
 
     /**
-     * The whole point of a connected account. Eventa holds one platform secret
-     * and charges ON BEHALF OF each workspace, so the money reaches the
-     * organizer who sold the ticket. Passing null here — which is what this
-     * service did — quietly collects every workspace's takings into the
-     * platform's own Stripe balance, while Payouts goes on trying to pay out
-     * from the organizer's empty one.
+     * The provider is not told WHICH account to use — it authenticates as the
+     * workspace with that workspace's own key. What this service still owes is
+     * the check that there IS one, before a buyer is sent to a payment page
+     * that cannot take their money.
      */
-    it('charges on the workspace’s own connected account', async () => {
+    it('checks the workspace can take money before starting', async () => {
       await pay();
       expect(merchants.findAccount).toHaveBeenCalledWith(ORG);
-      expect(provider.start).toHaveBeenCalledWith(
-        expect.objectContaining({ accountId: ACCOUNT }),
-      );
     });
 
     // A refund has to reverse on the account that took the money, and the
@@ -219,7 +230,7 @@ describe('PaymentsService (US-DISC-05)', () => {
       );
     });
 
-    describe('when the workspace has not connected an account', () => {
+    describe('when the workspace has no payment account', () => {
       /**
        * Refusing is the only honest answer. Collecting into the platform
        * account would take a buyer's money into a balance the organizer cannot
@@ -250,7 +261,7 @@ describe('PaymentsService (US-DISC-05)', () => {
 
       // A row can say connected and carry no reference; charging "on behalf
       // of" nothing is a platform charge wearing a workspace's label.
-      it('refuses a connected row that names no account', async () => {
+      it('refuses a row marked connected that names no account', async () => {
         merchants.findAccount.mockResolvedValue({
           connected: true,
           accountId: null,
@@ -460,6 +471,7 @@ describe('PaymentsService — money-path defences', () => {
       provider,
       orders,
       merchantPort(),
+      credentialsPort(),
       clock,
       {
         getOrThrow: () => 'fake',
@@ -467,7 +479,8 @@ describe('PaymentsService — money-path defences', () => {
     );
   });
 
-  const webhook = () => service.handleWebhook(Buffer.from('{}'), 'sig');
+  const webhook = () =>
+    service.handleWebhook(WEBHOOK_TOKEN, Buffer.from('{}'), 'sig');
 
   describe('a second successful payment on an already-settled order', () => {
     beforeEach(() => {

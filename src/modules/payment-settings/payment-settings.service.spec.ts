@@ -1,4 +1,3 @@
-import { DomainException } from '../../common/errors/domain.exception';
 import type { Clock } from '../../common/time/clock';
 import type { OrganizationService } from '../organization/organization.service';
 import { PaymentSettingsRepository } from './payment-settings.repository';

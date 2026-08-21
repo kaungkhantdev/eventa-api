@@ -17,6 +17,7 @@ import { PaymentsLedgerService } from './payments-ledger.service';
 import { RefundsService } from './refunds.service';
 import { PaymentsRepository } from './payments.repository';
 import { PaymentsService } from './payments.service';
+import { GatewayCredentialsPort } from './ports/gateway-credentials.port';
 import { PaymentProviderPort } from './ports/payment-provider.port';
 import { StripePaymentAdapter } from './providers/stripe-payment.adapter';
 import { RevenueInsightsPort } from '../dashboard/ports/revenue-insights.port';
@@ -51,9 +52,12 @@ import { RevenueInsightsAdapter } from './revenue-insights.adapter';
       // A factory, not `useClass`: the adapter takes an optional Stripe client
       // as a third argument so a test can pass its own, and Nest would try to
       // resolve that as a dependency.
-      useFactory: (clock: Clock, config: ConfigService<Env, true>) =>
-        new StripePaymentAdapter(clock, config),
-      inject: [Clock, ConfigService],
+      useFactory: (
+        clock: Clock,
+        config: ConfigService<Env, true>,
+        credentials: GatewayCredentialsPort,
+      ) => new StripePaymentAdapter(clock, config, credentials),
+      inject: [Clock, ConfigService, GatewayCredentialsPort],
     },
     { provide: InvoicePaymentPort, useClass: InvoicePaymentAdapter },
     { provide: TaxableSalesPort, useClass: TaxableSalesAdapter },

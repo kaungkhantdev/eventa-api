@@ -1,3 +1,4 @@
+import { paymentModeEnum } from '../../db/schema';
 import type {
   paymentCredentials,
   paymentMethodSettings,
@@ -9,6 +10,9 @@ export type PaymentCredentialsRow = typeof paymentCredentials.$inferSelect;
 export type PaymentMethodSettingRow = typeof paymentMethodSettings.$inferSelect;
 export type PaymentMethod = PaymentMethodSettingRow['method'];
 export type PaymentMode = PaymentSettingsRow['mode'];
+
+/** Both modes, in the order the screen offers them. Derived, never re-typed. */
+export const PAYMENT_MODES = paymentModeEnum.enumValues;
 
 /** Connect a provider account (US-SET-08). No secret is ever accepted or stored. */
 export interface ConnectInput {

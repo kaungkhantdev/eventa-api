@@ -16,8 +16,6 @@ export interface StartPaymentInput {
   buyerEmail: string;
   /** ≤22 chars, shown on the buyer's statement (US-SET-10). */
   statementDescriptor: string | null;
-  /** The workspace's connected account at the provider; null = platform account. */
-  accountId: string | null;
   /**
    * What the buyer is paying for, shown on the provider's own page.
    *
@@ -67,13 +65,13 @@ export interface StartedPayment {
 
 /** Give money back to the card or wallet it came from (US-FIN-02). */
 export interface RefundPaymentInput {
+  /** Whose key reverses it — the same workspace that took the money. */
+  organizationId: number;
   /** The provider's reference for the original charge (`gateway_ref`). */
   gatewayRef: string;
   amountSatang: number;
   /** Exactly-once at the PROVIDER — a double-click must not refund twice. */
   idempotencyKey: string;
-  /** The workspace's connected account; null = platform account. */
-  accountId: string | null;
 }
 
 /**
@@ -89,12 +87,12 @@ export interface RefundedPayment {
 
 /** Re-submit a settlement the bank rejected (US-FIN-04). */
 export interface RetryPayoutInput {
+  /** Whose key re-submits it. */
+  organizationId: number;
   /** OUR reference for the payout being recovered. */
   reference: string;
   amountSatang: number;
   currency: string;
-  /** The workspace's connected account; null = platform account. */
-  accountId: string | null;
 }
 
 export interface RetriedPayout {
@@ -149,7 +147,16 @@ export abstract class PaymentProviderPort {
    * does not check out: an unverified webhook is an attacker claiming an order
    * was paid, and is the one input that could hand out tickets for free.
    */
-  abstract verifyWebhook(rawBody: Buffer, signature: string): VerifiedWebhook;
+  /**
+   * `signingSecrets` rather than one, because a workspace registers the same
+   * URL in the provider's test and live dashboards and each issues its own. The
+   * event does not say which until it is verified.
+   */
+  abstract verifyWebhook(
+    rawBody: Buffer,
+    signature: string,
+    signingSecrets: readonly string[],
+  ): VerifiedWebhook;
 
   /**
    * Return a settled charge to its original method. Idempotent on the given
@@ -167,7 +174,10 @@ export abstract class PaymentProviderPort {
    * workspace has no connected account yet — the caller must guide them through
    * connecting before there is anything to manage.
    */
-  abstract payoutSettingsLink(accountId: string | null): Promise<string | null>;
+  abstract payoutSettingsLink(
+    organizationId: number,
+    accountId: string | null,
+  ): Promise<string | null>;
 
   /**
    * Re-submit a failed payout to the same connected account (US-FIN-04). The

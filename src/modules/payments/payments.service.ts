@@ -7,6 +7,7 @@ import { ticketsUrlFor } from '../checkout/ticket-links';
 import type { Env } from '../../config/env.validation';
 import type { PayOrderDto } from './dto/pay-order.dto';
 import type { PaymentIntentDto } from './dto/payment-intent.dto';
+import { GatewayCredentialsPort } from './ports/gateway-credentials.port';
 import { MerchantAccountPort } from './ports/merchant-account.port';
 import {
   OrderPaymentPort,
@@ -54,6 +55,7 @@ export class PaymentsService {
     private readonly provider: PaymentProviderPort,
     private readonly orders: OrderPaymentPort,
     private readonly merchants: MerchantAccountPort,
+    private readonly credentials: GatewayCredentialsPort,
     private readonly clock: Clock,
     config: ConfigService<Env, true>,
   ) {
@@ -74,7 +76,6 @@ export class PaymentsService {
       statementDescriptor: await this.repo.orgStatementDescriptor(
         order.organizationId,
       ),
-      accountId,
       description: order.eventName,
       // Where the provider sends the buyer back: their own copy of the order,
       // which reads correctly whether or not the money has landed yet.
@@ -110,8 +111,25 @@ export class PaymentsService {
    * claiming an order was paid — then processed exactly once by provider event
    * id, whatever retries or replicas do.
    */
-  async handleWebhook(rawBody: Buffer, signature: string): Promise<WebhookAck> {
-    const verified = this.provider.verifyWebhook(rawBody, signature);
+  async handleWebhook(
+    token: string,
+    rawBody: Buffer,
+    signature: string,
+  ): Promise<WebhookAck> {
+    // The token in the URL is what resolves a tenant: a callback carries no
+    // session, and its signature cannot be checked until we know which
+    // workspace's signing secret to check it against.
+    const identity = await this.credentials.webhookIdentityFor(token);
+    if (!identity) {
+      // Same answer as a bad signature, and for the same reason: an unknown
+      // token must not tell a prober whether it guessed a real workspace.
+      throw DomainException.forbidden('Invalid webhook signature.');
+    }
+    const verified = this.provider.verifyWebhook(
+      rawBody,
+      signature,
+      identity.signingSecrets,
+    );
     if (verified.type === 'ignored') return { received: true };
     const fresh = await this.repo.recordWebhook(
       PaymentsService.PROVIDER_NAME,

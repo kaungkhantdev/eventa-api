@@ -7,8 +7,6 @@ describe('validateEnv', () => {
     // Required now: card payment runs through Stripe and only Stripe, so the
     // app refuses to boot without the keys rather than discovering they are
     // missing at the till.
-    STRIPE_SECRET_KEY: 'sk_test_dummy',
-    STRIPE_WEBHOOK_SECRET: 'whsec_test_dummy',
   };
 
   it('rejects an env missing DATABASE_URL', () => {
@@ -58,15 +56,14 @@ describe('validateEnv', () => {
       expect(validateEnv(base).PROMPTPAY_EXPIRY_SECONDS).toBe(900);
     });
 
-    it('refuses to boot with no secret key', () => {
-      const withoutKey = { ...base, STRIPE_SECRET_KEY: undefined };
-      expect(() => validateEnv(withoutKey)).toThrow(/STRIPE_SECRET_KEY/);
-    });
-
-    it('refuses to boot with no webhook secret', () => {
-      // Without it every webhook would have to be trusted unverified.
-      const withoutSecret = { ...base, STRIPE_WEBHOOK_SECRET: undefined };
-      expect(() => validateEnv(withoutSecret)).toThrow(/STRIPE_WEBHOOK_SECRET/);
+    /**
+     * There is no platform Stripe key, and its absence is the safety property:
+     * credentials are per workspace, so a fallback key would silently take one
+     * organizer's money into another's account. The live-key guard moved with
+     * the credential — see `payment-keys.service.spec.ts`.
+     */
+    it('boots with no Stripe key at all', () => {
+      expect(() => validateEnv(base)).not.toThrow();
     });
 
     it('coerces the PromptPay window from a string', () => {
@@ -117,61 +114,6 @@ describe('validateEnv', () => {
         S3_PUBLIC_BASE_URL: 'https://cdn.eventa.co.th/',
       });
       expect(env.S3_PUBLIC_BASE_URL).toBe('https://cdn.eventa.co.th');
-    });
-  });
-
-  describe('Stripe key mode (US-DISC-05)', () => {
-    it('refuses a LIVE secret key outside production — a test run must not charge anyone', () => {
-      expect(() =>
-        validateEnv({
-          ...base,
-          NODE_ENV: 'development',
-          STRIPE_SECRET_KEY: 'sk_live_realmoney',
-          STRIPE_WEBHOOK_SECRET: 'whsec_test',
-        }),
-      ).toThrow(/live/i);
-    });
-
-    it('refuses a live RESTRICTED key outside production too', () => {
-      expect(() =>
-        validateEnv({
-          ...base,
-          NODE_ENV: 'development',
-          STRIPE_SECRET_KEY: 'rk_live_restricted',
-          STRIPE_WEBHOOK_SECRET: 'whsec_test',
-        }),
-      ).toThrow(/live/i);
-    });
-
-    it('accepts a live key in production', () => {
-      const env = validateEnv({
-        ...base,
-        NODE_ENV: 'production',
-        STRIPE_SECRET_KEY: 'sk_live_realmoney',
-        STRIPE_WEBHOOK_SECRET: 'whsec_live',
-      });
-      expect(env.STRIPE_SECRET_KEY).toBe('sk_live_realmoney');
-    });
-
-    it('refuses a live key outside production — it must not be lying around', () => {
-      // Inert today, but one PAYMENT_PROVIDER=stripe away from charging real
-      // cards from a developer's machine. Refuse the key, not just its use.
-      expect(() =>
-        validateEnv({
-          ...base,
-          NODE_ENV: 'development',
-          STRIPE_SECRET_KEY: 'sk_live_leftover',
-        }),
-      ).toThrow(/live/i);
-    });
-
-    it('accepts a test key outside production', () => {
-      const env = validateEnv({
-        ...base,
-        NODE_ENV: 'test',
-        STRIPE_SECRET_KEY: 'sk_test_abc123',
-      });
-      expect(env.STRIPE_SECRET_KEY).toBe('sk_test_abc123');
     });
   });
 });
