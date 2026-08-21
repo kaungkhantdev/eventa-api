@@ -98,13 +98,18 @@ export class OrganizationService {
   }
 
   private assertValid(input: UpdateOrganizationInput): void {
+    // Named fields, not bare sentences: the form puts each under the input it
+    // is about, and a client never has to match on the message text — which
+    // would stop working the moment this copy is translated.
     if (input.taxId != null && !THAI_TAX_ID.test(input.taxId)) {
-      throw DomainException.validation(
+      throw DomainException.invalidField(
+        'taxId',
         'Tax ID must be the 13-digit Thai VAT registration number.',
       );
     }
     if (input.website != null && !HTTP_URL.test(input.website)) {
-      throw DomainException.validation(
+      throw DomainException.invalidField(
+        'website',
         'Website must be a valid http(s) address.',
       );
     }
