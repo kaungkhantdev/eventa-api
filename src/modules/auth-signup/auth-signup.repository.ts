@@ -292,11 +292,29 @@ export class SignupRepository {
     });
   }
 
+  /**
+   * Reconcile the `permissions` table with the catalog in code.
+   *
+   * `onConflictDoNothing` left a row alone once it existed, so a key seeded
+   * before its label was written — or before the wording was corrected — kept
+   * the old value forever, and the settings screen fell back to spacing out the
+   * key: "Ev create", "Fin manage". The catalog is the source of truth, so the
+   * table is brought up to it on every signup rather than only on the first.
+   *
+   * Only `group` and `label` are updated. The key is the identity, and grants
+   * reference it — nothing here touches those.
+   */
   private async ensureCatalog(tx: Tx): Promise<void> {
     await tx
       .insert(permissions)
       .values(PERMISSION_CATALOG)
-      .onConflictDoNothing({ target: permissions.key });
+      .onConflictDoUpdate({
+        target: permissions.key,
+        set: {
+          group: sql`excluded."group"`,
+          label: sql`excluded.label`,
+        },
+      });
   }
 
   private async insertDefaultRoles(

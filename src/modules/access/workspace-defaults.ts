@@ -3,34 +3,46 @@ import type { PermissionKey } from '../../common/decorators/require-permissions.
 type PermGroup = 'Events' | 'Registrations' | 'Finance' | 'Settings';
 type RoleName = 'Admin' | 'Organizer' | 'Staff';
 
-/** The global permission catalog (permission_key enum → group + label). */
+/**
+ * The global permission catalog (permission_key enum → group + label).
+ *
+ * This is the source of truth for the wording, and the `permissions` table is a
+ * copy of it — see `ensureCatalog`, which reconciles rather than ignores. The
+ * labels match `eventa-ui-kit/admin/roles.html`, because a permission's label
+ * exists only to be read on that screen: "Ev create" is a key with a space in
+ * it, not something to put in front of somebody deciding what a role may do.
+ */
 export const PERMISSION_CATALOG: {
   key: PermissionKey;
   group: PermGroup;
   label: string;
 }[] = [
   { key: 'evCreate', group: 'Events', label: 'Create & edit events' },
-  { key: 'evPublish', group: 'Events', label: 'Publish & unpublish events' },
-  { key: 'evSpeakers', group: 'Events', label: 'Manage speakers & program' },
+  { key: 'evPublish', group: 'Events', label: 'Publish & cancel events' },
+  { key: 'evSpeakers', group: 'Events', label: 'Manage speakers & agenda' },
   { key: 'evProgramView', group: 'Events', label: 'View agenda & speakers' },
-  { key: 'regView', group: 'Registrations', label: 'View registrations' },
-  { key: 'regCheckin', group: 'Registrations', label: 'Check in attendees' },
-  { key: 'regExport', group: 'Registrations', label: 'Export registrations' },
+  {
+    key: 'regView',
+    group: 'Registrations',
+    label: 'View registrations & attendees',
+  },
+  { key: 'regCheckin', group: 'Registrations', label: 'Check attendees in' },
+  { key: 'regExport', group: 'Registrations', label: 'Export attendee data' },
   {
     key: 'regManage',
     group: 'Registrations',
     label: 'Approve, add & invite registrations',
   },
-  { key: 'finView', group: 'Finance', label: 'View finances' },
+  { key: 'finView', group: 'Finance', label: 'View payments & payouts' },
   { key: 'finRefund', group: 'Finance', label: 'Issue refunds' },
-  { key: 'finDiscount', group: 'Finance', label: 'Manage discounts' },
+  { key: 'finDiscount', group: 'Finance', label: 'Manage discounts & pricing' },
   {
     key: 'finManage',
     group: 'Finance',
     label: 'Void invoices, payouts & VAT filing',
   },
-  { key: 'setUsers', group: 'Settings', label: 'Manage team' },
-  { key: 'setSettings', group: 'Settings', label: 'Manage settings' },
+  { key: 'setUsers', group: 'Settings', label: 'Manage users & roles' },
+  { key: 'setSettings', group: 'Settings', label: 'Edit workspace settings' },
   { key: 'setIntegrations', group: 'Settings', label: 'Manage integrations' },
 ];
 
