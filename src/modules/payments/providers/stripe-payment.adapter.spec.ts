@@ -30,12 +30,15 @@ const ORG = 7;
 /** The workspace's own secret — what every call must authenticate as. */
 const WORKSPACE_KEY = 'sk_test_workspace7';
 
+/**
+ * The adapter's whole appetite for configuration: one TTL that is ours, not
+ * Stripe's. Its secret key comes from the workspace's own row through
+ * `GatewayCredentialsPort`, so a double that answered `STRIPE_SECRET_KEY`
+ * would be describing a version of this class that no longer exists.
+ */
 function config(): ConfigService<Env, true> {
   return {
-    get: (key: string) =>
-      key === 'STRIPE_SECRET_KEY' ? SECRET_KEY : WEBHOOK_SECRET,
-    getOrThrow: (key: string) =>
-      key === 'PROMPTPAY_EXPIRY_SECONDS' ? TTL : WEBHOOK_SECRET,
+    getOrThrow: () => TTL,
   } as unknown as ConfigService<Env, true>;
 }
 

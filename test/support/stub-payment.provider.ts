@@ -17,8 +17,12 @@ import {
 
 const MS_PER_SECOND = 1000;
 const SIGNATURE_ALGORITHM = 'sha256';
-/** Used when no webhook secret is configured — `fake` needs no real credentials. */
-const DEFAULT_TEST_SECRET = 'whsec_fake';
+/**
+ * What this double signs with. A fixed constant, not configuration: a signing
+ * secret belongs to a workspace's own webhook endpoint now, and the env no
+ * longer carries one for anything to read.
+ */
+const TEST_SECRET = 'whsec_fake';
 
 /**
  * A buyer whose email starts with this is declined, the way Stripe's test cards
@@ -55,9 +59,7 @@ export class StubPaymentProvider extends PaymentProviderPort {
     config: ConfigService<Env, true>,
   ) {
     super();
-    this.secret =
-      config.get('STRIPE_WEBHOOK_SECRET', { infer: true }) ??
-      DEFAULT_TEST_SECRET;
+    this.secret = TEST_SECRET;
     this.promptPayTtlSeconds = config.getOrThrow('PROMPTPAY_EXPIRY_SECONDS', {
       infer: true,
     });
