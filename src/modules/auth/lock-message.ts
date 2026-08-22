@@ -1,7 +1,16 @@
 const SECONDS_PER_MINUTE = 60;
 
-/** When the remaining time is unknown, the old wording is still the honest one. */
-const NO_TIME_KNOWN = 'Too many sign-in attempts. Please try again later.';
+/**
+ * What was attempted too often. The same lock guards sign-in and the forgotten-
+ * password form, and telling somebody who was resetting a password that they
+ * made too many SIGN-IN attempts sends them to a screen they never touched.
+ */
+export type LockedAttempt = 'sign-in' | 'reset';
+
+const ATTEMPT_NOUN: Record<LockedAttempt, string> = {
+  'sign-in': 'sign-in attempts',
+  reset: 'password-reset attempts',
+};
 
 /**
  * What a locked-out person is told, including how long is left (US-ACC-12).
@@ -22,11 +31,15 @@ const NO_TIME_KNOWN = 'Too many sign-in attempts. Please try again later.';
  * Rounded UP: refusing somebody at the moment they were told to return is worse
  * than letting them in a little early.
  */
-export function lockedMessage(secondsRemaining: number): string {
+export function lockedMessage(
+  secondsRemaining: number,
+  attempt: LockedAttempt = 'sign-in',
+): string {
+  const what = ATTEMPT_NOUN[attempt];
   if (!Number.isFinite(secondsRemaining) || secondsRemaining <= 0) {
-    return NO_TIME_KNOWN;
+    return `Too many ${what}. Please try again later.`;
   }
   const minutes = Math.ceil(secondsRemaining / SECONDS_PER_MINUTE);
   const unit = minutes === 1 ? 'minute' : 'minutes';
-  return `Too many sign-in attempts. Try again in ${minutes} ${unit}.`;
+  return `Too many ${what}. Try again in ${minutes} ${unit}.`;
 }

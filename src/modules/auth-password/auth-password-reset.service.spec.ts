@@ -8,7 +8,22 @@ import { passwordFingerprint } from './auth-password-fingerprint';
 import type { PasswordRepository } from './auth-password.repository';
 import type { PasswordService } from './auth-password.service';
 import type { TokenService } from '../auth/token.service';
+import type { LoginThrottleService } from '../auth/login-throttle.service';
 import { IDENTITY_PASSWORD_RESET_REQUESTED } from './events/password-reset-requested.event';
+
+/**
+ * The message a refusal carried. Typed, unlike `expect.stringMatching` inside
+ * `toMatchObject`, which widens the whole object to `any` and takes the lint
+ * with it.
+ */
+async function refusalFrom(promise: Promise<unknown>): Promise<string> {
+  try {
+    await promise;
+  } catch (err) {
+    return (err as Error).message;
+  }
+  throw new Error('expected the call to be refused, but it resolved');
+}
 
 const CURRENT_HASH = 'argon2-current-hash';
 const FINGERPRINT = passwordFingerprint(CURRENT_HASH);
@@ -25,6 +40,7 @@ describe('PasswordResetService', () => {
   let passwords: jest.Mocked<PasswordService>;
   let tokens: jest.Mocked<TokenService>;
   let outbox: jest.Mocked<OutboxPort>;
+  let throttle: jest.Mocked<LoginThrottleService>;
   let service: PasswordResetService;
 
   beforeEach(() => {
@@ -50,11 +66,16 @@ describe('PasswordResetService', () => {
     const config = {
       getOrThrow: jest.fn().mockReturnValue('https://web.test'),
     } as unknown as ConfigService<Env, true>;
+    throttle = {
+      assertNotLocked: jest.fn().mockResolvedValue(undefined),
+      recordFailure: jest.fn().mockResolvedValue(undefined),
+    } as unknown as jest.Mocked<LoginThrottleService>;
     service = new PasswordResetService(
       repo,
       passwords,
       tokens,
       outbox,
+      throttle,
       clock,
       config,
     );
@@ -77,10 +98,46 @@ describe('PasswordResetService', () => {
       );
     });
 
-    it('returns the same neutral message and sends nothing for an unknown email', async () => {
+    /**
+     * A deliberate product decision, overriding the usual advice to answer
+     * uniformly. Silence for an address with no account is indistinguishable
+     * from a mail that was sent and lost, and people were being left to wait
+     * for a link that could never arrive.
+     *
+     * The cost is real: this endpoint now confirms whether an account exists.
+     * The throttle below is what keeps that from being a way to farm the list.
+     */
+    it('says plainly when no account matches, and sends nothing', async () => {
       repo.findByEmailPersona.mockResolvedValue(null);
-      const res = await service.forgot('ghost@acme.co.th');
-      expect(res.message).toMatch(/on its way/i);
+      await expect(service.forgot('ghost@acme.co.th')).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+      expect(outbox.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('names the audience it searched, so the other one can be tried', async () => {
+      repo.findByEmailPersona.mockResolvedValue(null);
+      await expect(
+        refusalFrom(service.forgot('ghost@acme.co.th', Persona.Attendee)),
+      ).resolves.toMatch(/attendee/i);
+      repo.findByEmailPersona.mockResolvedValue(null);
+      await expect(
+        refusalFrom(service.forgot('ghost@acme.co.th')),
+      ).resolves.toMatch(/organizer/i);
+    });
+
+    /**
+     * An account with no password is a social-only sign-in. It exists, so the
+     * "no account" answer would be a lie — and it has nothing to reset.
+     */
+    it('does not claim a social-only account is missing', async () => {
+      repo.findByEmailPersona.mockResolvedValue({
+        ...user,
+        passwordHash: null,
+      });
+      await expect(
+        refusalFrom(service.forgot('owner@acme.co.th')),
+      ).resolves.toMatch(/google/i);
       expect(outbox.enqueue).not.toHaveBeenCalled();
     });
 
@@ -90,6 +147,50 @@ describe('PasswordResetService', () => {
         'owner@acme.co.th',
         Persona.Admin,
       );
+    });
+  });
+
+  /**
+   * The mitigation the plain answer above requires.
+   *
+   * Once a reset form tells a registered address from an unknown one, it is a
+   * membership oracle — so a miss is counted per identity exactly as a failed
+   * sign-in is, and enough of them lock the identity out for a cool-off. A
+   * scripted sweep gets a handful of answers and then a 429; a person who
+   * mistyped their own address gets an honest one.
+   */
+  describe('forgot — throttling the oracle it creates', () => {
+    it('refuses while the identity is in a cool-off', async () => {
+      throttle.assertNotLocked.mockRejectedValue(
+        Object.assign(new Error('locked'), { code: 'TOO_MANY_REQUESTS' }),
+      );
+      await expect(service.forgot('ghost@acme.co.th')).rejects.toMatchObject({
+        code: 'TOO_MANY_REQUESTS',
+      });
+      // Refused before the lookup: a locked identity learns nothing at all.
+      expect(repo.findByEmailPersona).not.toHaveBeenCalled();
+    });
+
+    it('counts a miss against the identity that was probed', async () => {
+      repo.findByEmailPersona.mockResolvedValue(null);
+      await expect(service.forgot('ghost@acme.co.th')).rejects.toBeDefined();
+      expect(throttle.recordFailure).toHaveBeenCalledWith(
+        expect.stringContaining('ghost@acme.co.th'),
+      );
+    });
+
+    it('keys the count per audience — two realms are two identities', async () => {
+      repo.findByEmailPersona.mockResolvedValue(null);
+      await expect(
+        service.forgot('ghost@acme.co.th', Persona.Attendee),
+      ).rejects.toBeDefined();
+      const [identity] = throttle.recordFailure.mock.calls[0];
+      expect(identity).toContain(Persona.Attendee);
+    });
+
+    it('counts nothing against an address that does have an account', async () => {
+      await service.forgot('owner@acme.co.th');
+      expect(throttle.recordFailure).not.toHaveBeenCalled();
     });
   });
 

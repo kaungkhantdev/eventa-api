@@ -37,6 +37,32 @@ describe('lockedMessage', () => {
   });
 
   /**
+   * The same lock now guards the forgotten-password form, which is not a
+   * sign-in. Telling somebody who was resetting a password that they made too
+   * many SIGN-IN attempts sends them to check a screen they never touched, so
+   * the caller names the attempt and the wait is worded around it.
+   */
+  describe('naming the attempt that was refused', () => {
+    it('says reset attempts on the reset form', () => {
+      expect(lockedMessage(900, 'reset')).toBe(
+        'Too many password-reset attempts. Try again in 15 minutes.',
+      );
+    });
+
+    it('still says sign-in when nothing is named', () => {
+      expect(lockedMessage(900)).toBe(
+        'Too many sign-in attempts. Try again in 15 minutes.',
+      );
+    });
+
+    it('names the attempt in the no-time-known wording too', () => {
+      expect(lockedMessage(0, 'reset')).toBe(
+        'Too many password-reset attempts. Please try again later.',
+      );
+    });
+  });
+
+  /**
    * Redis can report -1 (no expiry) or -2 (no such key), and a race can leave
    * the lock expiring between the check and the read. None of those should
    * produce "try again in -1 minutes".
