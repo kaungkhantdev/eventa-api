@@ -106,6 +106,7 @@ export class AttendeeTicketsService {
       startAt: row.startAt.toISOString(),
       timezone: row.timezone,
       venueName: row.isOnline ? null : row.venueName,
+      venueAddress: row.isOnline ? null : row.venueAddress,
       city: row.isOnline ? null : row.city,
       isOnline: row.isOnline,
       coverImage: row.coverImage,
@@ -132,6 +133,7 @@ export class AttendeeTicketsService {
       startAt: row.startAt.toISOString(),
       timezone: row.timezone,
       venueName: row.isOnline ? null : row.venueName,
+      venueAddress: row.isOnline ? null : row.venueAddress,
       city: row.isOnline ? null : row.city,
       isOnline: row.isOnline,
       seat: hasSeat

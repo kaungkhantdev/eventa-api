@@ -30,6 +30,14 @@ export class MyRegistrationDto {
   @ApiProperty({ nullable: true, type: String })
   venueName!: string | null;
 
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description:
+      'Street address — what a map needs to place the venue; a name alone rarely resolves',
+  })
+  venueAddress!: string | null;
+
   @ApiProperty({ nullable: true, type: String })
   city!: string | null;
 
@@ -136,6 +144,14 @@ export class TicketPassDto {
 
   @ApiProperty({ nullable: true, type: String })
   venueName!: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description:
+      'Street address — what a map needs to place the venue; a name alone rarely resolves',
+  })
+  venueAddress!: string | null;
 
   @ApiProperty({ nullable: true, type: String })
   city!: string | null;
