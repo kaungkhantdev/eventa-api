@@ -5,6 +5,7 @@ import {
   PaymentProviderPort,
   type VerifyResult,
 } from '../ports/payment-provider.port';
+import { modeOfKey } from '../stripe-keys';
 
 /** How a Stripe client is made from a key. Injected so a test can supply its own. */
 export type StripeClientFactory = (secretKey: string) => Stripe;
@@ -38,11 +39,27 @@ export class StripeAccountAdapter extends PaymentProviderPort {
     super();
   }
 
+  /**
+   * `charges_enabled` is asked of LIVE keys only, and that distinction matters.
+   *
+   * Stripe defines it as whether the account may take **live** charges. A
+   * sandbox — or any account whose activation form has not been submitted —
+   * reports `false` while its test key takes test payments perfectly well. So
+   * demanding it of an `sk_test_` key refused working sandboxes with "Stripe
+   * has not enabled charges on this account yet": true, and useless, because
+   * nothing the organizer does in test mode will ever change it.
+   *
+   * For a test key the meaningful question is the one `retrieveCurrent` already
+   * answers — is this a real key, and whose account is it. For a live key the
+   * standing is the whole point: a live charge on an unactivated account fails
+   * at the till, in front of a buyer.
+   */
   async verifyKey(secretKey: string): Promise<VerifyResult> {
     try {
       const account =
         await this.clientFor(secretKey).accounts.retrieveCurrent();
-      if (!account.charges_enabled) {
+      const live = modeOfKey(secretKey) === 'live';
+      if (live && !account.charges_enabled) {
         return { ok: false, reason: whyNotChargeable(account) };
       }
       return { ok: true, accountId: account.id };

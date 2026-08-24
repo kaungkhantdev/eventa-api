@@ -1,7 +1,13 @@
 import Stripe from 'stripe';
 import { StripeAccountAdapter } from './stripe-account.adapter';
 
-const SECRET = 'sk_test_51P9xEventa7hV6tL1pX';
+/**
+ * A LIVE key throughout, because that is the mode whose account standing
+ * matters: a live charge on an unactivated account fails at the till, in front
+ * of a buyer. The test-mode cases below use TEST_SECRET deliberately.
+ */
+const SECRET = 'sk_live_51P9xEventa7hV6tL1pX';
+const TEST_SECRET = 'sk_test_51P9xEventa7hV6tL1pX';
 const ACCOUNT = 'acct_1A2b3C';
 
 const answering = (account: Partial<Stripe.Account>) =>
@@ -66,7 +72,56 @@ describe('StripeAccountAdapter', () => {
     expect(retrieve).toHaveBeenCalledWith();
   });
 
-  describe('an account that cannot take money', () => {
+  /**
+   * `charges_enabled` is Stripe's word on whether the account may take **live**
+   * charges, and only that. A brand-new or sandbox account reports `false`
+   * while its test key takes test payments perfectly well — so demanding it of
+   * a `sk_test_` key refused working sandboxes with "Stripe has not enabled
+   * charges on this account yet", which is true and completely unhelpful.
+   */
+  describe('a test key, where charges_enabled says nothing useful', () => {
+    it('accepts a sandbox key Stripe has not activated for live charges', async () => {
+      const { adapter } = harness(
+        answering({ id: ACCOUNT, charges_enabled: false }),
+      );
+      await expect(adapter.verifyKey(TEST_SECRET)).resolves.toEqual({
+        ok: true,
+        accountId: ACCOUNT,
+      });
+    });
+
+    it('accepts one still mid-onboarding, for the same reason', async () => {
+      const { adapter } = harness(
+        answering({
+          id: ACCOUNT,
+          charges_enabled: false,
+          requirements: {
+            disabled_reason: null,
+            currently_due: ['business_profile.mcc'],
+          } as Stripe.Account.Requirements,
+        }),
+      );
+      await expect(adapter.verifyKey(TEST_SECRET)).resolves.toMatchObject({
+        ok: true,
+      });
+    });
+
+    /** The key still has to BE a key: a bad one fails at Stripe, as before. */
+    it('still refuses a test key Stripe rejects', async () => {
+      const { adapter } = harness(
+        refusing(
+          new Stripe.errors.StripeAuthenticationError({
+            message: 'Invalid API Key provided: sk_test_***',
+            type: 'invalid_request_error',
+          }),
+        ),
+      );
+      const result = await adapter.verifyKey(TEST_SECRET);
+      expect(result.ok).toBe(false);
+    });
+  });
+
+  describe('a live account that cannot take money', () => {
     it('refuses one Stripe has disabled, and says which reason', async () => {
       const { adapter } = harness(
         answering({
