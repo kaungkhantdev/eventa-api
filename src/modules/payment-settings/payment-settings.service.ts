@@ -32,12 +32,15 @@ export class PaymentSettingsService {
     private readonly clock: Clock,
     /** `PUBLIC_API_URL` — where Stripe can reach this service. */
     private readonly publicApiUrl: string,
+    /** `NODE_ENV` — decides whether the screen may offer Live at all. */
+    private readonly environment: string,
   ) {}
 
   async get(organizationId: number): Promise<PaymentSettingsResponseDto> {
     return toPaymentSettingsResponse(
       await this.repo.findOrCreate(organizationId),
       this.publicApiUrl,
+      this.environment,
     );
   }
 
@@ -50,7 +53,10 @@ export class PaymentSettingsService {
     const warnings = await this.currencyWarnings(organizationId, input);
     await this.repo.findOrCreate(organizationId);
     const saved = await this.repo.update(organizationId, pickProvided(input));
-    return { ...toPaymentSettingsResponse(saved, this.publicApiUrl), warnings };
+    return {
+      ...toPaymentSettingsResponse(saved, this.publicApiUrl, this.environment),
+      warnings,
+    };
   }
 
   private assertValidPreferences(input: UpdatePreferencesInput): void {

@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { SecretCipher } from '../../common/crypto/secret-cipher';
 import { DomainException } from '../../common/errors/domain.exception';
 import { Clock } from '../../common/time/clock';
+import { liveKeysAccepted, whyLiveRefused } from './live-keys';
 import { PaymentCredentialsRepository } from './payment-credentials.repository';
 import { PaymentSettingsRepository } from './payment-settings.repository';
 import type { PaymentMode } from './payment-settings.types';
@@ -18,9 +19,6 @@ import {
 
 /** Long enough that a webhook URL cannot be found by guessing. */
 const WEBHOOK_TOKEN_BYTES = 18;
-
-/** The one environment where charging a real card is the intended outcome. */
-const PRODUCTION = 'production';
 
 /** What a workspace submits from the API keys card. */
 export interface SaveKeysInput {
@@ -183,10 +181,10 @@ export class PaymentKeysService {
    * a real person — and nothing about the screen would show it had happened.
    */
   private assertModeAllowedHere(mode: PaymentMode): void {
-    if (mode === 'live' && this.environment !== PRODUCTION) {
+    if (mode === 'live' && !liveKeysAccepted(this.environment)) {
       throw DomainException.invalidField(
         'mode',
-        `Live keys are only accepted in production; this server is running as "${this.environment}". Use your Stripe test keys here.`,
+        whyLiveRefused(this.environment),
       );
     }
   }

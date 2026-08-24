@@ -54,6 +54,7 @@ import { StripeAccountAdapter } from './providers/stripe-account.adapter';
           organization,
           clock,
           config.getOrThrow('PUBLIC_API_URL', { infer: true }),
+          config.getOrThrow('NODE_ENV', { infer: true }),
         ),
       inject: [
         PaymentSettingsRepository,

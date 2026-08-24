@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { PaymentSettingsRow } from '../payment-settings.types';
+import { liveKeysAccepted } from '../live-keys';
 import { webhookUrlFor } from '../webhook-url';
 
 /**
@@ -30,6 +31,11 @@ export class PaymentSettingsResponseDto {
       "This workspace's own webhook endpoint, to register in Stripe. Null until keys are first saved.",
   })
   webhookUrl!: string | null;
+  @ApiProperty({
+    description:
+      'Whether THIS server accepts live keys. False outside production, where a live key would let a seed script or a staging click charge a real card. The settings screen offers a Test/Live toggle and cannot know this on its own.',
+  })
+  liveKeysAccepted!: boolean;
   @ApiPropertyOptional({
     type: [String],
     description: 'Non-blocking advisories',
@@ -40,6 +46,7 @@ export class PaymentSettingsResponseDto {
 export function toPaymentSettingsResponse(
   row: PaymentSettingsRow,
   publicApiUrl = '',
+  environment = '',
 ): PaymentSettingsResponseDto {
   return {
     provider: row.provider,
@@ -54,6 +61,7 @@ export function toPaymentSettingsResponse(
     emailReceipts: row.emailReceipts,
     testMode: row.mode === 'test',
     webhookUrl: webhookUrlFor(publicApiUrl, row.webhookToken),
+    liveKeysAccepted: liveKeysAccepted(environment),
     warnings: [],
   };
 }
