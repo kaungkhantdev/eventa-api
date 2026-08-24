@@ -151,6 +151,70 @@ describe('PasswordResetService', () => {
   });
 
   /**
+   * Only an account that can actually sign in has a password worth resetting.
+   *
+   * Sign-in refuses anything but `Active`, and reset never touched `status` —
+   * so an unconfirmed account could complete the whole flow, be told "please
+   * sign in", and be refused at the door. A reset that ends somewhere its own
+   * success message sends you, and fails, is worse than an honest refusal.
+   */
+  describe('forgot — an account has to be usable to be reset', () => {
+    it('refuses an unconfirmed account and says what to do instead', async () => {
+      repo.findByEmailPersona.mockResolvedValue({
+        ...user,
+        status: 'Unconfirmed',
+      });
+      await expect(
+        refusalFrom(service.forgot('owner@acme.co.th')),
+      ).resolves.toMatch(/confirm/i);
+      expect(outbox.enqueue).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Deliberately no fresh confirmation email from here. Sign-in resends one,
+     * but only AFTER a correct password; this endpoint takes no credential at
+     * all, so sending from it would make it an unauthenticated way to fill
+     * somebody's inbox.
+     */
+    it('sends nothing at all when it refuses', async () => {
+      repo.findByEmailPersona.mockResolvedValue({
+        ...user,
+        status: 'Unconfirmed',
+      });
+      await expect(service.forgot('owner@acme.co.th')).rejects.toBeDefined();
+      expect(outbox.enqueue).not.toHaveBeenCalled();
+      expect(tokens.signPasswordReset).not.toHaveBeenCalled();
+    });
+
+    it('refuses a suspended account, pointing at the person who can undo it', async () => {
+      repo.findByEmailPersona.mockResolvedValue({
+        ...user,
+        status: 'Suspended',
+      });
+      await expect(
+        refusalFrom(service.forgot('owner@acme.co.th')),
+      ).resolves.toMatch(/suspend/i);
+    });
+
+    it('refuses an unaccepted invitation, naming the invitation', async () => {
+      repo.findByEmailPersona.mockResolvedValue({ ...user, status: 'Invited' });
+      await expect(
+        refusalFrom(service.forgot('owner@acme.co.th')),
+      ).resolves.toMatch(/invitation/i);
+    });
+
+    /** A blocked status is the account's own state, not a wrong guess at it. */
+    it('does not count a blocked status against the brute-force lock', async () => {
+      repo.findByEmailPersona.mockResolvedValue({
+        ...user,
+        status: 'Unconfirmed',
+      });
+      await expect(service.forgot('owner@acme.co.th')).rejects.toBeDefined();
+      expect(throttle.recordFailure).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
    * The mitigation the plain answer above requires.
    *
    * Once a reset form tells a registered address from an unknown one, it is a

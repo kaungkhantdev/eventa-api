@@ -28,6 +28,24 @@ function noSuchAccount(persona: Persona): string {
 
 const SOCIAL_ONLY =
   'That account signs in with Google, so it has no password to reset. Use “Continue with Google” instead.';
+
+/**
+ * Why a reset cannot help this account yet, keyed on the status blocking it.
+ *
+ * Only `Active` can sign in, and `reset` deliberately does not change status —
+ * so without this an unconfirmed account completed the whole flow, was told
+ * "please sign in", and was refused at the door. A success that ends in a
+ * locked door is worse than an honest refusal, and every message here names the
+ * one thing that actually unblocks them.
+ */
+const CANNOT_RESET: Record<string, string> = {
+  Unconfirmed:
+    'That account has not been confirmed yet, so there is no sign-in for a password to unlock. Open the confirmation link emailed when it was created — signing in sends a fresh one.',
+  Invited:
+    'That invitation has not been accepted yet. Open the invitation email to finish setting the account up, and choose a password there.',
+  Suspended:
+    'That account is suspended, so resetting its password would not let it back in. Ask a workspace admin to reactivate it.',
+};
 const RESET_DONE = 'Your password has been reset. Please sign in.';
 const INVALID_LINK =
   'This reset link is invalid or has expired. Request a new one.';
@@ -78,11 +96,13 @@ export class PasswordResetService {
       await this.throttle.recordFailure(identity);
       throw DomainException.notFound(noSuchAccount(audience));
     }
-    // Not counted as a miss: the account exists, so this reveals nothing a
-    // probe did not already learn, and it is a real answer to a real question.
+    // Neither of these counts as a miss against the lock: both are the
+    // account's own state, not somebody guessing at whether it exists.
     if (!user.passwordHash) {
       throw DomainException.validation(SOCIAL_ONLY);
     }
+    const blocked = CANNOT_RESET[user.status];
+    if (blocked) throw DomainException.validation(blocked);
 
     await this.sendResetLink(
       user.id,
