@@ -12,6 +12,7 @@ import { AppConfigModule } from './config/config.module';
 import type { Env } from './config/env.validation';
 import { buildLoggerOptions } from './config/logger.config';
 import { DatabaseModule } from './db/database.module';
+import { MetricsModule } from './modules/metrics/metrics.module';
 import { HealthModule } from './health/health.module';
 import { EventCategoriesModule } from './modules/event-categories/event-categories.module';
 import { EventDuplicationModule } from './modules/event-duplication/event-duplication.module';
@@ -72,6 +73,7 @@ import { MeetingsModule } from './modules/meetings/meetings.module';
     CommonModule,
     RedisModule,
     HealthModule,
+    MetricsModule,
     AuthModule,
     UsersModule,
     AuthSignupModule,
