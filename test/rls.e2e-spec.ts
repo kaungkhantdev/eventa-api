@@ -5,7 +5,10 @@
 process.env.NODE_ENV = 'test';
 process.env.DATABASE_URL ??= 'postgres://eventa:eventa@localhost:5432/eventa';
 
-import { Pool, type PoolClient } from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { Client, Pool, type PoolClient } from 'pg';
+import * as schema from '../src/db/schema';
+import { AuthRepository } from '../src/modules/auth/auth.repository';
 
 const APP_ROLE = 'eventa_app';
 const SLUGS = ['org-one-rls-test', 'org-two-rls-test'];
@@ -111,6 +114,72 @@ describe('RLS tenant isolation (integration)', () => {
           [org2],
         ),
       ).rejects.toThrow();
+    });
+  });
+
+  /**
+   * The tests above prove the POLICIES are right. These prove the app's own
+   * repositories satisfy them — which is a different claim, and the one that
+   * was untested.
+   *
+   * Every other suite in this repo connects as `eventa`, which owns the tables,
+   * and a table owner bypasses RLS unless FORCE ROW LEVEL SECURITY is set. So a
+   * repository that writes to a tenant table without setting `app.current_org`
+   * passes every test here and then fails in staging, where the app connects as
+   * a role RLS applies to. The write is the exact one that happens on every
+   * sign-in, and a rejected audit insert is a compliance hole, not a cosmetic
+   * bug: SAD §13 requires the trail to be complete.
+   *
+   * Running through the REAL repository, not raw SQL — raw SQL here would only
+   * re-test Postgres.
+   */
+  describe('the app’s own writes, under a role RLS applies to', () => {
+    let appDb: Client;
+    let repo: AuthRepository;
+    let aliceId: string;
+
+    beforeAll(async () => {
+      // A single client rather than a pool, so `SET ROLE` is known to have run
+      // before anything else — on a pool it would race each new connection.
+      appDb = new Client({ connectionString: process.env.DATABASE_URL });
+      await appDb.connect();
+      await appDb.query(`SET ROLE ${APP_ROLE}`);
+      repo = new AuthRepository(
+        drizzle(appDb, { schema, casing: 'snake_case' }),
+      );
+      const alice = await pool.query<{ id: string }>(
+        `SELECT id FROM users WHERE email = 'alice@rls.test'`,
+      );
+      aliceId = alice.rows[0].id;
+    });
+
+    afterAll(async () => {
+      // Before the outer hook drops the orgs: audit_events references
+      // organizations ON DELETE RESTRICT, so a leftover row blocks the cleanup.
+      await pool.query(`DELETE FROM audit_events WHERE organization_id = $1`, [
+        org1,
+      ]);
+      await appDb.end();
+    });
+
+    it('records a sign-in in the audit trail', async () => {
+      await expect(
+        repo.recordAudit({
+          organizationId: org1,
+          type: 'signin',
+          title: 'Signed in from Unknown device',
+          actorUserId: aliceId,
+          ip: '::ffff:127.0.0.1',
+        }),
+      ).resolves.toBeUndefined();
+
+      // Read back as the owner: the row must actually be there, not merely
+      // have failed to throw.
+      const written = await pool.query<{ title: string }>(
+        `SELECT title FROM audit_events WHERE organization_id = $1`,
+        [org1],
+      );
+      expect(written.rows).toHaveLength(1);
     });
   });
 });

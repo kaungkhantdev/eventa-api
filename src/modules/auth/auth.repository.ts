@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, gt, isNull } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { auditEvents, authSessions, memberships, users } from '../../db/schema';
+import { withTenant } from '../../db/tenant';
 
 type AuditType =
   | 'signin'
@@ -125,14 +126,27 @@ export class AuthRepository {
     });
   }
 
+  /**
+   * `withTenant`, because `audit_events` is one of the RLS tables in migration
+   * 0002 and its policy's WITH CHECK compares `organization_id` against the
+   * `app.current_org` setting. Unset, `current_setting(...)` is NULL, the
+   * comparison is NULL rather than true, and Postgres refuses the row.
+   *
+   * This wrote fine for a long time only because every developer and every test
+   * connects as `eventa`, which owns the tables — and an owner bypasses RLS
+   * while no migration sets FORCE ROW LEVEL SECURITY. Under the non-owning role
+   * the app uses in staging and production, every sign-in lost its audit entry.
+   */
   async recordAudit(input: AuditInput): Promise<void> {
-    await this.db.insert(auditEvents).values({
-      organizationId: input.organizationId,
-      type: input.type,
-      title: input.title,
-      actorUserId: input.actorUserId,
-      ipAddress: input.ip,
-      meta: input.meta ?? null,
+    await withTenant(this.db, input.organizationId, async (tx) => {
+      await tx.insert(auditEvents).values({
+        organizationId: input.organizationId,
+        type: input.type,
+        title: input.title,
+        actorUserId: input.actorUserId,
+        ipAddress: input.ip,
+        meta: input.meta ?? null,
+      });
     });
   }
 }
