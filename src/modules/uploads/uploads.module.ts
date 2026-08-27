@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type { Env } from '../../config/env.validation';
 import { ObjectStoragePort } from '../profile-photo/ports/object-storage.port';
 import { S3ObjectStorageAdapter } from '../profile-photo/providers/s3-object-storage.adapter';
 import { ImageUploadService } from './image-upload.service';
@@ -26,7 +28,18 @@ import { ImageUploadService } from './image-upload.service';
 @Module({
   providers: [
     ImageUploadService,
-    { provide: ObjectStoragePort, useClass: S3ObjectStorageAdapter },
+    {
+      // A factory, NOT `useClass`, and it has to stay one. The adapter takes an
+      // optional second parameter so its own spec can pass a fake `S3Client`,
+      // and `emitDecoratorMetadata` emits that parameter's type regardless of
+      // the `?` — so `useClass` sends Nest looking for an `S3Client` provider
+      // and the app dies at boot. Constructing it here passes the one
+      // dependency it actually has. `uploads.module.spec.ts` holds that line.
+      provide: ObjectStoragePort,
+      useFactory: (config: ConfigService<Env, true>) =>
+        new S3ObjectStorageAdapter(config),
+      inject: [ConfigService],
+    },
   ],
   exports: [ImageUploadService, ObjectStoragePort],
 })
