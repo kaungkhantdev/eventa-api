@@ -7,6 +7,11 @@ describe('validateEnv', () => {
     // Required now: card payment runs through Stripe and only Stripe, so the
     // app refuses to boot without the keys rather than discovering they are
     // missing at the till.
+    //
+    // The bucket is required for the same reason: there is one object storage
+    // backend, so a nameless bucket is a boot failure, not a runtime surprise.
+    S3_BUCKET: 'eventa-uploads',
+    S3_REGION: 'ap-southeast-1',
   };
 
   it('rejects an env missing DATABASE_URL', () => {
@@ -74,38 +79,48 @@ describe('validateEnv', () => {
     });
   });
 
+  /**
+   * There is ONE object storage backend: an S3 bucket. Locally that bucket is
+   * MinIO, which speaks the same API and is reached by pointing `S3_ENDPOINT`
+   * at it — a different address, not a different implementation.
+   */
   describe('object storage (US-DISC-11)', () => {
-    it('defaults to in-process storage, so local dev needs no AWS account', () => {
+    it('applies the upload defaults', () => {
       const env = validateEnv(base);
-      expect(env.STORAGE_PROVIDER).toBe('memory');
       expect(env.UPLOAD_MAX_BYTES).toBe(5_242_880);
       expect(env.UPLOAD_URL_TTL_SECONDS).toBe(300);
     });
 
-    it('refuses to boot on s3 without a bucket', () => {
-      expect(() =>
-        validateEnv({
-          ...base,
-          STORAGE_PROVIDER: 's3',
-          S3_REGION: 'ap-southeast-1',
-        }),
-      ).toThrow(/S3_BUCKET/);
+    /**
+     * The switch that used to select an in-process store is gone, and its
+     * absence is the point. It handed the browser `http://localhost/object-
+     * storage/…`, which nothing serves, so an env that merely forgot to say
+     * `s3` booted happily and then failed at every upload — far from the cause.
+     * A bucket the app cannot name is now a boot failure.
+     */
+    it('has no in-process backend to fall back to', () => {
+      expect(validateEnv(base)).not.toHaveProperty('STORAGE_PROVIDER');
     });
 
-    it('refuses to boot on s3 without a region', () => {
-      expect(() =>
-        validateEnv({ ...base, STORAGE_PROVIDER: 's3', S3_BUCKET: 'b' }),
-      ).toThrow(/S3_REGION/);
+    it('refuses to boot without a bucket', () => {
+      expect(() => validateEnv({ ...base, S3_BUCKET: undefined })).toThrow(
+        /S3_BUCKET/,
+      );
     });
 
-    it('accepts s3 once the bucket and region are named', () => {
+    it('refuses to boot without a region', () => {
+      expect(() => validateEnv({ ...base, S3_REGION: undefined })).toThrow(
+        /S3_REGION/,
+      );
+    });
+
+    /** How local dev reaches MinIO instead of Amazon. */
+    it('takes an S3-compatible endpoint', () => {
       const env = validateEnv({
         ...base,
-        STORAGE_PROVIDER: 's3',
-        S3_BUCKET: 'eventa-uploads',
-        S3_REGION: 'ap-southeast-1',
+        S3_ENDPOINT: 'http://localhost:9000',
       });
-      expect(env.STORAGE_PROVIDER).toBe('s3');
+      expect(env.S3_ENDPOINT).toBe('http://localhost:9000');
     });
 
     it('trims a trailing slash off the public base so URLs never double up', () => {

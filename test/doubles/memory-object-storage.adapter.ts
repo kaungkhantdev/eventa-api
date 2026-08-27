@@ -1,13 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { Env } from '../../../config/env.validation';
+import type { Env } from '../../src/config/env.validation';
 import {
   ObjectStoragePort,
   type CopyObjectInput,
   type PresignPutInput,
   type PresignedUpload,
   type StoredObject,
-} from '../ports/object-storage.port';
+} from '../../src/modules/profile-photo/ports/object-storage.port';
 
 const LOCAL_BASE = 'http://localhost/object-storage';
 
@@ -16,9 +16,17 @@ interface StoredBytes extends StoredObject {
 }
 
 /**
- * In-process object storage for tests and local development
- * (`STORAGE_PROVIDER=memory`, the default so the app runs without AWS
- * credentials).
+ * In-process object storage, FOR TESTS ONLY. A suite installs it with
+ * `.overrideProvider(ObjectStoragePort)`; nothing in `src/` can reach it and no
+ * environment variable selects it.
+ *
+ * It used to be reachable from the app as `STORAGE_PROVIDER=memory`, which was
+ * the wrong shape twice over. It hands the browser
+ * `http://localhost/object-storage/…` — an address nothing serves — so as a
+ * running configuration it is not "storage without AWS", it is uploads that
+ * always fail; and being the DEFAULT meant an env that simply forgot to name a
+ * bucket booted clean and broke at the first PUT. Local development uses MinIO,
+ * a real bucket at a different address.
  *
  * It is a double, not a stub: `head` answers only for keys something was
  * actually stored under, so the "confirmed an upload that never happened" path

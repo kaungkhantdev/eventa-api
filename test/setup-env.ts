@@ -13,3 +13,10 @@
 process.env.NODE_ENV ??= 'test';
 process.env.DATABASE_URL ??= 'postgres://eventa:eventa@localhost:5432/eventa';
 process.env.JWT_SECRET ??= 'test-secret-at-least-16-characters-long';
+
+// A bucket is required to boot, so CI needs one named even though no suite
+// writes to it — the one suite that uploads overrides `ObjectStoragePort` with
+// the in-process double. A name that is obviously not a real bucket, so a
+// misdirected request cannot land somewhere that exists.
+process.env.S3_BUCKET ??= 'eventa-test-no-such-bucket';
+process.env.S3_REGION ??= 'ap-southeast-1';

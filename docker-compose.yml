@@ -60,11 +60,11 @@ services:
 
   # Object storage for uploads — cover images, logos, profile photos.
   #
-  # Not optional in practice, despite STORAGE_PROVIDER defaulting to `memory`.
-  # The memory adapter hands the browser `http://localhost/object-storage/…`,
-  # which nothing serves, so the PUT fails and every upload errors out. It is a
-  # double for TESTS, where the bytes are handed over in-process; a real browser
-  # needs somewhere to send them.
+  # Not optional: the app has one storage backend, an S3 bucket, and this is
+  # that bucket locally. MinIO speaks the S3 API, so the same adapter and the
+  # same code path run here as in production — S3_ENDPOINT is the only
+  # difference. Without it the API still boots, and every upload fails at the
+  # browser's PUT.
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
