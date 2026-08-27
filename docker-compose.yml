@@ -58,5 +58,47 @@ services:
       timeout: 5s
       retries: 10
 
+  # Object storage for uploads — cover images, logos, profile photos.
+  #
+  # Not optional in practice, despite STORAGE_PROVIDER defaulting to `memory`.
+  # The memory adapter hands the browser `http://localhost/object-storage/…`,
+  # which nothing serves, so the PUT fails and every upload errors out. It is a
+  # double for TESTS, where the bytes are handed over in-process; a real browser
+  # needs somewhere to send them.
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - '9000:9000' # S3 API — what S3_ENDPOINT points at
+      - '9001:9001' # web console, http://localhost:9001
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Creates the bucket and makes it world-readable, then exits.
+  #
+  # Public reads are the point: the app stores the object's URL and renders it
+  # in an <img>, so a browser fetches it with no credentials. Only reads —
+  # writing still needs a presigned URL the API signed.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/eventa-uploads &&
+      mc anonymous set download local/eventa-uploads
+      "
+
 volumes:
   pgdata:
+  miniodata:
