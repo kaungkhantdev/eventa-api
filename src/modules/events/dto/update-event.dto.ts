@@ -28,10 +28,16 @@ export class UpdateEventDto {
   @MaxLength(120)
   name?: string;
 
-  @ApiPropertyOptional({ maxLength: 250 })
+  /**
+   * Rich text — the wizard's editor emits HTML and the API sanitises it on
+   * write (`rich-text.ts`). The cap counts MARKUP as well as words, which is
+   * why it is far above what anyone types: a page the length of a Meetup
+   * listing is ~2,400 characters of text and roughly double that as HTML.
+   */
+  @ApiPropertyOptional({ maxLength: 10000, description: 'Sanitised HTML' })
   @IsOptional()
   @IsString()
-  @MaxLength(250)
+  @MaxLength(10000)
   description?: string;
 
   @ApiPropertyOptional({ enum: EVENT_TYPES })
