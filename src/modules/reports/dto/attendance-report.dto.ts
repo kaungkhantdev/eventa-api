@@ -1,6 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { PeriodChangeDto } from './overview-report.dto';
-import { ReportPeriodDto } from './registrations-report.dto';
+import { PeriodChangeDto, ReportPeriodDto } from './report-common.dto';
 
 /**
  * Every rate is nullable, and the nulls carry meaning (US-RPT-09): an event

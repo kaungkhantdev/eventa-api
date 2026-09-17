@@ -1,6 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { PeriodChangeDto } from './overview-report.dto';
-import { ReportPeriodDto } from './registrations-report.dto';
+import { PeriodChangeDto, ReportPeriodDto } from './report-common.dto';
 
 /** Money for one scope, integer satang throughout (US-RPT-05). */
 export class IncomeFiguresDto {

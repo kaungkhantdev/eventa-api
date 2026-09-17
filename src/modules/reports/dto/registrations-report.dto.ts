@@ -1,30 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { PeriodChangeDto } from './overview-report.dto';
-
-/** The window a report covered, echoed back so the reader knows what they got. */
-export class ReportPeriodDto {
-  @ApiProperty({
-    example: '2026-01-01',
-    description: 'Bangkok day, inclusive.',
-  })
-  from!: string;
-
-  @ApiProperty({
-    example: '2026-07-19',
-    description: 'Bangkok day, inclusive.',
-  })
-  to!: string;
-
-  @ApiProperty({ example: 200 })
-  days!: number;
-
-  @ApiProperty({
-    example: false,
-    description:
-      'The span asked for exceeded the 24-month limit and was cut back to it.',
-  })
-  trimmed!: boolean;
-}
+import { PeriodChangeDto, ReportPeriodDto } from './report-common.dto';
 
 /** Seats by order state. The five sum to `total` (US-RPT-08). */
 export class RegistrationSplitDto {

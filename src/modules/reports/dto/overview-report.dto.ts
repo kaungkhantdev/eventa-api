@@ -1,28 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { TREND_GRANULARITIES, type TrendGranularity } from '../revenue-trend';
-import { ReportPeriodDto } from './registrations-report.dto';
-
-/** How a figure moved against the previous equal period (US-RPT-01). */
-export class PeriodChangeDto {
-  @ApiProperty({ enum: ['up', 'down', 'flat'] })
-  direction!: 'up' | 'down' | 'flat';
-
-  @ApiProperty({
-    type: Number,
-    nullable: true,
-    description:
-      'Null where no honest percentage exists — a baseline of zero is “new”, not “+∞%”. Render “—”.',
-  })
-  percent!: number | null;
-
-  @ApiProperty({
-    type: Boolean,
-    nullable: true,
-    description:
-      'Whether the movement is GOOD for this metric — a falling refund rate is an improvement. Null when flat, or when nothing could be compared.',
-  })
-  improved!: boolean | null;
-}
+import { PeriodChangeDto, ReportPeriodDto } from './report-common.dto';
 
 export class OverviewKpiDto {
   @ApiProperty({

@@ -2,10 +2,8 @@ import { BANGKOK_OFFSET_MS, DAY_MS } from '../../common/time/bangkok';
 import type { AttendanceReportDto } from './dto/attendance-report.dto';
 import type { IncomeReportDto } from './dto/income-report.dto';
 import type { OverviewReportDto } from './dto/overview-report.dto';
-import type {
-  RegistrationsReportDto,
-  ReportPeriodDto,
-} from './dto/registrations-report.dto';
+import type { RegistrationsReportDto } from './dto/registrations-report.dto';
+import type { ReportPeriodDto } from './dto/report-common.dto';
 import type { AttendanceReportView } from './attendance-report.service';
 import type { IncomeReportView } from './income-report.service';
 import type { OverviewReportView } from './overview-report.service';
