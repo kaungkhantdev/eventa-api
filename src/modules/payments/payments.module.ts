@@ -24,6 +24,8 @@ import { RevenueInsightsPort } from '../dashboard/ports/revenue-insights.port';
 import { RevenueInsightsAdapter } from './revenue-insights.adapter';
 import { IncomeReportPort } from '../reports/ports/income-report.port';
 import { IncomeReportAdapter } from './income-report.adapter';
+import { PaymentFeedPort } from '../notifications/ports/payment-feed.port';
+import { PaymentFeedAdapter } from './payment-feed.adapter';
 
 /**
  * Payments (US-DISC-05): collect an order's total by card or PromptPay, and act
@@ -48,6 +50,9 @@ import { IncomeReportAdapter } from './income-report.adapter';
     // Same arithmetic as the revenue port above, per event and with fees — see
     // the adapter. Bound here because only Payments knows what these mean.
     { provide: IncomeReportPort, useClass: IncomeReportAdapter },
+    // Settled and declined charges as feed items (US-MSG-03). Which status
+    // means which kind is Payments' call, not the feed's.
+    { provide: PaymentFeedPort, useClass: PaymentFeedAdapter },
     PaymentsService,
     RefundsService,
     PaymentsLedgerService,
@@ -78,6 +83,7 @@ import { IncomeReportAdapter } from './income-report.adapter';
     // re-submitted transfer both go through the same adapter.
     PaymentProviderPort,
     IncomeReportPort,
+    PaymentFeedPort,
   ],
 })
 export class PaymentsModule {}

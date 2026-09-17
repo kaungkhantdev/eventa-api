@@ -2,9 +2,11 @@ import { Module } from '@nestjs/common';
 import { EventAttendancePort } from '../discover/ports/event-attendance.port';
 import { EventStatsPort } from '../events/ports/event-stats.port';
 import { AttendanceReportPort } from '../reports/ports/attendance-report.port';
+import { RegistrationFeedPort } from '../notifications/ports/registration-feed.port';
 import { RegistrationReportPort } from '../reports/ports/registration-report.port';
 import { EventAttendanceAdapter } from './event-attendance.adapter';
 import { AttendanceReportAdapter } from './attendance-report.adapter';
+import { RegistrationFeedAdapter } from './registration-feed.adapter';
 import { RegistrationReportAdapter } from './registration-report.adapter';
 import { RegistrationStatsAdapter } from './registration-stats.adapter';
 import { RegistrationStatsRepository } from './registration-stats.repository';
@@ -26,12 +28,15 @@ import { RegistrationStatsRepository } from './registration-stats.repository';
     { provide: EventAttendancePort, useClass: EventAttendanceAdapter },
     { provide: RegistrationReportPort, useClass: RegistrationReportAdapter },
     { provide: AttendanceReportPort, useClass: AttendanceReportAdapter },
+    // Confirmed registrations as feed items (US-MSG-03).
+    { provide: RegistrationFeedPort, useClass: RegistrationFeedAdapter },
   ],
   exports: [
     EventStatsPort,
     EventAttendancePort,
     RegistrationReportPort,
     AttendanceReportPort,
+    RegistrationFeedPort,
   ],
 })
 export class RegistrationStatsModule {}

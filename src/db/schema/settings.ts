@@ -66,6 +66,37 @@ export const notificationPreferences = pgTable(
 );
 
 /**
+ * How far one member has read their notification feed (US-MSG-03).
+ *
+ * A watermark, not a row per notification. The feed itself is DERIVED from
+ * registrations, payments and payouts as they already stand, so there is nothing
+ * to mark read one by one — "unread" means "happened after this instant", and
+ * the whole of "mark all read" is moving this timestamp forward.
+ *
+ * One row per (organization, member): a colleague clearing their own feed must
+ * not clear anybody else's.
+ */
+export const notificationReads = pgTable(
+  'notification_reads',
+  {
+    id: idPk(),
+    organizationId: bigint({ mode: 'number' })
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** Everything at or before this instant is read. */
+    readAt: timestamp({ withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    unique('uq_notification_reads_member').on(t.organizationId, t.userId),
+  ],
+);
+
+/**
  * One automated message an organizer controls (US-MSG-01/02): the
  * registration confirmation, the payment receipt, the reminder, and so on,
  * identified by a stable `slug`.

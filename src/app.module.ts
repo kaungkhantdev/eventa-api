@@ -44,6 +44,7 @@ import { CheckoutModule } from './modules/checkout/checkout.module';
 import { CheckInModule } from './modules/check-in/check-in.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PayoutsModule } from './modules/payouts/payouts.module';
 import { TaxPeriodsModule } from './modules/tax-periods/tax-periods.module';
 import { DiscoverModule } from './modules/discover/discover.module';
@@ -116,6 +117,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     InvoicesModule,
     TaxPeriodsModule,
     CheckInModule,
+    NotificationsModule,
     PayoutsModule,
     ReportsModule,
   ],

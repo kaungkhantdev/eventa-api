@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { AccessModule } from '../access/access.module';
 import { PaymentSettingsModule } from '../payment-settings/payment-settings.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { PayoutFeedPort } from '../notifications/ports/payout-feed.port';
+import { PayoutFeedAdapter } from './payout-feed.adapter';
 import { PayoutsController } from './payouts.controller';
 import { PayoutsRepository } from './payouts.repository';
 import { PayoutsService } from './payouts.service';
@@ -22,7 +24,12 @@ import { PayoutsService } from './payouts.service';
 @Module({
   imports: [AccessModule, PaymentsModule, PaymentSettingsModule],
   controllers: [PayoutsController],
-  providers: [PayoutsService, PayoutsRepository],
-  exports: [PayoutsService],
+  providers: [
+    PayoutsService,
+    PayoutsRepository,
+    // Completed transfers as feed items (US-MSG-03).
+    { provide: PayoutFeedPort, useClass: PayoutFeedAdapter },
+  ],
+  exports: [PayoutsService, PayoutFeedPort],
 })
 export class PayoutsModule {}
