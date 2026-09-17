@@ -22,6 +22,8 @@ import { PaymentProviderPort } from './ports/payment-provider.port';
 import { StripePaymentAdapter } from './providers/stripe-payment.adapter';
 import { RevenueInsightsPort } from '../dashboard/ports/revenue-insights.port';
 import { RevenueInsightsAdapter } from './revenue-insights.adapter';
+import { IncomeReportPort } from '../reports/ports/income-report.port';
+import { IncomeReportAdapter } from './income-report.adapter';
 
 /**
  * Payments (US-DISC-05): collect an order's total by card or PromptPay, and act
@@ -43,6 +45,9 @@ import { RevenueInsightsAdapter } from './revenue-insights.adapter';
   controllers: [PaymentsController, FinanceController],
   providers: [
     { provide: RevenueInsightsPort, useClass: RevenueInsightsAdapter },
+    // Same arithmetic as the revenue port above, per event and with fees — see
+    // the adapter. Bound here because only Payments knows what these mean.
+    { provide: IncomeReportPort, useClass: IncomeReportAdapter },
     PaymentsService,
     RefundsService,
     PaymentsLedgerService,
@@ -72,6 +77,7 @@ import { RevenueInsightsAdapter } from './revenue-insights.adapter';
     // Payouts shares the provider seam: the hosted settings link and the
     // re-submitted transfer both go through the same adapter.
     PaymentProviderPort,
+    IncomeReportPort,
   ],
 })
 export class PaymentsModule {}

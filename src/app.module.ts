@@ -58,6 +58,7 @@ import { TicketSharingModule } from './modules/ticket-sharing/ticket-sharing.mod
 import { TicketingModule } from './modules/ticketing/ticketing.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { MeetingsModule } from './modules/meetings/meetings.module';
+import { ReportsModule } from './modules/reports/reports.module';
 
 @Module({
   imports: [
@@ -116,6 +117,7 @@ import { MeetingsModule } from './modules/meetings/meetings.module';
     TaxPeriodsModule,
     CheckInModule,
     PayoutsModule,
+    ReportsModule,
   ],
 })
 export class AppModule implements NestModule {
