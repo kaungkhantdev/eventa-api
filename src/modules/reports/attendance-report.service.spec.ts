@@ -3,6 +3,7 @@ import type {
   AttendanceCounts,
   AttendancePage,
   AttendanceReportPort,
+  AttendanceTotals,
 } from './ports/attendance-report.port';
 
 /**
@@ -27,8 +28,19 @@ const counts = (over: Partial<AttendanceCounts> = {}): AttendanceCounts => ({
   ...over,
 });
 
-function portReturning(page: Partial<AttendancePage> = {}) {
+const NO_ATTENDANCE = {
+  registered: 0,
+  checkedIn: 0,
+  checkedInAll: 0,
+  onTime: 0,
+};
+
+function portReturning(
+  page: Partial<AttendancePage> = {},
+  before: Partial<AttendanceTotals> = {},
+) {
   const port: AttendanceReportPort = {
+    totalsFor: () => Promise.resolve({ ...NO_ATTENDANCE, ...before }),
     attendanceByEvent: () =>
       Promise.resolve({
         rows: [counts()],
@@ -162,6 +174,38 @@ describe('AttendanceReportService', () => {
       const view = await serviceWith(port).load(ORG, { eventId: 'nope' });
       expect(view.rows).toEqual([]);
       expect(view.totals.checkedIn).toBe(0);
+    });
+  });
+
+  describe('against the previous period (US-RPT-02)', () => {
+    it('reads a higher attendance rate as an improvement', async () => {
+      // 80% now against 50% before.
+      const port = portReturning(
+        {},
+        { registered: 200, checkedIn: 100, checkedInAll: 100, onTime: 100 },
+      );
+      expect(
+        (await serviceWith(port).load(ORG, {})).changes.attendanceRate,
+      ).toMatchObject({ direction: 'up', improved: true });
+    });
+
+    it('reads FEWER no-shows as an improvement', async () => {
+      const port = portReturning(
+        {},
+        { registered: 400, checkedIn: 100, checkedInAll: 100, onTime: 100 },
+      );
+      // 80 missing now, 300 before.
+      expect(
+        (await serviceWith(port).load(ORG, {})).changes.noShows,
+      ).toMatchObject({ direction: 'down', improved: true });
+    });
+
+    it('claims no change where the previous period had no rate at all', async () => {
+      // Nothing ran then, so there is no attendance to have moved from.
+      const port = portReturning();
+      expect(
+        (await serviceWith(port).load(ORG, {})).changes.attendanceRate,
+      ).toEqual({ direction: 'flat', percent: null, improved: null });
     });
   });
 });

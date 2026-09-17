@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { PeriodChangeDto } from './overview-report.dto';
 
 /** The window a report covered, echoed back so the reader knows what they got. */
 export class ReportPeriodDto {
@@ -55,6 +56,27 @@ export class RegistrationsReportRowDto extends RegistrationSplitDto {
   startAt!: string;
 }
 
+/** Each tile's move against the previous equal period (US-RPT-02). */
+export class RegistrationChangesDto {
+  @ApiProperty({ type: PeriodChangeDto }) confirmed!: PeriodChangeDto;
+  @ApiProperty({ type: PeriodChangeDto }) pending!: PeriodChangeDto;
+  @ApiProperty({ type: PeriodChangeDto }) waitlisted!: PeriodChangeDto;
+
+  @ApiProperty({
+    type: PeriodChangeDto,
+    description: 'A registration lost — falling is the improvement.',
+  })
+  cancelled!: PeriodChangeDto;
+
+  @ApiProperty({
+    type: PeriodChangeDto,
+    description: 'Also a loss — falling is the improvement.',
+  })
+  rejected!: PeriodChangeDto;
+
+  @ApiProperty({ type: PeriodChangeDto }) total!: PeriodChangeDto;
+}
+
 export class RegistrationsReportDto {
   @ApiProperty({ type: ReportPeriodDto })
   period!: ReportPeriodDto;
@@ -63,9 +85,21 @@ export class RegistrationsReportDto {
   rows!: RegistrationsReportRowDto[];
 
   @ApiProperty({
+    description:
+      'How many events the filter matched in total, for paging the rows.',
+  })
+  matchedEvents!: number;
+
+  @ApiProperty({
     type: RegistrationSplitDto,
     description:
       'Summed across everything the filter matched, not just the page shown.',
   })
   totals!: RegistrationSplitDto;
+
+  @ApiProperty({
+    type: RegistrationChangesDto,
+    description: 'How each total moved against the previous equal period.',
+  })
+  changes!: RegistrationChangesDto;
 }

@@ -37,6 +37,11 @@ const PERM_GROUP: Record<string, string> = {
 interface Success<T> {
   data: T;
 }
+interface Change {
+  direction: 'up' | 'down' | 'flat';
+  percent: number | null;
+  improved: boolean | null;
+}
 interface Split {
   confirmed: number;
   pending: number;
@@ -54,6 +59,7 @@ interface Report {
   period: { from: string; to: string; days: number; trimmed: boolean };
   rows: Row[];
   totals: Split;
+  changes: Record<keyof Split, Change>;
 }
 interface Money {
   grossSatang: number;
@@ -74,6 +80,10 @@ interface AttendanceRow {
 }
 interface AttendanceReport {
   rows: AttendanceRow[];
+  changes: Record<
+    'checkedIn' | 'noShows' | 'attendanceRate' | 'onTimeRate',
+    Change
+  >;
   totals: {
     checkedIn: number;
     noShows: number | null;
@@ -85,11 +95,7 @@ interface IncomeReport {
   period: { from: string; to: string; days: number; trimmed: boolean };
   rows: (Money & { eventId: string; eventName: string })[];
   totals: Money;
-}
-interface Change {
-  direction: 'up' | 'down' | 'flat';
-  percent: number | null;
-  improved: boolean | null;
+  changes: Record<keyof Money, Change>;
 }
 interface Kpi {
   value: number | null;
@@ -754,6 +760,78 @@ describe('Reports (e2e — US-RPT)', () => {
       const res = await getAttendance(adminJwt, '?q=no-such-event').expect(200);
       expect(attendance(res).rows).toEqual([]);
       expect(attendance(res).totals.attendanceRate).toBeNull();
+    });
+  });
+
+  describe('tiles against the previous period (US-RPT-02)', () => {
+    it('compares registrations with the window before this one', async () => {
+      await seedOrder({ seats: 2, at: `now() - interval '40 days'` });
+      await seedOrder({ seats: 4, at: 'now()' });
+
+      const r = report(await get(adminJwt, '?range=30d').expect(200));
+      expect(r.totals.confirmed).toBe(4);
+      expect(r.changes.confirmed).toMatchObject({
+        direction: 'up',
+        percent: 100,
+        improved: true,
+      });
+    });
+
+    it('reads fewer cancellations as an improvement', async () => {
+      await seedOrder({
+        status: 'cancelled',
+        seats: 4,
+        at: `now() - interval '40 days'`,
+      });
+      await seedOrder({ status: 'cancelled', seats: 1, at: 'now()' });
+
+      const r = report(await get(adminJwt, '?range=30d').expect(200));
+      expect(r.changes.cancelled).toMatchObject({
+        direction: 'down',
+        improved: true,
+      });
+    });
+
+    it('compares income with the window before this one', async () => {
+      await seedPayment({
+        amountSatang: 5_000,
+        at: `now() - interval '40 days'`,
+      });
+      await seedPayment({ amountSatang: 10_000, at: 'now()' });
+
+      const i = income(await getIncome(adminJwt, '?range=30d').expect(200));
+      expect(i.changes.grossSatang).toMatchObject({
+        direction: 'up',
+        percent: 100,
+        improved: true,
+      });
+    });
+
+    it('passes no verdict on VAT', async () => {
+      await seedPayment({
+        amountSatang: 10_000,
+        vatSatang: 700,
+        at: `now() - interval '40 days'`,
+      });
+      await seedPayment({ amountSatang: 20_000, vatSatang: 1_400 });
+
+      const i = income(await getIncome(adminJwt, '?range=30d').expect(200));
+      expect(i.changes.vatSatang.direction).toBe('up');
+      expect(i.changes.vatSatang.improved).toBeNull();
+    });
+
+    it('claims no attendance change where nothing ran before', async () => {
+      const past = await seedEventAt('rpt-cmp', 'Compared Summit', '-2 days');
+      await seedTicket({ event: past, checkedIn: 'onTime' });
+
+      const a = attendance(
+        await getAttendance(adminJwt, '?q=Compared').expect(200),
+      );
+      expect(a.changes.attendanceRate).toEqual({
+        direction: 'flat',
+        percent: null,
+        improved: null,
+      });
     });
   });
 

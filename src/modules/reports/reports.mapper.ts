@@ -30,7 +30,9 @@ export function toRegistrationsReport(
       rejected: row.rejected,
       total: row.total,
     })),
+    matchedEvents: view.matchedEvents,
     totals: view.totals,
+    changes: view.changes,
   };
 }
 
@@ -49,7 +51,9 @@ export function toAttendanceReport(
       attendanceRate: row.attendanceRate,
       onTimeRate: row.onTimeRate,
     })),
+    matchedEvents: view.matchedEvents,
     totals: view.totals,
+    changes: view.changes,
   };
 }
 
@@ -75,7 +79,9 @@ export function toIncomeReport(view: IncomeReportView): IncomeReportDto {
       netSatang: row.netSatang,
       settledSatang: row.settledSatang,
     })),
+    matchedEvents: view.matchedEvents,
     totals: view.totals,
+    changes: view.changes,
   };
 }
 

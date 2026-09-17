@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
   comparePeriod,
-  FLAT_CHANGE,
   type PeriodChange,
 } from '../../common/analytics/period-change';
 import { Permission } from '../../common/decorators/require-permissions.decorator';
@@ -18,6 +17,7 @@ import {
   type IncomeSummary,
 } from './ports/income-report.port';
 import { RegistrationReportPort } from './ports/registration-report.port';
+import { changeBetween } from './report-change';
 import { resolveReportPeriod, type ReportPeriod } from './reports-period';
 import {
   bucketRevenue,
@@ -158,22 +158,13 @@ interface Takings {
   moneyBefore: IncomeSummary;
 }
 
-/**
- * A card from two figures.
- *
- * A null on EITHER side means no comparison is claimed. An unknown current
- * figure has nothing to compare, and an unknown previous one is not a zero to
- * measure against — "up from 0%" would invent a baseline that never existed.
- */
+/** A card from two figures; `changeBetween` owns what an unknown side means. */
 function kpi(
   current: number | null,
   previous: number | null,
   options: { higherIsBetter?: boolean } = {},
 ): OverviewKpi {
-  if (current === null || previous === null) {
-    return { value: current, change: FLAT_CHANGE };
-  }
-  return { value: current, change: comparePeriod(current, previous, options) };
+  return { value: current, change: changeBetween(current, previous, options) };
 }
 
 /** The three finance tiles, or three nulls when the caller may not see them. */

@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { PeriodChangeDto } from './overview-report.dto';
 import { ReportPeriodDto } from './registrations-report.dto';
 
 /**
@@ -50,9 +51,35 @@ export class AttendanceTotalsDto {
   @ApiPropertyOptional({ nullable: true }) onTimeRate!: number | null;
 }
 
+/** Each tile's move against the previous equal period (US-RPT-02). */
+export class AttendanceChangesDto {
+  @ApiProperty({ type: PeriodChangeDto }) checkedIn!: PeriodChangeDto;
+
+  @ApiProperty({
+    type: PeriodChangeDto,
+    description: 'People who did not arrive — falling is the improvement.',
+  })
+  noShows!: PeriodChangeDto;
+
+  @ApiProperty({ type: PeriodChangeDto }) attendanceRate!: PeriodChangeDto;
+  @ApiProperty({ type: PeriodChangeDto }) onTimeRate!: PeriodChangeDto;
+}
+
 export class AttendanceReportDto {
   @ApiProperty({ type: ReportPeriodDto }) period!: ReportPeriodDto;
   @ApiProperty({ type: [AttendanceReportRowDto] })
   rows!: AttendanceReportRowDto[];
+
+  @ApiProperty({
+    description:
+      'How many events the filter matched in total, for paging the rows.',
+  })
+  matchedEvents!: number;
   @ApiProperty({ type: AttendanceTotalsDto }) totals!: AttendanceTotalsDto;
+
+  @ApiProperty({
+    type: AttendanceChangesDto,
+    description: 'How each total moved against the previous equal period.',
+  })
+  changes!: AttendanceChangesDto;
 }

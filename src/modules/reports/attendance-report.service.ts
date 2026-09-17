@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { PeriodChange } from '../../common/analytics/period-change';
 import { Clock } from '../../common/time/clock';
 import {
   DEFAULT_REPORT_LIMIT,
@@ -7,7 +8,9 @@ import {
 import {
   AttendanceReportPort,
   type AttendanceCounts,
+  type AttendanceTotals,
 } from './ports/attendance-report.port';
+import { changeBetween, LOWER_IS_BETTER } from './report-change';
 import { resolveReportPeriod, type ReportPeriod } from './reports-period';
 
 /**
@@ -35,11 +38,23 @@ export interface AttendanceTotalsView {
   onTimeRate: number | null;
 }
 
+/**
+ * How each tile moved against the previous equal period.
+ *
+ * No-shows are the only one where a fall is the improvement — the other three
+ * are people arriving, and arriving on time.
+ */
+export type AttendanceChanges = Record<
+  keyof AttendanceTotalsView,
+  PeriodChange
+>;
+
 export interface AttendanceReportView {
   period: ReportPeriod;
   rows: AttendanceRow[];
   matchedEvents: number;
   totals: AttendanceTotalsView;
+  changes: AttendanceChanges;
 }
 
 @Injectable()
@@ -55,28 +70,54 @@ export class AttendanceReportService {
   ): Promise<AttendanceReportView> {
     const period = resolveReportPeriod(filter, this.clock.now());
 
-    const page = await this.attendance.attendanceByEvent(organizationId, {
-      from: period.from,
-      to: period.to,
-      eventId: filter.eventId,
-      search: filter.q,
-      page: filter.page ?? 1,
-      limit: filter.limit ?? DEFAULT_REPORT_LIMIT,
-    });
+    const scope = { eventId: filter.eventId, search: filter.q };
+    const [page, before] = await Promise.all([
+      this.attendance.attendanceByEvent(organizationId, {
+        from: period.from,
+        to: period.to,
+        ...scope,
+        page: filter.page ?? 1,
+        limit: filter.limit ?? DEFAULT_REPORT_LIMIT,
+      }),
+      this.attendance.totalsFor(organizationId, {
+        from: period.previousFrom,
+        to: period.previousTo,
+        ...scope,
+      }),
+    ]);
 
-    const { registered, checkedIn, checkedInAll, onTime } = page.totals;
+    const totals = toTotals(page.totals);
     return {
       period,
       rows: page.rows.map(toRow),
       matchedEvents: page.matchedEvents,
-      totals: {
-        checkedIn: checkedInAll,
-        noShows: registered === 0 ? null : registered - checkedIn,
-        attendanceRate: rate(checkedIn, registered),
-        onTimeRate: rate(onTime, checkedIn),
-      },
+      totals,
+      changes: changesBetween(totals, toTotals(before)),
     };
   }
+}
+
+/** The four tiles, from the raw sums. Same rules as a row, across the filter. */
+function toTotals(counts: AttendanceTotals): AttendanceTotalsView {
+  const { registered, checkedIn, checkedInAll, onTime } = counts;
+  return {
+    checkedIn: checkedInAll,
+    noShows: registered === 0 ? null : registered - checkedIn,
+    attendanceRate: rate(checkedIn, registered),
+    onTimeRate: rate(onTime, checkedIn),
+  };
+}
+
+function changesBetween(
+  now: AttendanceTotalsView,
+  before: AttendanceTotalsView,
+): AttendanceChanges {
+  return {
+    checkedIn: changeBetween(now.checkedIn, before.checkedIn),
+    noShows: changeBetween(now.noShows, before.noShows, LOWER_IS_BETTER),
+    attendanceRate: changeBetween(now.attendanceRate, before.attendanceRate),
+    onTimeRate: changeBetween(now.onTimeRate, before.onTimeRate),
+  };
 }
 
 /**

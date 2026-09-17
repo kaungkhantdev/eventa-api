@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { PeriodChangeDto } from './overview-report.dto';
 import { ReportPeriodDto } from './registrations-report.dto';
 
 /** Money for one scope, integer satang throughout (US-RPT-05). */
@@ -38,6 +39,33 @@ export class IncomeReportRowDto extends IncomeFiguresDto {
   @ApiProperty({ format: 'date-time' }) startAt!: string;
 }
 
+/** Each money tile's move against the previous equal period (US-RPT-02). */
+export class IncomeChangesDto {
+  @ApiProperty({ type: PeriodChangeDto }) grossSatang!: PeriodChangeDto;
+
+  @ApiProperty({
+    type: PeriodChangeDto,
+    description:
+      'Carries no verdict — `improved` is always null. VAT was never the organizer’s to gain or lose.',
+  })
+  vatSatang!: PeriodChangeDto;
+
+  @ApiProperty({
+    type: PeriodChangeDto,
+    description: 'Money leaving — falling is the improvement.',
+  })
+  refundsSatang!: PeriodChangeDto;
+
+  @ApiProperty({
+    type: PeriodChangeDto,
+    description: 'Also money leaving — falling is the improvement.',
+  })
+  feesSatang!: PeriodChangeDto;
+
+  @ApiProperty({ type: PeriodChangeDto }) netSatang!: PeriodChangeDto;
+  @ApiProperty({ type: PeriodChangeDto }) settledSatang!: PeriodChangeDto;
+}
+
 export class IncomeReportDto {
   @ApiProperty({ type: ReportPeriodDto })
   period!: ReportPeriodDto;
@@ -46,8 +74,20 @@ export class IncomeReportDto {
   rows!: IncomeReportRowDto[];
 
   @ApiProperty({
+    description:
+      'How many events the filter matched in total, for paging the rows.',
+  })
+  matchedEvents!: number;
+
+  @ApiProperty({
     type: IncomeFiguresDto,
     description: 'Summed across the whole filter, not the page shown.',
   })
   totals!: IncomeFiguresDto;
+
+  @ApiProperty({
+    type: IncomeChangesDto,
+    description: 'How each total moved against the previous equal period.',
+  })
+  changes!: IncomeChangesDto;
 }
