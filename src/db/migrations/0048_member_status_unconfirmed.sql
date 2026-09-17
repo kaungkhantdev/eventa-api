@@ -1,0 +1,39 @@
+-- An account that signed ITSELF up and has not confirmed its email yet.
+--
+-- `Invited` used to carry both meanings, and they are opposite facts about how
+-- an account came to exist:
+--
+--   Invited      — somebody else created this for you. An admin added you to a
+--                  workspace and you have not accepted. You were expecting it.
+--   Unconfirmed  — you created this yourself, and the address has not been
+--                  proven. Nobody invited you.
+--
+-- They read identically in the members list and need different follow-ups: an
+-- invitation is re-sent, a confirmation link is re-sent. Conflating them told
+-- an organizer that an attendee who signed up on the public portal had been
+-- "invited" by someone in their workspace, which was simply untrue.
+--
+-- Enum values are add-only, and nothing yet writes this one, so it is safe to
+-- apply ahead of the code.
+--
+-- NO BACKFILL LIVES HERE, and it cannot live in a migration at all. Postgres
+-- refuses to USE an enum value added in the same transaction ("unsafe use of
+-- new value"), and drizzle-kit applies every pending migration in ONE
+-- transaction — so on a fresh database the ADD VALUE and any UPDATE using it
+-- are always in the same transaction, and the whole batch rolls back. A fresh
+-- database needs no backfill anyway: nothing has signed up yet.
+--
+-- An EXISTING database re-labels its self-signups once, by hand, after this
+-- migration has committed. The membership is the discriminator, not the user:
+-- `createInvitedMember` writes 'Invited' on BOTH rows, while sign-up leaves an
+-- Active membership (workspace owner) or none at all (an attendee owns no
+-- workspace). So a user with no Invited membership was never invited by anyone.
+--
+--   UPDATE users u SET status = 'Unconfirmed'
+--    WHERE u.status = 'Invited'
+--      AND NOT EXISTS (SELECT 1 FROM memberships m
+--                       WHERE m.user_id = u.id AND m.status = 'Invited');
+--
+-- `memberships.status = 'Invited'` is left alone — there the word was always
+-- correct.
+ALTER TYPE member_status ADD VALUE IF NOT EXISTS 'Unconfirmed';

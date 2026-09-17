@@ -7,9 +7,20 @@ export const localeEnum = pgEnum('locale', ['en', 'th']);
 
 export const userPersonaEnum = pgEnum('user_persona', ['admin', 'attendee']);
 
+/**
+ * Used by BOTH `memberships.status` and `users.status`, which is why the two
+ * "not usable yet" values are distinct rather than one:
+ *
+ * - `Invited`     — somebody else created this account. On a membership it is
+ *                   the invite lifecycle; on a user it means an admin added
+ *                   them and they have not accepted.
+ * - `Unconfirmed` — they signed themselves up and the email is unproven. Only
+ *                   ever on a user; nobody invited them.
+ */
 export const memberStatusEnum = pgEnum('member_status', [
   'Active',
   'Invited',
+  'Unconfirmed',
   'Suspended',
 ]);
 
@@ -240,6 +251,13 @@ export const orderStatusEnum = pgEnum('order_status', [
    * registration can never be re-approved; the two must not be conflated.
    */
   'rejected',
+  /**
+   * The seat hold lapsed before the money arrived — nobody ever paid and the
+   * clock ran out. Distinct from `cancelled` (a decision somebody made) for the
+   * same reason `rejected` is: they read alike in a list and mean opposite
+   * things to whoever reconciles it.
+   */
+  'expired',
 ]);
 
 export const paymentStatusEnum = pgEnum('payment_status', [

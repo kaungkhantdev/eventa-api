@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, isNull, like, sql } from 'drizzle-orm';
+import { and, eq, isNull, like, ne, sql } from 'drizzle-orm';
+import { PLATFORM_ORG_SLUG } from '../../common/tenancy/platform-org';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
   memberships,
@@ -15,10 +16,31 @@ import {
   OWNER_ROLE,
   PERMISSION_CATALOG,
 } from '../access/workspace-defaults';
+import type { Persona } from '../auth/auth.types';
 
 const ADMIN_PERSONA = 'admin';
-const PENDING_STATUS = 'Invited';
+const ATTENDEE_PERSONA = 'attendee';
+/**
+ * Signed up, email not yet proven — NOT `Invited`. Nobody invited someone who
+ * filled in the sign-up form themselves, and an organizer reading the members
+ * list should not be told otherwise.
+ */
+const PENDING_STATUS = 'Unconfirmed';
 const ACTIVE_STATUS = 'Active';
+
+/** Just enough to sign a fresh token and address the email to a person. */
+export interface PendingVerification {
+  organizationId: number;
+  userId: string;
+  name: string;
+  email: string;
+}
+
+export interface AttendeeAccountInput {
+  name: string;
+  email: string;
+  passwordHash: string;
+}
 
 export interface BootstrapInput {
   organizationName: string;
@@ -40,6 +62,63 @@ export interface BootstrapResult {
 export class SignupRepository {
   constructor(@Inject(DRIZZLE) private readonly db: Database) {}
 
+  /**
+   * The account this address is still waiting to confirm, if there is one.
+   *
+   * Only `Unconfirmed` matches: an active account has nothing to resend, and an
+   * invited one was sent a different link by somebody else. Returns null for
+   * every other case — including no account at all — so the caller answers
+   * identically either way and the endpoint reveals nothing.
+   */
+  async pendingVerification(
+    email: string,
+    persona: 'admin' | 'attendee',
+  ): Promise<PendingVerification | null> {
+    const [row] = await this.db
+      .select({
+        organizationId: users.organizationId,
+        userId: users.id,
+        name: users.name,
+        email: users.email,
+      })
+      .from(users)
+      .where(
+        and(
+          eq(users.email, email),
+          eq(users.persona, persona),
+          eq(users.status, PENDING_STATUS),
+          isNull(users.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  /**
+   * Is another live workspace already called this?
+   *
+   * Compared the way `uq_organizations_name` compares — lowercased and
+   * trimmed — because "Acme Events", "acme events" and " Acme Events " are one
+   * name to everybody except a byte comparison. The index is the guarantee;
+   * this exists so somebody gets a sentence rather than a 500.
+   */
+  async nameTaken(name: string, exceptOrgId?: number): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(
+        and(
+          sql`lower(btrim(${organizations.name})) = lower(btrim(${name}))`,
+          isNull(organizations.deletedAt),
+          exceptOrgId === undefined
+            ? undefined
+            : ne(organizations.id, exceptOrgId),
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
+  }
+
   /** Is this email already an organizer account anywhere? (Global, persona-scoped.) */
   async organizerEmailExists(email: string): Promise<boolean> {
     const [row] = await this.db
@@ -54,6 +133,67 @@ export class SignupRepository {
       )
       .limit(1);
     return row !== undefined;
+  }
+
+  /**
+   * Is this email already an ATTENDEE account? Persona-scoped like its organizer
+   * counterpart: `users` is unique on (organization_id, email, persona), so one
+   * person may hold both and neither blocks the other (US-DISC-08).
+   */
+  async attendeeEmailExists(email: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .where(
+        and(
+          eq(users.email, email),
+          eq(users.persona, ATTENDEE_PERSONA),
+          isNull(users.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
+  }
+
+  /**
+   * Create an attendee in the ONE platform organization (US-DISC-08).
+   *
+   * No organization, no roles, no membership — an attendee owns no workspace,
+   * and their tickets span every organizer on the platform. `Invited` until the
+   * emailed link is opened, exactly like an organizer.
+   *
+   * Null when the platform organization is missing: it is seeded by migration
+   * 0026, so its absence is a broken deployment for the caller to surface.
+   */
+  async createAttendeeAccount(
+    input: AttendeeAccountInput,
+  ): Promise<{ organizationId: number; userId: string } | null> {
+    const [org] = await this.db
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(
+        and(
+          eq(organizations.slug, PLATFORM_ORG_SLUG),
+          isNull(organizations.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!org) return null;
+
+    return withTenant(this.db, org.id, async (tx) => {
+      const [user] = await tx
+        .insert(users)
+        .values({
+          organizationId: org.id,
+          name: input.name,
+          email: input.email,
+          persona: ATTENDEE_PERSONA,
+          status: PENDING_STATUS,
+          passwordHash: input.passwordHash,
+        })
+        .returning({ id: users.id });
+      return { organizationId: org.id, userId: user.id };
+    });
   }
 
   /** First free workspace slug: `base`, then `base-2`, `base-3`, … (globally unique). */
@@ -116,14 +256,17 @@ export class SignupRepository {
   /**
    * Activate an account once its email link is opened. Idempotent: a second click
    * (already Active) still returns the workspace slug. Returns null if unknown.
+   *
+   * The persona comes back too: the two audiences sign in at different pages,
+   * and only an organizer's slug is ever typed into a workspace field.
    */
   async activateEmail(
     userId: string,
     organizationId: number,
-  ): Promise<{ orgSlug: string } | null> {
+  ): Promise<{ orgSlug: string; persona: Persona } | null> {
     return withTenant(this.db, organizationId, async (tx) => {
       const [user] = await tx
-        .select({ status: users.status })
+        .select({ status: users.status, persona: users.persona })
         .from(users)
         .where(
           and(
@@ -145,15 +288,33 @@ export class SignupRepository {
         .from(organizations)
         .where(eq(organizations.id, organizationId))
         .limit(1);
-      return org ? { orgSlug: org.slug } : null;
+      return org ? { orgSlug: org.slug, persona: user.persona } : null;
     });
   }
 
+  /**
+   * Reconcile the `permissions` table with the catalog in code.
+   *
+   * `onConflictDoNothing` left a row alone once it existed, so a key seeded
+   * before its label was written — or before the wording was corrected — kept
+   * the old value forever, and the settings screen fell back to spacing out the
+   * key: "Ev create", "Fin manage". The catalog is the source of truth, so the
+   * table is brought up to it on every signup rather than only on the first.
+   *
+   * Only `group` and `label` are updated. The key is the identity, and grants
+   * reference it — nothing here touches those.
+   */
   private async ensureCatalog(tx: Tx): Promise<void> {
     await tx
       .insert(permissions)
       .values(PERMISSION_CATALOG)
-      .onConflictDoNothing({ target: permissions.key });
+      .onConflictDoUpdate({
+        target: permissions.key,
+        set: {
+          group: sql`excluded."group"`,
+          label: sql`excluded.label`,
+        },
+      });
   }
 
   private async insertDefaultRoles(

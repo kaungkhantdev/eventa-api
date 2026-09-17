@@ -12,4 +12,15 @@ export interface UpdateOrganizationInput {
   logoUrl?: string | null;
   timezone?: string;
   statementDescriptor?: string | null;
+  /**
+   * The version the caller's form was built from. Not a column to write — it
+   * is compared, and the write is guarded by it.
+   */
+  version?: number;
+}
+
+/** Counts shown beside the logo — derived, never stored. */
+export interface OrganizationSummary {
+  eventsHosted: number;
+  teamMembers: number;
 }

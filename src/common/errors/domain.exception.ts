@@ -1,4 +1,5 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
+import type { FieldError } from '../http/validation';
 import { ErrorCode } from './error-codes';
 
 /**
@@ -12,8 +13,16 @@ export class DomainException extends HttpException {
     message: string,
     status: HttpStatus,
     readonly details?: unknown,
+    /**
+     * Which field the caller got wrong, when there is one. Rendered into the
+     * envelope's `errors` array — the same array class-validator fills — so a
+     * client can put the sentence under the input it belongs to instead of at
+     * the foot of the form. Omitted entirely when nothing is to blame: an
+     * empty array would read as a claim rather than an absence.
+     */
+    readonly errors?: FieldError[],
   ) {
-    super({ code, message, details }, status);
+    super({ code, message, details, ...(errors ? { errors } : {}) }, status);
   }
 
   static notFound(message = 'Resource not found', details?: unknown) {
@@ -58,6 +67,23 @@ export class DomainException extends HttpException {
       message,
       HttpStatus.UNPROCESSABLE_ENTITY,
       details,
+    );
+  }
+
+  /**
+   * A validation failure the caller can fix in one named field.
+   *
+   * The message is repeated into the field entry on purpose: anything showing
+   * a form wants it beside the input, and anything that is not — a script, a
+   * log line — still reads the sentence at the top of the envelope.
+   */
+  static invalidField(field: string, message: string) {
+    return new DomainException(
+      ErrorCode.VALIDATION_ERROR,
+      message,
+      HttpStatus.UNPROCESSABLE_ENTITY,
+      undefined,
+      [{ field, message }],
     );
   }
 

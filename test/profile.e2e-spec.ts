@@ -182,5 +182,15 @@ async function cleanup(pool: Pool): Promise<void> {
        (SELECT id FROM organizations WHERE slug = $1)`,
     [ORG.slug],
   );
+  // Written by eventa-worker, not by this test: signing in enqueues
+  // `identity.signed_in`, and if the relay and worker are both up while the
+  // suite runs, an audit row lands for this org. `audit_events` is ON DELETE
+  // RESTRICT on purpose — an audit trail should not vanish with the thing it
+  // describes — so the org cannot be deleted until these go first.
+  await pool.query(
+    `DELETE FROM audit_events WHERE organization_id IN
+       (SELECT id FROM organizations WHERE slug = $1)`,
+    [ORG.slug],
+  );
   await pool.query(`DELETE FROM organizations WHERE slug = $1`, [ORG.slug]);
 }

@@ -128,6 +128,25 @@ describe('EventsService.createDraft', () => {
     expect(repo.organizationName).not.toHaveBeenCalled();
   });
 
+  /**
+   * The description is the one field an organizer writes as HTML and an
+   * attendee loads, on a public page. It is cleaned on the way IN, so what is
+   * stored is already safe for every reader — a check on the way out would have
+   * to be remembered by each of them.
+   */
+  it('stores a cleaned description, never the script it was sent', async () => {
+    await service.createDraft(auth, {
+      name: 'Tech Conference 2026',
+      type: 'Conference',
+      startAt: new Date('2026-09-01T02:00:00Z'),
+      description: '<p>Two days</p><script>alert(1)</script>',
+    });
+
+    const values = repo.insert.mock.calls[0][0];
+    expect(values.description).toBe('<p>Two days</p>');
+    expect(values.description).not.toContain('script');
+  });
+
   it('rejects a categoryId not in the caller org with 404 (no insert)', async () => {
     repo.categoryExists.mockResolvedValue(false);
 
@@ -263,6 +282,26 @@ describe('EventsService get/update', () => {
         .updateEvent(auth, 'e1', { name: 'X' })
         .catch((e: unknown) => e);
       expect((err as DomainException).getStatus()).toBe(409);
+    });
+
+    /**
+     * US-EVT-07. The landing template could only be set while publishing, and
+     * publishing an already-published event is a 409 — so an organizer who
+     * wanted a different look had to unpublish their live event to get one,
+     * taking the public page down in the middle of selling tickets.
+     */
+    it('changes the landing template of an event that is already live', async () => {
+      await service.updateEvent(auth, 'e1', { landingTemplateId: 'noir' });
+      const [, , values] = repo.update.mock.calls[0];
+      expect(values).toMatchObject({ landingTemplateId: 'noir' });
+    });
+
+    it('leaves the template alone when the update does not mention it', async () => {
+      // The repo applies only the keys it is given. Passing the key through as
+      // undefined would blank a chosen template on every unrelated edit.
+      await service.updateEvent(auth, 'e1', { name: 'Renamed' });
+      const [, , values] = repo.update.mock.calls[0];
+      expect(values).not.toHaveProperty('landingTemplateId');
     });
   });
 });

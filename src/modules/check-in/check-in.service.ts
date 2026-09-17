@@ -6,6 +6,9 @@ import { isCheckInOpen } from './check-in-window';
 import { CheckInRepository } from './check-in.repository';
 import type {
   AdmissibleTicket,
+  AttendanceCounts,
+  AttendanceQuery,
+  AttendanceRow,
   CheckInMethod,
   ScanResult,
 } from './check-in.types';
@@ -103,6 +106,32 @@ export class CheckInService {
     if (!undone) throw DomainException.notFound(NEVER_ADMITTED);
   }
 
+  /**
+   * The roll: who is expected, and who is already inside (US-REG-11).
+   *
+   * Deliberately NOT behind `requireOpenDoor`. Reading who is due is not
+   * working the door: an organizer checks the list before the doors open and
+   * reconciles it after they close, and refusing both because the window is
+   * shut would make the screen useless exactly when it is wanted. Resolving the
+   * event still gates on the workspace, so another org's roll simply 404s.
+   */
+  async listAttendance(
+    auth: AuthContext,
+    eventId: string,
+    query: Omit<AttendanceQuery, 'eventId'>,
+  ): Promise<{
+    rows: AttendanceRow[];
+    total: number;
+    counts: AttendanceCounts;
+  }> {
+    await this.requireEvent(auth, eventId);
+    const [page, counts] = await Promise.all([
+      this.repo.listAttendance(auth.organizationId, { ...query, eventId }),
+      this.repo.countAttendance(auth.organizationId, eventId),
+    ]);
+    return { ...page, counts };
+  }
+
   /** The five outcomes of US-REG-12, decided in the order the door needs. */
   private async admit(
     auth: AuthContext,
@@ -139,14 +168,23 @@ export class CheckInService {
     auth: AuthContext,
     eventId: string,
   ): Promise<void> {
+    const event = await this.requireEvent(auth, eventId);
+    if (!isCheckInOpen(event, this.clock.now())) {
+      throw DomainException.conflict(DOOR_SHUT);
+    }
+  }
+
+  /**
+   * Resolve the event, which IS the tenancy check — one from another workspace
+   * does not come back, so it 404s rather than leaking that it exists.
+   */
+  private async requireEvent(auth: AuthContext, eventId: string) {
     const event = await this.events.findForCheckIn(
       auth.organizationId,
       eventId,
     );
     if (!event) throw DomainException.notFound('Event not found.');
-    if (!isCheckInOpen(event, this.clock.now())) {
-      throw DomainException.conflict(DOOR_SHUT);
-    }
+    return event;
   }
 }
 

@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { PASSWORD_MAX_LENGTH } from '../../auth-password/auth-password.policy';
 import {
   IsBoolean,
   IsEmail,
@@ -16,10 +17,27 @@ export class LoginDto {
   @MaxLength(254)
   email!: string;
 
-  @ApiProperty({ example: 'correct horse battery staple', minLength: 8 })
+  /**
+   * Verified, not policed.
+   *
+   * No strength rule here on purpose: the minimum for CHOOSING a password
+   * lives in `auth-password.policy` and applies at sign-up, reset and change.
+   * Repeating a stricter one at sign-in refused passwords this API had itself
+   * issued — anything between the policy minimum and 8 characters could be
+   * registered and then never used — and told the holder their input was
+   * malformed rather than wrong, so nobody would think to reset it. It also
+   * handed an unauthenticated caller the policy, and refused short passwords
+   * before the credentials were read at all: a different status, body and
+   * response time from a wrong one.
+   *
+   * The upper bound stays, as a resource guard rather than a rule: hashing is
+   * deliberately slow, so an unbounded body is a way to spend CPU without an
+   * account.
+   */
+  @ApiProperty({ example: 'correct horse battery staple' })
   @IsString()
-  @MinLength(8)
-  @MaxLength(200)
+  @MinLength(1)
+  @MaxLength(PASSWORD_MAX_LENGTH)
   password!: string;
 
   @ApiPropertyOptional({

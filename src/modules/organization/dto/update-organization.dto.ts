@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  IsInt,
   IsOptional,
   IsString,
   Matches,
@@ -58,4 +59,11 @@ export class UpdateOrganizationDto {
     message: "statementDescriptor may use letters, numbers, spaces . , ' -",
   })
   statementDescriptor?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Optimistic-concurrency token (from GET)',
+  })
+  @IsOptional()
+  @IsInt()
+  version?: number;
 }

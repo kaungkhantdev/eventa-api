@@ -4,6 +4,7 @@ import { Clock } from '../../common/time/clock';
 import type { Env } from '../../config/env.validation';
 import { AccessModule } from '../access/access.module';
 import { CheckoutModule } from '../checkout/checkout.module';
+import { PaymentSettingsModule } from '../payment-settings/payment-settings.module';
 import { InvoicePaymentPort } from '../invoices/ports/invoice-payment.port';
 import { SettledFundsPort } from '../payouts/ports/settled-funds.port';
 import { TaxableSalesPort } from '../tax-periods/ports/taxable-sales.port';
@@ -16,11 +17,15 @@ import { PaymentsLedgerService } from './payments-ledger.service';
 import { RefundsService } from './refunds.service';
 import { PaymentsRepository } from './payments.repository';
 import { PaymentsService } from './payments.service';
+import { GatewayCredentialsPort } from './ports/gateway-credentials.port';
 import { PaymentProviderPort } from './ports/payment-provider.port';
-import { FakePaymentAdapter } from './providers/fake-payment.adapter';
 import { StripePaymentAdapter } from './providers/stripe-payment.adapter';
 import { RevenueInsightsPort } from '../dashboard/ports/revenue-insights.port';
 import { RevenueInsightsAdapter } from './revenue-insights.adapter';
+import { IncomeReportPort } from '../reports/ports/income-report.port';
+import { IncomeReportAdapter } from './income-report.adapter';
+import { PaymentFeedPort } from '../notifications/ports/payment-feed.port';
+import { PaymentFeedAdapter } from './payment-feed.adapter';
 
 /**
  * Payments (US-DISC-05): collect an order's total by card or PromptPay, and act
@@ -29,30 +34,40 @@ import { RevenueInsightsAdapter } from './revenue-insights.adapter';
  * the Payments-owned `OrderPaymentPort`, which Checkout binds.
  *
  * The provider sits behind `PaymentProviderPort` — the PCI SAQ-A boundary; see
- * the port's docstring. Selection is by `PAYMENT_PROVIDER`, defaulting to the
- * fake so nothing charges a card by accident; `stripe` needs both Stripe
- * secrets, which the env schema enforces at boot rather than at the till.
+ * the port's docstring. There is one implementation and it is the real one:
+ * a stand-in that can mint a "paid" order does not belong in the shipped app,
+ * so the test suite supplies its own. Both Stripe secrets are required at
+ * boot rather than discovered at the till.
  */
 @Module({
-  imports: [AccessModule, CheckoutModule],
+  // PaymentSettings binds `MerchantAccountPort` — whose connected account a
+  // charge is made on. Without it every workspace's money lands in the
+  // platform's own Stripe balance.
+  imports: [AccessModule, CheckoutModule, PaymentSettingsModule],
   controllers: [PaymentsController, FinanceController],
   providers: [
     { provide: RevenueInsightsPort, useClass: RevenueInsightsAdapter },
+    // Same arithmetic as the revenue port above, per event and with fees — see
+    // the adapter. Bound here because only Payments knows what these mean.
+    { provide: IncomeReportPort, useClass: IncomeReportAdapter },
+    // Settled and declined charges as feed items (US-MSG-03). Which status
+    // means which kind is Payments' call, not the feed's.
+    { provide: PaymentFeedPort, useClass: PaymentFeedAdapter },
     PaymentsService,
     RefundsService,
     PaymentsLedgerService,
     PaymentsRepository,
     {
       provide: PaymentProviderPort,
-      useFactory: (clock: Clock, config: ConfigService<Env, true>) => {
-        const provider = config.getOrThrow('PAYMENT_PROVIDER', {
-          infer: true,
-        });
-        return provider === 'stripe'
-          ? new StripePaymentAdapter(clock, config)
-          : new FakePaymentAdapter(clock, config);
-      },
-      inject: [Clock, ConfigService],
+      // A factory, not `useClass`: the adapter takes an optional Stripe client
+      // as a third argument so a test can pass its own, and Nest would try to
+      // resolve that as a dependency.
+      useFactory: (
+        clock: Clock,
+        config: ConfigService<Env, true>,
+        credentials: GatewayCredentialsPort,
+      ) => new StripePaymentAdapter(clock, config, credentials),
+      inject: [Clock, ConfigService, GatewayCredentialsPort],
     },
     { provide: InvoicePaymentPort, useClass: InvoicePaymentAdapter },
     { provide: TaxableSalesPort, useClass: TaxableSalesAdapter },
@@ -67,6 +82,8 @@ import { RevenueInsightsAdapter } from './revenue-insights.adapter';
     // Payouts shares the provider seam: the hosted settings link and the
     // re-submitted transfer both go through the same adapter.
     PaymentProviderPort,
+    IncomeReportPort,
+    PaymentFeedPort,
   ],
 })
 export class PaymentsModule {}

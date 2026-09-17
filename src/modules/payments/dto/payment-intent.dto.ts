@@ -31,6 +31,17 @@ export class PaymentIntentDto {
   @ApiProperty({ nullable: true, type: String, description: 'Card only' })
   clientSecret!: string | null;
 
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    example: 'https://checkout.stripe.com/c/pay/cs_test_123',
+    description:
+      "Card only — the provider's OWN payment page. Send the buyer here; they " +
+      'return to their order when done. Landing back does not mean paid: only ' +
+      'the webhook settles.',
+  })
+  checkoutUrl!: string | null;
+
   @ApiProperty({ nullable: true, type: String, description: 'PromptPay only' })
   promptPayQr!: string | null;
 

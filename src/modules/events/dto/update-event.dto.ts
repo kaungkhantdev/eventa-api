@@ -12,11 +12,12 @@ import {
   MinLength,
   ValidateIf,
 } from 'class-validator';
-import { seatingModeEnum } from '../../../db/schema';
-import type { EventType, SeatingMode } from '../events.types';
+import { seatingModeEnum, templateIdEnum } from '../../../db/schema';
+import type { EventType, SeatingMode, TemplateId } from '../events.types';
 import { EVENT_TYPES } from './create-event.dto';
 
 const SEATING_MODES: readonly SeatingMode[] = seatingModeEnum.enumValues;
+const TEMPLATES: readonly TemplateId[] = templateIdEnum.enumValues;
 
 /** Partial update to an event's Basics + Date/Location. Omit a field to leave it. */
 export class UpdateEventDto {
@@ -27,10 +28,16 @@ export class UpdateEventDto {
   @MaxLength(120)
   name?: string;
 
-  @ApiPropertyOptional({ maxLength: 250 })
+  /**
+   * Rich text — the wizard's editor emits HTML and the API sanitises it on
+   * write (`rich-text.ts`). The cap counts MARKUP as well as words, which is
+   * why it is far above what anyone types: a page the length of a Meetup
+   * listing is ~2,400 characters of text and roughly double that as HTML.
+   */
+  @ApiPropertyOptional({ maxLength: 10000, description: 'Sanitised HTML' })
   @IsOptional()
   @IsString()
-  @MaxLength(250)
+  @MaxLength(10000)
   description?: string;
 
   @ApiPropertyOptional({ enum: EVENT_TYPES })
@@ -127,6 +134,15 @@ export class UpdateEventDto {
   @IsEmail()
   @MaxLength(254)
   contactEmail?: string;
+
+  @ApiPropertyOptional({
+    enum: templateIdEnum.enumValues,
+    description:
+      'Public landing-page template. Settable while the event is live — changing the look must not require unpublishing it.',
+  })
+  @IsOptional()
+  @IsIn(TEMPLATES)
+  landingTemplateId?: TemplateId;
 
   @ApiPropertyOptional({
     description: 'Optimistic-concurrency token (from GET)',

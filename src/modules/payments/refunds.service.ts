@@ -99,11 +99,11 @@ export class RefundsService {
     refund: RefundRow,
   ): Promise<RefundResult> {
     const outcome = await this.provider.refund({
+      organizationId: payment.organizationId,
       gatewayRef: payment.gatewayRef,
       // The payment's own amount, never a number from the request.
       amountSatang: payment.amountSatang,
       idempotencyKey: refund.idempotencyKey,
-      accountId: null,
     });
     if (outcome.status === 'failed') {
       await this.repo.markRefundFailed(refund.id, outcome.failureReason);

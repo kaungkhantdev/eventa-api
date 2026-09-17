@@ -31,6 +31,7 @@ describe('OrganizationService', () => {
   beforeEach(() => {
     repo = {
       find: jest.fn().mockResolvedValue(orgRow()),
+      nameTaken: jest.fn().mockResolvedValue(false),
       update: jest
         .fn()
         .mockImplementation((_id, values: object) =>
@@ -68,6 +69,7 @@ describe('OrganizationService', () => {
       expect(repo.update).toHaveBeenCalledWith(
         orgId,
         expect.objectContaining({ name: 'Acme Events Co., Ltd.' }),
+        1,
       );
       expect(res.name).toBe('Acme Events Co., Ltd.');
     });
@@ -91,6 +93,7 @@ describe('OrganizationService', () => {
       expect(repo.update).toHaveBeenCalledWith(
         orgId,
         expect.objectContaining({ taxId: null, website: null }),
+        1,
       );
     });
 
@@ -98,6 +101,81 @@ describe('OrganizationService', () => {
       await service.update(orgId, { name: 'Only the name' });
       const [, values] = repo.update.mock.calls[0];
       expect(Object.keys(values)).toEqual(['name']);
+    });
+
+    /**
+     * Optimistic concurrency, as every other editable resource here does it
+     * (categories, discounts, speakers, sessions, events, meetings). Two admins
+     * on the same workspace settings is the ordinary case, not the exotic one:
+     * without this the second save silently overwrites the first.
+     */
+    describe('version', () => {
+      it('refuses a form opened before somebody else’s edit', async () => {
+        await expect(
+          service.update(orgId, { name: 'Renamed', version: 0 }),
+        ).rejects.toMatchObject({ code: 'CONFLICT' });
+        expect(repo.update).not.toHaveBeenCalled();
+      });
+
+      it('passes the version it read through to the write', async () => {
+        await service.update(orgId, { name: 'Renamed', version: 1 });
+        expect(repo.update).toHaveBeenCalledWith(
+          orgId,
+          expect.objectContaining({ name: 'Renamed' }),
+          1,
+        );
+      });
+
+      // The row moved between the read and the write — the guarded UPDATE
+      // matches nothing, and that is the same fact as a stale form.
+      it('refuses when the guarded write matches no row', async () => {
+        repo.update.mockResolvedValueOnce(null);
+        await expect(
+          service.update(orgId, { name: 'Renamed', version: 1 }),
+        ).rejects.toMatchObject({ code: 'CONFLICT' });
+      });
+
+      // Older clients, and the API's own tests, send no version at all.
+      it('saves without one rather than inventing a conflict', async () => {
+        await expect(
+          service.update(orgId, { name: 'Renamed' }),
+        ).resolves.toBeDefined();
+      });
+
+      it('never writes the version as if it were a column of its own', async () => {
+        await service.update(orgId, { name: 'Renamed', version: 1 });
+        const [, values] = repo.update.mock.calls[0];
+        expect(Object.keys(values)).toEqual(['name']);
+      });
+    });
+
+    /**
+     * Renaming into somebody else's name is refused for the same reason
+     * sign-up refuses it: the name is what an attendee reads on a ticket, an
+     * invoice and a receipt, and two of them make all three ambiguous.
+     */
+    describe('name', () => {
+      it('refuses a name another workspace already has', async () => {
+        repo.nameTaken.mockResolvedValue(true);
+
+        await expect(
+          service.update(orgId, { name: 'Someone Else Ltd.' }),
+        ).rejects.toMatchObject({ code: 'CONFLICT' });
+        expect(repo.update).not.toHaveBeenCalled();
+      });
+
+      // Or saving the form unchanged would refuse the name it already holds.
+      it('does not count the workspace against itself', async () => {
+        await service.update(orgId, { name: 'Acme Events' });
+
+        expect(repo.nameTaken).toHaveBeenCalledWith('Acme Events', orgId);
+      });
+
+      it('asks nothing when the name is not being changed', async () => {
+        await service.update(orgId, { address: 'Somewhere else' });
+
+        expect(repo.nameTaken).not.toHaveBeenCalled();
+      });
     });
   });
 });

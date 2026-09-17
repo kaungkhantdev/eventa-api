@@ -119,7 +119,7 @@ export class PayoutsService {
       reference: payout.reference,
       amountSatang: payout.amountSatang,
       currency: payout.currency,
-      accountId: account.accountId,
+      organizationId: auth.organizationId,
     });
     const updated = await this.repo.markRetried(
       auth.organizationId,
@@ -152,7 +152,10 @@ export class PayoutsService {
     if (!account.connected) return { connected: false, url: null };
     return {
       connected: true,
-      url: await this.provider.payoutSettingsLink(account.accountId),
+      url: await this.provider.payoutSettingsLink(
+        auth.organizationId,
+        account.accountId,
+      ),
     };
   }
 

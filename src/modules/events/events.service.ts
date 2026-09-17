@@ -8,6 +8,7 @@ import { eventCancelledEvent } from './events/event-cancelled.event';
 import { eventPublishedEvent } from './events/event-published.event';
 import { toEventResponse } from './events.mapper';
 import { EventsRepository } from './events.repository';
+import { sanitizeDescription } from './rich-text';
 import { TicketAvailabilityPort } from './ports/ticket-availability.port';
 import type {
   CancelEventInput,
@@ -44,6 +45,27 @@ const PUBLISH_REQUIREMENTS = {
 } as const;
 type PublishRequirement = keyof typeof PUBLISH_REQUIREMENTS;
 
+/**
+ * The description is rich text an ORGANIZER authors and an ATTENDEE loads on a
+ * public page, so it is sanitised on the way IN — both write paths below go
+ * through these. Cleaning on read instead would put the obligation on every
+ * consumer, and the first one to forget serves the payload.
+ */
+function cleanDescription(html: string | undefined): string | null {
+  if (html === undefined) return null;
+  return sanitizeDescription(html) || null;
+}
+
+/**
+ * The same, for a PATCH. Absent means "leave it alone" and null means "clear
+ * it" — neither is a value to clean, and both must survive untouched.
+ */
+function withCleanDescription(input: UpdateEventInput): UpdateEventInput {
+  const { description } = input;
+  if (description === undefined || description === null) return input;
+  return { ...input, description: sanitizeDescription(description) };
+}
+
 /** Fields a PATCH may set on an event (Basics + Date/Location). */
 const UPDATABLE_KEYS: (keyof NewEventValues & keyof UpdateEventInput)[] = [
   'name',
@@ -63,6 +85,9 @@ const UPDATABLE_KEYS: (keyof NewEventValues & keyof UpdateEventInput)[] = [
   'coverImage',
   'accentColor',
   'contactEmail',
+  // Settable after publishing, not only during it: changing how the public
+  // page looks should not mean taking it down and putting it back up.
+  'landingTemplateId',
 ];
 
 /** event_bucket is derived from lifecycle status (entities.md): terminal → completed. */
@@ -105,7 +130,7 @@ export class EventsService {
       status,
       bucket: bucketForStatus(status),
       startAt: input.startAt,
-      description: input.description ?? null,
+      description: cleanDescription(input.description),
       categoryId: input.categoryId ?? null,
       organizerName,
       createdBy: actor.userId,
@@ -191,7 +216,7 @@ export class EventsService {
     const updated = await this.repo.update(
       actor.organizationId,
       eventId,
-      pickDefined(input, UPDATABLE_KEYS),
+      pickDefined(withCleanDescription(input), UPDATABLE_KEYS),
       event.version,
     );
     if (!updated) throw this.staleEvent();

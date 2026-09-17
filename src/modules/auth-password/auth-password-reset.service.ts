@@ -11,9 +11,41 @@ import { passwordFingerprint } from './auth-password-fingerprint';
 import { PasswordRepository } from './auth-password.repository';
 import { PasswordService } from './auth-password.service';
 import { TokenService } from '../auth/token.service';
+import { LoginThrottleService } from '../auth/login-throttle.service';
 
-const LINK_ON_ITS_WAY =
-  'If an account matches, a password-reset link is on its way.';
+const LINK_ON_ITS_WAY = 'A password-reset link is on its way.';
+
+/** What each audience's account is called, for a message someone has to act on. */
+const AUDIENCE: Record<Persona, string> = {
+  [Persona.Admin]: 'organizer',
+  [Persona.Attendee]: 'attendee',
+};
+
+function noSuchAccount(persona: Persona): string {
+  const other = persona === Persona.Admin ? 'attendee' : 'organizer';
+  return `No ${AUDIENCE[persona]} account uses that email address. Check the spelling, try your ${other} account, or create one.`;
+}
+
+const SOCIAL_ONLY =
+  'That account signs in with Google, so it has no password to reset. Use “Continue with Google” instead.';
+
+/**
+ * Why a reset cannot help this account yet, keyed on the status blocking it.
+ *
+ * Only `Active` can sign in, and `reset` deliberately does not change status —
+ * so without this an unconfirmed account completed the whole flow, was told
+ * "please sign in", and was refused at the door. A success that ends in a
+ * locked door is worse than an honest refusal, and every message here names the
+ * one thing that actually unblocks them.
+ */
+const CANNOT_RESET: Record<string, string> = {
+  Unconfirmed:
+    'That account has not been confirmed yet, so there is no sign-in for a password to unlock. Open the confirmation link emailed when it was created — signing in sends a fresh one.',
+  Invited:
+    'That invitation has not been accepted yet. Open the invitation email to finish setting the account up, and choose a password there.',
+  Suspended:
+    'That account is suspended, so resetting its password would not let it back in. Ask a workspace admin to reactivate it.',
+};
 const RESET_DONE = 'Your password has been reset. Please sign in.';
 const INVALID_LINK =
   'This reset link is invalid or has expired. Request a new one.';
@@ -30,28 +62,61 @@ export class PasswordResetService {
     private readonly passwords: PasswordService,
     private readonly tokens: TokenService,
     private readonly outbox: OutboxPort,
+    private readonly throttle: LoginThrottleService,
     private readonly clock: Clock,
     config: ConfigService<Env, true>,
   ) {
     this.publicWebUrl = config.getOrThrow('PUBLIC_WEB_URL', { infer: true });
   }
 
-  /** Always returns the same neutral message — a registered email is never revealed. */
+  /**
+   * Send the reset link, or say plainly why there is none to send (US-ACC-04).
+   *
+   * This DELIBERATELY departs from the usual advice that a reset form answer
+   * uniformly whether or not an account exists. Silence is indistinguishable
+   * from a mail that was sent and lost: people wait, resend, and wait again for
+   * a link that could never have been written — most often because the address
+   * belongs to the other audience, which the neutral answer cannot say.
+   *
+   * The cost is accepted with eyes open: this endpoint now confirms whether an
+   * account exists. `LoginThrottleService` is what stops that being a way to
+   * farm the list — a miss counts against the identity exactly as a failed
+   * sign-in does, and enough of them lock it out. A scripted sweep gets a few
+   * answers and then 429s; somebody who mistyped their own address gets help.
+   */
   async forgot(email: string, persona?: Persona): Promise<MessageResponseDto> {
-    const user = await this.repo.findByEmailPersona(
-      email,
-      persona ?? Persona.Admin,
-    );
-    if (user?.passwordHash) {
-      await this.sendResetLink(
-        user.id,
-        user.organizationId,
-        user.name,
-        email,
-        user.passwordHash,
-      );
+    const audience = persona ?? Persona.Admin;
+    const identity = this.identityOf(email, audience);
+    // Before the lookup, so a locked identity learns nothing at all — not even
+    // the timing difference between a hit and a miss.
+    await this.throttle.assertNotLocked(identity, 'reset');
+
+    const user = await this.repo.findByEmailPersona(email, audience);
+    if (!user) {
+      await this.throttle.recordFailure(identity);
+      throw DomainException.notFound(noSuchAccount(audience));
     }
+    // Neither of these counts as a miss against the lock: both are the
+    // account's own state, not somebody guessing at whether it exists.
+    if (!user.passwordHash) {
+      throw DomainException.validation(SOCIAL_ONLY);
+    }
+    const blocked = CANNOT_RESET[user.status];
+    if (blocked) throw DomainException.validation(blocked);
+
+    await this.sendResetLink(
+      user.id,
+      user.organizationId,
+      user.name,
+      email,
+      user.passwordHash,
+    );
     return { message: LINK_ON_ITS_WAY };
+  }
+
+  /** Matches the sign-in throttle's shape: one count per audience per address. */
+  private identityOf(email: string, persona: Persona): string {
+    return `forgot|${persona}|${email.toLowerCase()}`;
   }
 
   /**

@@ -14,6 +14,12 @@ export interface RegistrationRow {
   status: RegistrationStatus;
   paymentStatus: RegistrationPayment;
   seats: number;
+  /**
+   * The tier(s) bought, comma-separated for a mixed order, or null when the
+   * tier has since been deleted. Not gated by finance access: what someone
+   * bought is not the same privilege as what they paid.
+   */
+  ticketTypeName: string | null;
   totalSatang: number;
   registeredAt: Date;
   confirmedAt: Date | null;

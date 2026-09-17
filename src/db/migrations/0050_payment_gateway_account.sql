@@ -1,0 +1,16 @@
+-- Which provider account actually took the money.
+--
+-- A charge is made on the workspace's connected account (`acct_…`); a refund
+-- has to be made on the SAME one. Reading it from `payment_settings` at refund
+-- time gets that wrong twice over: a workspace that disconnected has no account
+-- reference left, and one that reconnected to a different account would send
+-- the reversal somewhere the charge never was.
+--
+-- So it is stamped on the payment when the charge starts, and the refund reads
+-- it back. Nullable on purpose, and NOT backfilled: NULL means the platform
+-- account, which is exactly where every payment taken before this column
+-- existed was actually charged. Backfilling today's connected account onto
+-- those rows would be a lie that breaks their refunds.
+--
+-- No secret lands here. `acct_…` is a reference, not a credential.
+ALTER TABLE "payments" ADD COLUMN IF NOT EXISTS "gateway_account_id" text;

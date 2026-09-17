@@ -14,6 +14,8 @@ import { CheckInEventPort } from '../check-in/ports/check-in-event.port';
 import { CheckInEventAdapter } from './check-in-event.adapter';
 import { EventsRepository } from './events.repository';
 import { EventsQueryService } from './events-query.service';
+import { UploadsModule } from '../uploads/uploads.module';
+import { EventCoverService } from './event-cover.service';
 import { EventsService } from './events.service';
 import { EventInsightsPort } from '../dashboard/ports/operations-insights.port';
 import { EventInsightsAdapter } from './event-insights.adapter';
@@ -32,12 +34,18 @@ import { MeetingEventAdapter } from './meeting-event.adapter';
  * event-monitoring · event-duplication.
  */
 @Module({
-  imports: [AccessModule, PlatformModule, forwardRef(() => TicketingModule)],
+  imports: [
+    AccessModule,
+    PlatformModule,
+    UploadsModule,
+    forwardRef(() => TicketingModule),
+  ],
   controllers: [EventsController],
   providers: [
     { provide: MeetingEventPort, useClass: MeetingEventAdapter },
     { provide: EventInsightsPort, useClass: EventInsightsAdapter },
     { provide: CheckInEventPort, useClass: CheckInEventAdapter },
+    EventCoverService,
     EventsService,
     EventsQueryService,
     EventsRepository,

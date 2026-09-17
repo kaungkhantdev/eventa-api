@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Stripe from 'stripe';
+import { GatewayCredentialsPort } from '../ports/gateway-credentials.port';
 import { DomainException } from '../../../common/errors/domain.exception';
+import { STRIPE_API_VERSION } from '../../../common/stripe/stripe-api-version';
 import { Clock } from '../../../common/time/clock';
 import type { Env } from '../../../config/env.validation';
 import {
@@ -15,9 +17,6 @@ import {
   type StartedPayment,
   type VerifiedWebhook,
 } from '../ports/payment-provider.port';
-
-/** Pinned by the installed SDK — `Stripe.LatestApiVersion` accepts nothing else. */
-export const STRIPE_API_VERSION = '2026-07-29.dahlia';
 
 const MS_PER_SECOND = 1000;
 const THB = 'thb';
@@ -35,6 +34,51 @@ const NON_LATIN = /[^A-Za-z0-9 ]/g;
 
 /** Stripe's code for "the buyer never completed it in time" (PromptPay lapse). */
 const ATTEMPT_EXPIRED = 'payment_intent_payment_attempt_expired';
+
+/** How a Stripe client is made from a key. Injected so a test can supply its own. */
+export type StripeClientFactory = (secretKey: string) => Stripe;
+
+export const defaultStripeClient: StripeClientFactory = (secretKey) =>
+  new Stripe(secretKey, { apiVersion: STRIPE_API_VERSION, typescript: true });
+
+/**
+ * Signature checking is pure HMAC over the raw bytes — it never calls Stripe and
+ * never uses an API key. One throwaway client exists only to reach that method;
+ * the placeholder is never sent anywhere.
+ */
+const WEBHOOK_VERIFIER = new Stripe('sk_signature_check_only', {
+  apiVersion: STRIPE_API_VERSION,
+});
+
+/**
+ * Verification needs no key, only the endpoint's signing secret — so it is a
+ * free function rather than a method, and a callback can be checked without
+ * first working out whose it is.
+ *
+ * An unverified webhook is a stranger claiming an order was paid: the one input
+ * that could hand out tickets for free. Stripe's own check runs over the RAW
+ * bytes. Each candidate secret is tried because a workspace registers the same
+ * URL in test and live and gets a different secret from each; if none matches,
+ * the callback is refused.
+ */
+function constructEvent(
+  rawBody: Buffer,
+  signature: string,
+  signingSecrets: readonly string[],
+): Stripe.Event {
+  for (const secret of signingSecrets) {
+    try {
+      return WEBHOOK_VERIFIER.webhooks.constructEvent(
+        rawBody,
+        signature,
+        secret,
+      );
+    } catch {
+      continue;
+    }
+  }
+  throw DomainException.forbidden('Invalid webhook signature.');
+}
 
 const IGNORED: VerifiedWebhook = {
   eventId: '',
@@ -67,37 +111,115 @@ const IGNORED: VerifiedWebhook = {
  */
 @Injectable()
 export class StripePaymentAdapter extends PaymentProviderPort {
-  private readonly stripe: Stripe;
-  private readonly webhookSecret: string;
   private readonly promptPayTtlSeconds: number;
 
   constructor(
     private readonly clock: Clock,
     config: ConfigService<Env, true>,
-    client?: Stripe,
+    private readonly credentials: GatewayCredentialsPort,
+    /** Injected so a test supplies its own client without a real key. */
+    private readonly clientFor: StripeClientFactory = defaultStripeClient,
   ) {
     super();
-    this.webhookSecret = config.getOrThrow('STRIPE_WEBHOOK_SECRET', {
-      infer: true,
-    });
     this.promptPayTtlSeconds = config.getOrThrow('PROMPTPAY_EXPIRY_SECONDS', {
       infer: true,
     });
-    this.stripe =
-      client ??
-      new Stripe(config.getOrThrow('STRIPE_SECRET_KEY', { infer: true }), {
-        apiVersion: STRIPE_API_VERSION,
-        typescript: true,
-      });
   }
 
+  /**
+   * A client authenticated as this workspace.
+   *
+   * Built per call rather than once at boot, because there is no longer one key
+   * — there is one per workspace, and the right one depends on whose order is
+   * being charged. The plaintext is borrowed for the length of the call and
+   * never held on the instance: this adapter is a singleton, so a cached key
+   * would be the wrong workspace's the moment a second one paid.
+   */
+  private async as(organizationId: number): Promise<Stripe> {
+    return this.clientFor(await this.credentials.secretKeyFor(organizationId));
+  }
+
+  /**
+   * Open a hosted Checkout Session and hand back its URL (US-DISC-05).
+   *
+   * A Session rather than a bare PaymentIntent, because the payment page is
+   * then Stripe's own: the browser needs no publishable key, no account id and
+   * no SDK, which is what keeps a multi-tenant product simple — each workspace
+   * charges on its own connected account, and none of that reaches the client.
+   *
+   * In `payment` mode the Session creates its PaymentIntent immediately, so
+   * `payment_intent` is the reference stored as `gateway_ref`. That is
+   * deliberate: settlement still arrives as `payment_intent.succeeded` and
+   * refunds still take a `pi_…`, so neither had to change.
+   */
   async start(input: StartPaymentInput): Promise<StartedPayment> {
     assertChargeable(input);
-    const intent = await this.stripe.paymentIntents.create(
-      this.params(input),
+    // PromptPay stays a PaymentIntent: its QR renders in our own page, and
+    // sending somebody to a hosted page to look at a code they scan on their
+    // phone would be a worse journey, not a safer one. Only the card needs
+    // fields we must never host.
+    const stripe = await this.as(input.organizationId);
+    if (input.method === 'PromptPay') {
+      const intent = await stripe.paymentIntents.create(
+        this.params(input),
+        requestOptions(input),
+      );
+      return this.toStartedPayment(intent, input.method);
+    }
+    const session = await stripe.checkout.sessions.create(
+      this.sessionParams(input),
       requestOptions(input),
     );
-    return this.toStartedPayment(intent, input.method);
+    return {
+      gatewayRef: intentIdOf(session),
+      // Nothing is owed-and-settled at this point: the buyer has not opened the
+      // page yet, let alone paid. Only the webhook says otherwise.
+      status: 'requires_action',
+      checkoutUrl: session.url,
+      clientSecret: null,
+      promptPayQr: null,
+      expiresAt: session.expires_at
+        ? new Date(session.expires_at * 1000)
+        : null,
+      declineReason: null,
+    };
+  }
+
+  private sessionParams(
+    input: StartPaymentInput,
+  ): Stripe.Checkout.SessionCreateParams {
+    const metadata = {
+      order_id: input.orderId,
+      org_id: String(input.organizationId),
+    };
+    const suffix = statementDescriptorSuffix(input.statementDescriptor);
+    return {
+      mode: 'payment',
+      payment_method_types: ['card'],
+      customer_email: input.buyerEmail,
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: input.currency.toLowerCase(),
+            unit_amount: input.amountSatang,
+            product_data: { name: input.description },
+          },
+        },
+      ],
+      // Both land on the order page. Cancelling is not failing — the order is
+      // still there, still unpaid, and still payable.
+      success_url: input.returnUrl,
+      cancel_url: input.returnUrl,
+      metadata,
+      payment_intent_data: {
+        metadata,
+        receipt_email: input.buyerEmail,
+        // A SUFFIX, and Latin-only — the same rule the intent path follows,
+        // because cards reject the full form and reject Thai script outright.
+        ...(suffix ? { statement_descriptor_suffix: suffix } : {}),
+      },
+    };
   }
 
   /**
@@ -106,12 +228,10 @@ export class StripePaymentAdapter extends PaymentProviderPort {
    * Stripe collects by email, so the ledger records it and the webhook confirms.
    */
   async refund(input: RefundPaymentInput): Promise<RefundedPayment> {
-    const refund = await this.stripe.refunds.create(
+    const stripe = await this.as(input.organizationId);
+    const refund = await stripe.refunds.create(
       { payment_intent: input.gatewayRef, amount: input.amountSatang },
-      {
-        idempotencyKey: input.idempotencyKey,
-        ...(input.accountId ? { stripeAccount: input.accountId } : {}),
-      },
+      { idempotencyKey: input.idempotencyKey },
     );
     return {
       refundRef: refund.id,
@@ -120,9 +240,14 @@ export class StripePaymentAdapter extends PaymentProviderPort {
     };
   }
 
-  verifyWebhook(rawBody: Buffer, signature: string): VerifiedWebhook {
-    const event = this.constructEvent(rawBody, signature);
-    return toVerifiedWebhook(event);
+  verifyWebhook(
+    rawBody: Buffer,
+    signature: string,
+    signingSecrets: readonly string[],
+  ): VerifiedWebhook {
+    return toVerifiedWebhook(
+      constructEvent(rawBody, signature, signingSecrets),
+    );
   }
 
   /**
@@ -131,9 +256,13 @@ export class StripePaymentAdapter extends PaymentProviderPort {
    * (US-FIN-05). This is what keeps bank data out of Eventa entirely: Stripe
    * collects and shows it, we only hold the `acct_…` reference.
    */
-  async payoutSettingsLink(accountId: string | null): Promise<string | null> {
+  async payoutSettingsLink(
+    organizationId: number,
+    accountId: string | null,
+  ): Promise<string | null> {
     if (!accountId) return null;
-    const link = await this.stripe.accounts.createLoginLink(accountId);
+    const stripe = await this.as(organizationId);
+    const link = await stripe.accounts.createLoginLink(accountId);
     return link.url;
   }
 
@@ -145,16 +274,14 @@ export class StripePaymentAdapter extends PaymentProviderPort {
    */
   async retryPayout(input: RetryPayoutInput): Promise<RetriedPayout> {
     try {
-      const payout = await this.stripe.payouts.create(
+      const stripe = await this.as(input.organizationId);
+      const payout = await stripe.payouts.create(
         {
           amount: input.amountSatang,
           currency: input.currency.toLowerCase(),
           metadata: { eventa_reference: input.reference },
         },
-        {
-          idempotencyKey: `payout-retry:${input.reference}`,
-          ...(input.accountId ? { stripeAccount: input.accountId } : {}),
-        },
+        { idempotencyKey: `payout-retry:${input.reference}` },
       );
       return {
         payoutRef: payout.id,
@@ -193,6 +320,9 @@ export class StripePaymentAdapter extends PaymentProviderPort {
     return {
       gatewayRef: intent.id,
       status: toStartedStatus(intent),
+      // This path answers a PaymentIntent, not a hosted Session; `start` is
+      // the one that opens a page.
+      checkoutUrl: null,
       clientSecret: method === 'Card' ? intent.client_secret : null,
       promptPayQr: qr?.data ?? null,
       expiresAt: qr ? this.qrDeadline(intent) : null,
@@ -206,23 +336,6 @@ export class StripePaymentAdapter extends PaymentProviderPort {
       ? intent.created * MS_PER_SECOND
       : this.clock.now().getTime();
     return new Date(createdMs + this.promptPayTtlSeconds * MS_PER_SECOND);
-  }
-
-  /**
-   * An unverified webhook is a stranger claiming an order was paid — the one
-   * input that could hand out tickets for free. Stripe's own verification runs
-   * over the RAW bytes; anything it rejects becomes a 403.
-   */
-  private constructEvent(rawBody: Buffer, signature: string): Stripe.Event {
-    try {
-      return this.stripe.webhooks.constructEvent(
-        rawBody,
-        signature,
-        this.webhookSecret,
-      );
-    } catch {
-      throw DomainException.forbidden('Invalid webhook signature.');
-    }
   }
 }
 
@@ -255,11 +368,12 @@ function promptPayParams(
   };
 }
 
+/**
+ * No `stripeAccount`: the client is already authenticated AS the workspace, so
+ * acting on behalf of one would be asking their own key to impersonate them.
+ */
 function requestOptions(input: StartPaymentInput): Stripe.RequestOptions {
-  return {
-    idempotencyKey: input.idempotencyKey,
-    ...(input.accountId ? { stripeAccount: input.accountId } : {}),
-  };
+  return { idempotencyKey: input.idempotencyKey };
 }
 
 /** Fail before the money moves, with a reason a human can act on. */
@@ -322,6 +436,19 @@ function toStartedStatus(
  */
 function toVerifiedWebhook(event: Stripe.Event): VerifiedWebhook {
   switch (event.type) {
+    // The settling event for a hosted checkout. `payment_intent.succeeded`
+    // also fires, but carries a `pi_…` that matches nothing: the reference
+    // stored at `start` is the session's, because the intent did not exist yet.
+    case 'checkout.session.completed':
+      return fromSession(event, sessionOf(event));
+    case 'checkout.session.expired':
+      return {
+        eventId: event.id,
+        type: 'expired',
+        gatewayRef: sessionOf(event).id,
+        amountSatang: 0,
+        declineReason: null,
+      };
     case 'payment_intent.succeeded':
       return settled(event, intentOf(event), 'succeeded');
     case 'payment_intent.payment_failed':
@@ -331,6 +458,46 @@ function toVerifiedWebhook(event: Stripe.Event): VerifiedWebhook {
     default:
       return IGNORED;
   }
+}
+
+/**
+ * The Session's PaymentIntent id — a string, an expanded object, or absent.
+ *
+ * Absent is the NORMAL case at creation: Checkout does not mint the intent
+ * until the buyer pays. Falling back to the session id is what lets `start`
+ * store a reference at all, and `checkout.session.completed` is what later
+ * reconciles it onto the real `pi_…`.
+ */
+function intentIdOf(session: Stripe.Checkout.Session): string {
+  const intent = session.payment_intent;
+  if (typeof intent === 'string') return intent;
+  return intent?.id ?? session.id;
+}
+
+function sessionOf(event: Stripe.Event): Stripe.Checkout.Session {
+  return event.data.object as Stripe.Checkout.Session;
+}
+
+/**
+ * A completed session, settled under the reference we actually stored.
+ *
+ * Only `paid` counts: a session can complete while the money is still in
+ * flight — an async method, or a delayed capture — and that is not settled.
+ */
+function fromSession(
+  event: Stripe.Event,
+  session: Stripe.Checkout.Session,
+): VerifiedWebhook {
+  if (session.payment_status !== 'paid') return IGNORED;
+  return {
+    eventId: event.id,
+    type: 'succeeded',
+    gatewayRef: session.id,
+    // What a refund will need; the stored reference is reconciled onto it.
+    settledRef: intentIdOf(session),
+    amountSatang: session.amount_total ?? 0,
+    declineReason: null,
+  };
 }
 
 function intentOf(event: Stripe.Event): Stripe.PaymentIntent {

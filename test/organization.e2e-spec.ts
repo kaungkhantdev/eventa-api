@@ -32,6 +32,7 @@ interface Org {
   taxId: string | null;
   vatRatePercent: number;
   statementDescriptor: string | null;
+  version: number;
 }
 
 describe('Organization settings (e2e — US-SET-07)', () => {
@@ -151,6 +152,39 @@ describe('Organization settings (e2e — US-SET-07)', () => {
       name: 'Org E2E Holdings',
       taxId: '0105556012345',
       address: '99 Sukhumvit Rd, Bangkok 10110',
+    });
+  });
+
+  /**
+   * The settings form reads a version and hands it back. Only the HTTP layer
+   * proves this: the whitelist pipe rejects any property the DTO does not
+   * declare, so an accepted field is a contract fact, not a service one.
+   */
+  describe('optimistic concurrency', () => {
+    it('accepts the version it handed out', async () => {
+      const before = ((await get(adminJwt)).body as Success<Org>).data.version;
+      const res = await patch(adminJwt, {
+        name: 'Org E2E Versioned',
+        version: before,
+      });
+
+      expect(res.status).toBe(200);
+      // Bumped, so the very same form cannot be submitted a second time.
+      expect((res.body as Success<Org>).data.version).toBe(before + 1);
+    });
+
+    it('refuses a form opened before somebody else’s edit (409)', async () => {
+      const before = ((await get(adminJwt)).body as Success<Org>).data.version;
+      await patch(adminJwt, { name: 'First writer wins', version: before });
+
+      const res = await patch(adminJwt, {
+        name: 'Second writer',
+        version: before,
+      });
+      expect(res.status).toBe(409);
+
+      const after = (await get(adminJwt)).body as Success<Org>;
+      expect(after.data.name).toBe('First writer wins');
     });
   });
 

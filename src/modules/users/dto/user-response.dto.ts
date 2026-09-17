@@ -16,8 +16,8 @@ export class MeResponseDto {
   @ApiProperty() name!: string;
   @ApiProperty() email!: string;
   @ApiProperty({ enum: ['admin', 'attendee'] }) persona!: 'admin' | 'attendee';
-  @ApiProperty({ enum: ['Active', 'Invited', 'Suspended'] })
-  status!: 'Active' | 'Invited' | 'Suspended';
+  @ApiProperty({ enum: ['Active', 'Invited', 'Unconfirmed', 'Suspended'] })
+  status!: 'Active' | 'Invited' | 'Unconfirmed' | 'Suspended';
   @ApiProperty() twoFactorEnabled!: boolean;
   @ApiProperty({ type: OrganizationSummaryDto })
   organization!: OrganizationSummaryDto;

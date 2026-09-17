@@ -24,10 +24,12 @@ export interface PresignPutInput {
  * `PaymentProviderPort`. Domain code must never import an AWS client directly;
  * it asks for a presigned URL, then asks what landed.
  *
- * Two implementations: `S3ObjectStorageAdapter` for real buckets, and
- * `MemoryObjectStorageAdapter` for tests and local development. Chosen by
- * `STORAGE_PROVIDER`, which defaults to `memory` so a developer without AWS
- * credentials can still run the app.
+ * One implementation ships: `S3ObjectStorageAdapter`, bound in `UploadsModule`.
+ * Local development runs the same adapter against MinIO by setting
+ * `S3_ENDPOINT` — a different bucket, not a different backend. The seam earns
+ * its keep regardless: it keeps the SDK out of the services, and it is what
+ * lets a test swap in `test/doubles/memory-object-storage.adapter.ts` without
+ * the app carrying a second storage implementation into production.
  */
 export interface CopyObjectInput {
   from: string;

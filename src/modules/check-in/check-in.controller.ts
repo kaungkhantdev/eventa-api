@@ -2,11 +2,13 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   HttpCode,
   HttpStatus,
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiConflictResponse, ApiTags } from '@nestjs/swagger';
@@ -19,10 +21,17 @@ import { ResponseMessage } from '../../common/decorators/response-message.decora
 import { ApiErrorDto } from '../../common/errors/error-envelope';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
-import { ApiData } from '../../common/http/api-data.decorator';
+import { ApiData, ApiPage } from '../../common/http/api-data.decorator';
+import { Paginated } from '../../common/http/paginated';
 import type { AuthContext } from '../auth/auth.types';
 import { CheckInService } from './check-in.service';
-import { toScanResult } from './check-in.mapper';
+import { toAttendanceRow, toScanResult } from './check-in.mapper';
+import {
+  AttendanceCountsDto,
+  AttendanceRowDto,
+  DEFAULT_LIMIT,
+  ListAttendanceDto,
+} from './dto/attendance.dto';
 import {
   ManualCheckInDto,
   ScanResultDto,
@@ -44,6 +53,46 @@ import {
 @UseGuards(AdminGuard, PermissionsGuard)
 export class CheckInController {
   constructor(private readonly checkIn: CheckInService) {}
+
+  /**
+   * The roll (US-REG-11): who is expected, and who is already inside.
+   *
+   * One endpoint for both screens the door uses. The queue reads it by name;
+   * the station's live feed reads `?status=checked_in&sort=recent`. They are
+   * two views of one list, and two endpoints would drift apart.
+   *
+   * Unlike the write routes this does NOT require the door to be open —
+   * checking the list before doors open, and reconciling it after they close,
+   * are the moments it is most wanted.
+   */
+  @Get()
+  @RequirePermissions(Permission.regCheckin)
+  @ResponseMessage('Attendance retrieved.')
+  @ApiPage(AttendanceRowDto, 200, { counts: AttendanceCountsDto })
+  async list(
+    @CurrentAuth() auth: AuthContext,
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Query() query: ListAttendanceDto,
+  ): Promise<Paginated<AttendanceRowDto>> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? DEFAULT_LIMIT;
+    const { rows, total, counts } = await this.checkIn.listAttendance(
+      auth,
+      eventId,
+      {
+        page,
+        limit,
+        status: query.status,
+        search: query.search,
+        sort: query.sort ?? 'name',
+      },
+    );
+    return Paginated.of(rows.map(toAttendanceRow), total, page, limit).withMeta(
+      {
+        counts,
+      },
+    );
+  }
 
   @Post('scan')
   @HttpCode(HttpStatus.OK)

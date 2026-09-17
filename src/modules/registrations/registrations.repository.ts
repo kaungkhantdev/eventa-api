@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { type SQL, and, desc, eq, ilike, or, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
-import { events, orders } from '../../db/schema';
+import { events, orderItems, orders, ticketTypes } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
 import type {
   RegistrationCounts,
@@ -93,6 +93,7 @@ export class RegistrationsRepository {
       status: orders.status,
       paymentStatus: orders.paymentStatus,
       seats: orders.seats,
+      ticketTypeName: ticketTypeNames(),
       totalSatang: orders.totalSatang,
       registeredAt: orders.registeredAt,
       confirmedAt: orders.confirmedAt,
@@ -126,6 +127,24 @@ export class RegistrationsRepository {
   }
 }
 
+/**
+ * The tier(s) an order bought, as one value.
+ *
+ * A scalar subquery rather than a join: an order with two tiers joined against
+ * `order_items` would come back as two rows, which would break both the page
+ * size and the `count(*)` beside it. Distinct and ordered so the same order
+ * always reads the same way, and null — never '' — when every tier it referred
+ * to has since been deleted.
+ */
+function ticketTypeNames(): SQL<string | null> {
+  return sql<string | null>`(
+    select string_agg(distinct ${ticketTypes.name}, ', ' order by ${ticketTypes.name})
+    from ${orderItems}
+    join ${ticketTypes} on ${ticketTypes.id} = ${orderItems.ticketTypeId}
+    where ${orderItems.orderId} = ${orders.id}
+  )`;
+}
+
 function toRow(row: Record<string, unknown>): RegistrationRow {
   return {
     id: row.id as string,
@@ -137,6 +156,7 @@ function toRow(row: Record<string, unknown>): RegistrationRow {
     status: row.status as RegistrationRow['status'],
     paymentStatus: row.paymentStatus as RegistrationRow['paymentStatus'],
     seats: Number(row.seats),
+    ticketTypeName: (row.ticketTypeName as string | null) ?? null,
     totalSatang: Number(row.totalSatang),
     registeredAt: row.registeredAt as Date,
     confirmedAt: (row.confirmedAt as Date | null) ?? null,

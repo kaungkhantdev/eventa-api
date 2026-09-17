@@ -20,6 +20,9 @@ const auth: AuthContext = {
   persona: 'admin',
 };
 
+/** The account the original charge was made on. */
+const ACCOUNT = 'acct_workspace7';
+
 const payment = (o: Partial<PaymentRow> = {}) =>
   ({
     id: PAYMENT_ID,
@@ -29,6 +32,7 @@ const payment = (o: Partial<PaymentRow> = {}) =>
     currency: 'THB',
     status: 'paid',
     gatewayRef: 'pi_123',
+    gatewayAccountId: ACCOUNT,
     ...o,
   }) as PaymentRow;
 
@@ -87,6 +91,18 @@ describe('RefundsService (US-FIN-02)', () => {
     await refund({ amountSatang: 1 });
     expect(provider.refund).toHaveBeenCalledWith(
       expect.objectContaining({ amountSatang: TOTAL, gatewayRef: 'pi_123' }),
+    );
+  });
+
+  /**
+   * The reversal is made with the same workspace's key that took the money —
+   * the provider authenticates AS the organizer, so naming the account is
+   * neither needed nor possible. What it does need is whose key to use.
+   */
+  it('reverses as the workspace that took the money', async () => {
+    await refund();
+    expect(provider.refund).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: ORG }),
     );
   });
 

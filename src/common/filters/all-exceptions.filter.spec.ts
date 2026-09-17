@@ -51,6 +51,31 @@ describe('AllExceptionsFilter', () => {
   const clock: Clock = { now: () => new Date('2026-07-28T10:00:00.000Z') };
   const filter = new AllExceptionsFilter(context, clock);
 
+  /**
+   * A domain rule that names its field has to reach the client intact, or the
+   * form can only drop the sentence at its foot and hope the reader works out
+   * which input is meant.
+   */
+  it('forwards the field a domain rule blamed', () => {
+    const { host, sent } = mockHost();
+
+    filter.catch(
+      DomainException.invalidField(
+        'taxId',
+        'Tax ID must be the 13-digit Thai VAT registration number.',
+      ),
+      host,
+    );
+
+    expect(sent().status).toBe(HttpStatus.UNPROCESSABLE_ENTITY);
+    expect(sent().body.errors).toEqual([
+      {
+        field: 'taxId',
+        message: 'Tax ID must be the 13-digit Thai VAT registration number.',
+      },
+    ]);
+  });
+
   it('renders a DomainException as the failure envelope', () => {
     const { host, sent } = mockHost();
     filter.catch(DomainException.notFound('Event not found'), host);

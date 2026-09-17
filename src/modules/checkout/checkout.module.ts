@@ -8,7 +8,10 @@ import { InvoiceOrderPort } from '../invoices/ports/invoice-order.port';
 import { OrderPaymentPort } from '../payments/ports/order-payment.port';
 import { RegistrationApprovalPort } from '../registrations/ports/registration-approval.port';
 import { RegistrationEntryPort } from '../registrations/ports/registration-entry.port';
-import { CheckoutController } from './checkout.controller';
+import {
+  CheckoutController,
+  GuestOrderController,
+} from './checkout.controller';
 import { InvoiceOrderAdapter } from './invoice-order.adapter';
 import { OrderPaymentAdapter } from './order-payment.adapter';
 import { RegistrationApprovalAdapter } from './registration-approval.adapter';
@@ -45,7 +48,7 @@ import { CheckoutViewService } from './checkout-view.service';
     DiscountsModule,
     PlatformModule,
   ],
-  controllers: [CheckoutController],
+  controllers: [CheckoutController, GuestOrderController],
   providers: [
     CheckoutViewService,
     CheckoutService,

@@ -16,6 +16,7 @@ import { ApiBearerAuth, ApiForbiddenResponse, ApiTags } from '@nestjs/swagger';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 import { ApiErrorDto } from '../../common/errors/error-envelope';
 import { ApiData, ApiPage } from '../../common/http/api-data.decorator';
+import type { MemberStatusCounts } from './access.types';
 import { Paginated } from '../../common/http/paginated';
 import type { AuthContext } from '../auth/auth.types';
 import { CurrentAuth } from '../../common/decorators/current-auth.decorator';
@@ -49,6 +50,21 @@ export class MembersController {
     @Query() query: ListMembersQueryDto,
   ): Promise<Paginated<MemberResponseDto>> {
     return this.access.listMembers(auth.organizationId, query);
+  }
+
+  /**
+   * How many members sit behind each tab. Its own call rather than a field on
+   * the list, because the list is one page and these describe all of them.
+   */
+  @Get('counts')
+  @RequirePermissions(Permission.setUsers)
+  @ResponseMessage('Member counts retrieved.')
+  @ApiData(Object)
+  counts(
+    @CurrentAuth() auth: AuthContext,
+    @Query() query: ListMembersQueryDto,
+  ): Promise<MemberStatusCounts> {
+    return this.access.countMembers(auth.organizationId, query);
   }
 
   @Post()

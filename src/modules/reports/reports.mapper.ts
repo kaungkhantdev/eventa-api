@@ -1,0 +1,104 @@
+import { BANGKOK_OFFSET_MS, DAY_MS } from '../../common/time/bangkok';
+import type { AttendanceReportDto } from './dto/attendance-report.dto';
+import type { IncomeReportDto } from './dto/income-report.dto';
+import type { OverviewReportDto } from './dto/overview-report.dto';
+import type {
+  RegistrationsReportDto,
+  ReportPeriodDto,
+} from './dto/registrations-report.dto';
+import type { AttendanceReportView } from './attendance-report.service';
+import type { IncomeReportView } from './income-report.service';
+import type { OverviewReportView } from './overview-report.service';
+import type { RegistrationsReportView } from './registrations-report.service';
+import type { ReportPeriod } from './reports-period';
+
+/** Domain view → the wire shape. */
+
+export function toRegistrationsReport(
+  view: RegistrationsReportView,
+): RegistrationsReportDto {
+  return {
+    period: toPeriod(view.period),
+    rows: view.rows.map((row) => ({
+      eventId: row.eventId,
+      eventName: row.eventName,
+      startAt: row.startAt.toISOString(),
+      confirmed: row.confirmed,
+      pending: row.pending,
+      waitlisted: row.waitlisted,
+      cancelled: row.cancelled,
+      rejected: row.rejected,
+      total: row.total,
+    })),
+    totals: view.totals,
+  };
+}
+
+export function toAttendanceReport(
+  view: AttendanceReportView,
+): AttendanceReportDto {
+  return {
+    period: toPeriod(view.period),
+    rows: view.rows.map((row) => ({
+      eventId: row.eventId,
+      eventName: row.eventName,
+      startAt: row.startAt.toISOString(),
+      registered: row.registered,
+      checkedIn: row.checkedIn,
+      noShows: row.noShows,
+      attendanceRate: row.attendanceRate,
+      onTimeRate: row.onTimeRate,
+    })),
+    totals: view.totals,
+  };
+}
+
+export function toOverviewReport(view: OverviewReportView): OverviewReportDto {
+  return {
+    period: toPeriod(view.period),
+    kpis: view.kpis,
+    revenue: view.revenue,
+  };
+}
+
+export function toIncomeReport(view: IncomeReportView): IncomeReportDto {
+  return {
+    period: toPeriod(view.period),
+    rows: view.rows.map((row) => ({
+      eventId: row.eventId,
+      eventName: row.eventName,
+      startAt: row.startAt.toISOString(),
+      grossSatang: row.grossSatang,
+      vatSatang: row.vatSatang,
+      refundsSatang: row.refundsSatang,
+      feesSatang: row.feesSatang,
+      netSatang: row.netSatang,
+      settledSatang: row.settledSatang,
+    })),
+    totals: view.totals,
+  };
+}
+
+/**
+ * The window, as the two calendar days a reader would name it by.
+ *
+ * `to` is exclusive inside the domain — the midnight that opens the day AFTER
+ * the last one covered — so it is stepped back a day here. Reporting the raw
+ * exclusive end would tell somebody who asked for "to 19 July" that they got
+ * data to the 20th.
+ */
+function toPeriod(period: ReportPeriod): ReportPeriodDto {
+  return {
+    from: bangkokDayOf(period.from),
+    to: bangkokDayOf(new Date(period.to.getTime() - DAY_MS)),
+    days: period.days,
+    trimmed: period.trimmed,
+  };
+}
+
+/** The Bangkok calendar day an instant falls on, as `YYYY-MM-DD`. */
+function bangkokDayOf(instant: Date): string {
+  return new Date(instant.getTime() + BANGKOK_OFFSET_MS)
+    .toISOString()
+    .slice(0, 10);
+}

@@ -12,6 +12,7 @@ import { AppConfigModule } from './config/config.module';
 import type { Env } from './config/env.validation';
 import { buildLoggerOptions } from './config/logger.config';
 import { DatabaseModule } from './db/database.module';
+import { MetricsModule } from './modules/metrics/metrics.module';
 import { HealthModule } from './health/health.module';
 import { EventCategoriesModule } from './modules/event-categories/event-categories.module';
 import { EventDuplicationModule } from './modules/event-duplication/event-duplication.module';
@@ -43,6 +44,7 @@ import { CheckoutModule } from './modules/checkout/checkout.module';
 import { CheckInModule } from './modules/check-in/check-in.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PayoutsModule } from './modules/payouts/payouts.module';
 import { TaxPeriodsModule } from './modules/tax-periods/tax-periods.module';
 import { DiscoverModule } from './modules/discover/discover.module';
@@ -57,6 +59,7 @@ import { TicketSharingModule } from './modules/ticket-sharing/ticket-sharing.mod
 import { TicketingModule } from './modules/ticketing/ticketing.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { MeetingsModule } from './modules/meetings/meetings.module';
+import { ReportsModule } from './modules/reports/reports.module';
 
 @Module({
   imports: [
@@ -72,6 +75,7 @@ import { MeetingsModule } from './modules/meetings/meetings.module';
     CommonModule,
     RedisModule,
     HealthModule,
+    MetricsModule,
     AuthModule,
     UsersModule,
     AuthSignupModule,
@@ -113,7 +117,9 @@ import { MeetingsModule } from './modules/meetings/meetings.module';
     InvoicesModule,
     TaxPeriodsModule,
     CheckInModule,
+    NotificationsModule,
     PayoutsModule,
+    ReportsModule,
   ],
 })
 export class AppModule implements NestModule {

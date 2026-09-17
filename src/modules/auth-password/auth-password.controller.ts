@@ -24,7 +24,7 @@ export class AuthPasswordController {
   @Public()
   @Post('auth/forgot-password')
   @HttpCode(HttpStatus.OK)
-  @ResponseMessage('If an account matches, a reset link is on its way.')
+  @ResponseMessage('A reset link is on its way.')
   @ApiData(MessageResponseDto)
   forgotPassword(@Body() dto: ForgotPasswordDto): Promise<MessageResponseDto> {
     return this.passwordReset.forgot(dto.email, dto.persona);

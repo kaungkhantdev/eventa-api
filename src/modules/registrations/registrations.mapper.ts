@@ -28,6 +28,7 @@ export function toRegistrationEntry(
     status: row.status,
     paymentStatus: row.paymentStatus,
     seats: row.seats,
+    ticketTypeName: row.ticketTypeName,
     totalSatang: canViewMoney ? row.totalSatang : null,
     amountLabel: canViewMoney ? amountLabel(row.totalSatang) : null,
     registeredAt: row.registeredAt.toISOString(),

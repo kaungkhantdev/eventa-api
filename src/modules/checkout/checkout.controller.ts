@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Post,
 } from '@nestjs/common';
 import { ApiNoContentResponse, ApiTags } from '@nestjs/swagger';
@@ -17,6 +18,7 @@ import { CheckoutService } from './checkout.service';
 import { CheckoutViewService } from './checkout-view.service';
 import { CheckoutViewDto } from './dto/checkout-view.dto';
 import { ConfirmOrderDto } from './dto/confirm-order.dto';
+import { GuestOrderDto } from './dto/guest-order.dto';
 import { OrderPlacedDto } from './dto/order-placed.dto';
 import { CheckoutHoldDto, OrderSummaryDto } from './dto/order-summary.dto';
 import {
@@ -89,5 +91,31 @@ export class CheckoutController {
   @ApiNoContentResponse({ description: 'The inventory is free again' })
   release(@Body() dto: ReleaseCheckoutDto): Promise<void> {
     return this.checkout.release(dto);
+  }
+}
+
+/**
+ * The buyer's own copy of their order (US-DISC-06/07).
+ *
+ * Its own controller because it is not part of checking out — it is what the
+ * confirmation email links to afterwards, and what the "You're registered"
+ * screen sends a guest to. `@Public` for the whole point of it: registration
+ * never required an account, so viewing what you bought must not either. The
+ * order's uuid is the credential; `ParseUUIDPipe` rejects anything that is not
+ * one rather than searching for it.
+ */
+@ApiTags('checkout')
+@Controller('public/orders')
+export class GuestOrderController {
+  constructor(private readonly orders: CheckoutOrderService) {}
+
+  @Public()
+  @Get(':orderId')
+  @ResponseMessage('Order retrieved.')
+  @ApiData(GuestOrderDto)
+  view(
+    @Param('orderId', ParseUUIDPipe) orderId: string,
+  ): Promise<GuestOrderDto> {
+    return this.orders.viewGuestOrder(orderId);
   }
 }

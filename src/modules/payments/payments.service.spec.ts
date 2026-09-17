@@ -7,6 +7,11 @@ import type {
   OrderPaymentPort,
   PayableOrder,
 } from './ports/order-payment.port';
+import type { GatewayCredentialsPort } from './ports/gateway-credentials.port';
+import type {
+  MerchantAccount,
+  MerchantAccountPort,
+} from './ports/merchant-account.port';
 import type {
   PaymentProviderPort,
   StartedPayment,
@@ -73,12 +78,39 @@ function verified(o: Partial<VerifiedWebhook> = {}): VerifiedWebhook {
   };
 }
 
+/** The workspace's own Stripe account — where its money is supposed to land. */
+const ACCOUNT = 'acct_workspace7';
+
+function merchantPort(
+  account: Partial<MerchantAccount> = {},
+): jest.Mocked<MerchantAccountPort> {
+  return {
+    findAccount: jest
+      .fn()
+      .mockResolvedValue({ connected: true, accountId: ACCOUNT, ...account }),
+  };
+}
+
+/** The webhook token this workspace's own callback URL carries. */
+const WEBHOOK_TOKEN = 'tok_workspace7';
+
+function credentialsPort(): jest.Mocked<GatewayCredentialsPort> {
+  return {
+    secretKeyFor: jest.fn().mockResolvedValue('sk_test_workspace7'),
+    webhookIdentityFor: jest
+      .fn()
+      .mockResolvedValue({ organizationId: ORG, signingSecrets: ['whsec_x'] }),
+  };
+}
+
 const message = (e: unknown) => (e as DomainException).message;
 
 describe('PaymentsService (US-DISC-05)', () => {
   let repo: jest.Mocked<PaymentsRepository>;
   let provider: jest.Mocked<PaymentProviderPort>;
   let orders: jest.Mocked<OrderPaymentPort>;
+  let merchants: jest.Mocked<MerchantAccountPort>;
+  let credentials: jest.Mocked<GatewayCredentialsPort>;
   let service: PaymentsService;
 
   beforeEach(() => {
@@ -107,11 +139,21 @@ describe('PaymentsService (US-DISC-05)', () => {
       releaseHolds: jest.fn().mockResolvedValue(undefined),
       queueRefund: jest.fn().mockResolvedValue(undefined),
     };
+    merchants = merchantPort();
+    credentials = credentialsPort();
     const clock: Clock = { now: () => NOW };
     const config = {
       getOrThrow: () => 'fake',
     } as unknown as ConfigService<Env, true>;
-    service = new PaymentsService(repo, provider, orders, clock, config);
+    service = new PaymentsService(
+      repo,
+      provider,
+      orders,
+      merchants,
+      credentials,
+      clock,
+      config,
+    );
   });
 
   const pay = (o: Record<string, unknown> = {}) =>
@@ -166,6 +208,67 @@ describe('PaymentsService (US-DISC-05)', () => {
       expect(provider.start).toHaveBeenCalledWith(
         expect.objectContaining({ statementDescriptor: 'EVENTA*TECHWEEK' }),
       );
+    });
+
+    /**
+     * The provider is not told WHICH account to use — it authenticates as the
+     * workspace with that workspace's own key. What this service still owes is
+     * the check that there IS one, before a buyer is sent to a payment page
+     * that cannot take their money.
+     */
+    it('checks the workspace can take money before starting', async () => {
+      await pay();
+      expect(merchants.findAccount).toHaveBeenCalledWith(ORG);
+    });
+
+    // A refund has to reverse on the account that took the money, and the
+    // settings row can change underneath it. See the 0050 migration.
+    it('stamps the account on the payment, for the refund to read back', async () => {
+      await pay();
+      expect(repo.upsertAttempt).toHaveBeenCalledWith(
+        expect.objectContaining({ gatewayAccountId: ACCOUNT }),
+      );
+    });
+
+    describe('when the workspace has no payment account', () => {
+      /**
+       * Refusing is the only honest answer. Collecting into the platform
+       * account would take a buyer's money into a balance the organizer cannot
+       * reach, issue a valid ticket against it, and leave a payout that can
+       * never settle — a mess that is far harder to unpick than a checkout
+       * that stopped.
+       */
+      it('refuses to collect rather than banking it elsewhere', async () => {
+        merchants.findAccount.mockResolvedValue({
+          connected: false,
+          accountId: null,
+        });
+        await expect(pay()).rejects.toBeInstanceOf(DomainException);
+        expect(provider.start).not.toHaveBeenCalled();
+      });
+
+      it('says so in words a buyer can make sense of', async () => {
+        merchants.findAccount.mockResolvedValue({
+          connected: false,
+          accountId: null,
+        });
+        // The buyer cannot fix this and did nothing wrong, so the message
+        // names the organizer's setup rather than blaming the attempt.
+        await expect(pay().catch(message)).resolves.toMatch(
+          /organizer.*payment account/i,
+        );
+      });
+
+      // A row can say connected and carry no reference; charging "on behalf
+      // of" nothing is a platform charge wearing a workspace's label.
+      it('refuses a row marked connected that names no account', async () => {
+        merchants.findAccount.mockResolvedValue({
+          connected: true,
+          accountId: null,
+        });
+        await expect(pay()).rejects.toBeInstanceOf(DomainException);
+        expect(provider.start).not.toHaveBeenCalled();
+      });
     });
 
     it('records the attempt against the order', async () => {
@@ -363,12 +466,21 @@ describe('PaymentsService — money-path defences', () => {
       queueRefund: jest.fn().mockResolvedValue(undefined),
     };
     const clock: Clock = { now: () => NOW };
-    service = new PaymentsService(repo, provider, orders, clock, {
-      getOrThrow: () => 'fake',
-    } as unknown as ConfigService<Env, true>);
+    service = new PaymentsService(
+      repo,
+      provider,
+      orders,
+      merchantPort(),
+      credentialsPort(),
+      clock,
+      {
+        getOrThrow: () => 'fake',
+      } as unknown as ConfigService<Env, true>,
+    );
   });
 
-  const webhook = () => service.handleWebhook(Buffer.from('{}'), 'sig');
+  const webhook = () =>
+    service.handleWebhook(WEBHOOK_TOKEN, Buffer.from('{}'), 'sig');
 
   describe('a second successful payment on an already-settled order', () => {
     beforeEach(() => {

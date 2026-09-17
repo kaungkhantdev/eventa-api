@@ -6,6 +6,8 @@ export interface PayableOrder {
   organizationId: number;
   reference: string;
   eventId: string;
+  /** Shown on the provider's hosted page, so the buyer knows what this is. */
+  eventName: string;
   buyerName: string;
   buyerEmail: string;
   status: string;
