@@ -24,6 +24,8 @@ import { RevenueInsightsPort } from '../dashboard/ports/revenue-insights.port';
 import { RevenueInsightsAdapter } from './revenue-insights.adapter';
 import { IncomeReportPort } from '../reports/ports/income-report.port';
 import { IncomeReportAdapter } from './income-report.adapter';
+import { TransactionLedgerPort } from '../reports/ports/transaction-ledger.port';
+import { TransactionLedgerAdapter } from './transaction-ledger.adapter';
 import { PaymentFeedPort } from '../notifications/ports/payment-feed.port';
 import { PaymentFeedAdapter } from './payment-feed.adapter';
 
@@ -53,6 +55,8 @@ import { PaymentFeedAdapter } from './payment-feed.adapter';
     // Settled and declined charges as feed items (US-MSG-03). Which status
     // means which kind is Payments' call, not the feed's.
     { provide: PaymentFeedPort, useClass: PaymentFeedAdapter },
+    // The charge-and-reversal ledger (US-RPT-06).
+    { provide: TransactionLedgerPort, useClass: TransactionLedgerAdapter },
     PaymentsService,
     RefundsService,
     PaymentsLedgerService,
@@ -84,6 +88,7 @@ import { PaymentFeedAdapter } from './payment-feed.adapter';
     PaymentProviderPort,
     IncomeReportPort,
     PaymentFeedPort,
+    TransactionLedgerPort,
   ],
 })
 export class PaymentsModule {}

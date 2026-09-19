@@ -2,10 +2,12 @@ import { Module } from '@nestjs/common';
 import { EventAttendancePort } from '../discover/ports/event-attendance.port';
 import { EventStatsPort } from '../events/ports/event-stats.port';
 import { AttendanceReportPort } from '../reports/ports/attendance-report.port';
+import { EventPerformancePort } from '../reports/ports/event-performance.port';
 import { RegistrationFeedPort } from '../notifications/ports/registration-feed.port';
 import { RegistrationReportPort } from '../reports/ports/registration-report.port';
 import { EventAttendanceAdapter } from './event-attendance.adapter';
 import { AttendanceReportAdapter } from './attendance-report.adapter';
+import { EventPerformanceAdapter } from './event-performance.adapter';
 import { RegistrationFeedAdapter } from './registration-feed.adapter';
 import { RegistrationReportAdapter } from './registration-report.adapter';
 import { RegistrationStatsAdapter } from './registration-stats.adapter';
@@ -30,6 +32,9 @@ import { RegistrationStatsRepository } from './registration-stats.repository';
     { provide: AttendanceReportPort, useClass: AttendanceReportAdapter },
     // Confirmed registrations as feed items (US-MSG-03).
     { provide: RegistrationFeedPort, useClass: RegistrationFeedAdapter },
+    // Events ranked by registrations (US-RPT-04), driven from `events` so one
+    // with no sign-ups still appears.
+    { provide: EventPerformancePort, useClass: EventPerformanceAdapter },
   ],
   exports: [
     EventStatsPort,
@@ -37,6 +42,7 @@ import { RegistrationStatsRepository } from './registration-stats.repository';
     RegistrationReportPort,
     AttendanceReportPort,
     RegistrationFeedPort,
+    EventPerformancePort,
   ],
 })
 export class RegistrationStatsModule {}
