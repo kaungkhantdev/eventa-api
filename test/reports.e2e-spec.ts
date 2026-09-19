@@ -116,6 +116,7 @@ interface Overview {
     change: Change;
     points: { at: string; netSatang: number }[];
   } | null;
+  ticketMix: { ticketTypeName: string; seats: number; percent: number }[];
 }
 
 describe('Reports (e2e — US-RPT)', () => {
@@ -997,6 +998,28 @@ describe('Reports (e2e — US-RPT)', () => {
       expect(view.kpis.attendanceRate.value).toBeCloseTo(66.7, 1);
     });
 
+    describe('the ticket-type mix (US-RPT-03)', () => {
+      it('splits the sign-ups by ticket type, largest first', async () => {
+        const past = await seedEventAt('rpt-mix', 'Mix Event', '-2 days');
+        await seedTicket({ event: past, checkedIn: false });
+        await seedTicket({ event: past, checkedIn: false });
+
+        const mix = overview(
+          await getOverview(adminJwt, spanningWindow()).expect(200),
+        ).ticketMix;
+        expect(mix.length).toBeGreaterThan(0);
+        // Every seedTicket makes its own tier, so the shares must still total
+        // the whole however they are split.
+        const total = mix.reduce((sum, slice) => sum + slice.percent, 0);
+        expect(total).toBeCloseTo(100, 0);
+      });
+
+      it('gives an empty mix when nothing was sold', async () => {
+        const mix = overview(await getOverview(adminJwt).expect(200)).ticketMix;
+        expect(mix).toEqual([]);
+      });
+    });
+
     it('narrows every tile to one event, not just the chart', async () => {
       await seedPayment({ event: summitId, amountSatang: 30_000 });
       await seedPayment({ event: galaId, amountSatang: 70_000 });
@@ -1675,6 +1698,87 @@ describe('Reports (e2e — US-RPT)', () => {
           );
           expect(report.rows).toEqual([]);
           expect(report.totals.returnRatio).toBeNull();
+        });
+      });
+
+      describe('exporting a report (US-RPT-11)', () => {
+        const download = (jwt: string, path: string, query = '') =>
+          request(server)
+            .get(`/api/v1/reports/${path}${query}`)
+            .set('Authorization', `Bearer ${jwt}`);
+
+        it('sends a file rather than the API envelope', async () => {
+          await seedOrder({ seats: 3 });
+          const res = await download(adminJwt, 'registrations.csv').expect(200);
+
+          expect(res.headers['content-type']).toContain('csv');
+          expect(res.headers['content-disposition']).toContain(
+            'registrations.csv',
+          );
+          // A file, not `{ success, data }`.
+          expect(res.text).not.toContain('"success"');
+          expect(res.text.split('\n')[0]).toContain('Event');
+        });
+
+        it('opens with a byte-order mark so Thai reads in a spreadsheet', async () => {
+          await seedOrder({});
+          const res = await download(adminJwt, 'registrations.csv').expect(200);
+          expect(res.text.charCodeAt(0)).toBe(0xfeff);
+        });
+
+        it('holds exactly the rows the filter matched', async () => {
+          await seedOrder({ event: summitId, seats: 2 });
+          await seedOrder({ event: galaId, seats: 5 });
+
+          const all = await download(adminJwt, 'registrations.csv').expect(200);
+          const one = await download(
+            adminJwt,
+            'registrations.csv',
+            `?eventId=${galaId}`,
+          ).expect(200);
+
+          // Header plus one row per event, and a trailing newline.
+          expect(all.text.trim().split('\n')).toHaveLength(3);
+          expect(one.text.trim().split('\n')).toHaveLength(2);
+          expect(one.text).toContain('Charity Gala');
+          expect(one.text).not.toContain('Tech Summit');
+        });
+
+        it('ignores paging — an export is the whole set', async () => {
+          await seedOrder({ event: summitId });
+          await seedOrder({ event: galaId });
+
+          const res = await download(
+            adminJwt,
+            'registrations.csv',
+            '?page=1&limit=1',
+          ).expect(200);
+          expect(res.text.trim().split('\n')).toHaveLength(3);
+        });
+
+        it('writes money as a number a spreadsheet can add up', async () => {
+          await seedPayment({ amountSatang: 107_000, vatSatang: 7_000 });
+          const res = await download(adminJwt, 'income.csv').expect(200);
+          expect(res.text).toContain('1070.00');
+        });
+
+        it('keeps each export behind the same gate as its report', async () => {
+          // Finance files stay finance-only (US-RPT-12).
+          await download(staffJwt, 'income.csv').expect(403);
+          await download(staffJwt, 'transactions.csv').expect(403);
+          await download(staffJwt, 'discounts.csv').expect(403);
+          // The staff-visible ones still answer.
+          await download(staffJwt, 'registrations.csv').expect(200);
+          await download(staffJwt, 'attendance.csv').expect(200);
+          await download(staffJwt, 'events.csv').expect(200);
+        });
+
+        it('refuses a backwards window, like the report it mirrors', async () => {
+          await download(
+            adminJwt,
+            'registrations.csv',
+            '?from=2026-07-07&to=2026-07-01',
+          ).expect(422);
         });
       });
 

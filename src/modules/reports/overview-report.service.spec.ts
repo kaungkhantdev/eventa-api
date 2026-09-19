@@ -87,6 +87,10 @@ describe('OverviewReportService (US-RPT-01)', () => {
         .fn()
         .mockResolvedValueOnce(split(400))
         .mockResolvedValueOnce(split(350)),
+      ticketMix: jest.fn().mockResolvedValue([
+        { ticketTypeName: 'General Admission', seats: 300 },
+        { ticketTypeName: 'VIP', seats: 100 },
+      ]),
     };
     attendancePort = {
       attendanceByEvent: jest.fn(),
@@ -302,6 +306,38 @@ describe('OverviewReportService (US-RPT-01)', () => {
       await service.load(auth, { range: '30d' });
       const [[, current], [, previous]] = income.incomeTotals.mock.calls;
       expect(previous.to.getTime()).toBe(current.from.getTime());
+    });
+  });
+
+  describe('the ticket-type mix (US-RPT-03)', () => {
+    it('gives each type its share of the mix', async () => {
+      const view = await service.load(auth, {});
+      expect(view.ticketMix).toEqual([
+        { ticketTypeName: 'General Admission', seats: 300, percent: 75 },
+        { ticketTypeName: 'VIP', seats: 100, percent: 25 },
+      ]);
+    });
+
+    it('makes the shares add up to the whole', async () => {
+      // The story's own requirement for the donut.
+      const view = await service.load(auth, {});
+      const total = view.ticketMix.reduce(
+        (sum, slice) => sum + slice.percent,
+        0,
+      );
+      expect(total).toBeCloseTo(100, 1);
+    });
+
+    it('returns no slices at all when nothing was sold', async () => {
+      // An empty donut, not a ring of zero-width slices.
+      registrations.ticketMix = jest.fn().mockResolvedValue([]);
+      expect((await service.load(auth, {})).ticketMix).toEqual([]);
+    });
+
+    it('does not read the mix for a member without registration access', async () => {
+      permissions.getFor = jest.fn().mockResolvedValue([Permission.finView]);
+      await service.load(auth, {});
+      expect(registrations.ticketMix).not.toHaveBeenCalled();
     });
   });
 });

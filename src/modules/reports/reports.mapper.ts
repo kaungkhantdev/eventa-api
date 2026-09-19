@@ -106,6 +106,7 @@ export function toOverviewReport(view: OverviewReportView): OverviewReportDto {
     period: toPeriod(view.period),
     kpis: view.kpis,
     revenue: view.revenue,
+    ticketMix: view.ticketMix,
   };
 }
 

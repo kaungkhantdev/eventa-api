@@ -97,6 +97,22 @@ export class OverviewKpisDto {
   refundRate!: OverviewKpiDto | null;
 }
 
+/** One slice of the ticket-type donut (US-RPT-03). */
+export class TicketMixSliceDto {
+  @ApiProperty({ example: 'General Admission' }) ticketTypeName!: string;
+
+  @ApiProperty({
+    description: 'Seats sold of this type, confirmed orders only.',
+  })
+  seats!: number;
+
+  @ApiProperty({
+    description:
+      'Share of the MIX, to one decimal — the slices add up to the whole. Not a share of the registrations tile, which can also count a sign-up with no ticket type.',
+  })
+  percent!: number;
+}
+
 export class OverviewReportDto {
   @ApiProperty({ type: ReportPeriodDto })
   period!: ReportPeriodDto;
@@ -110,4 +126,11 @@ export class OverviewReportDto {
     description: 'Null without finance access: the panel is not shown at all.',
   })
   revenue!: RevenueTrendDto | null;
+
+  @ApiProperty({
+    type: [TicketMixSliceDto],
+    description:
+      'Largest share first. Empty when nothing was sold in the window — an empty donut, not a ring of zero-width slices.',
+  })
+  ticketMix!: TicketMixSliceDto[];
 }

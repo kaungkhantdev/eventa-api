@@ -16,7 +16,10 @@ import {
   IncomeReportPort,
   type IncomeSummary,
 } from './ports/income-report.port';
-import { RegistrationReportPort } from './ports/registration-report.port';
+import {
+  RegistrationReportPort,
+  type TicketShare,
+} from './ports/registration-report.port';
 import { changeBetween } from './report-change';
 import { resolveReportPeriod, type ReportPeriod } from './reports-period';
 import {
@@ -67,11 +70,21 @@ export interface OverviewKpis {
   refundRate: OverviewKpi | null;
 }
 
+/** One slice of the ticket-type donut (US-RPT-03). */
+export interface TicketMixSlice {
+  ticketTypeName: string;
+  seats: number;
+  /** Share of the mix, to one decimal. The slices add up to the whole. */
+  percent: number;
+}
+
 export interface OverviewReportView {
   period: ReportPeriod;
   kpis: OverviewKpis;
   /** Null without finance access: the panel is not shown at all. */
   revenue: RevenueTrendView | null;
+  /** Largest share first. Empty when nothing was sold in the window. */
+  ticketMix: TicketMixSlice[];
 }
 
 const PERCENT = 100;
@@ -104,16 +117,27 @@ export class OverviewReportService {
     // Checked BEFORE the money is fetched, not after: an unauthorized caller
     // should not have the figures read into the process at all.
     const finance = granted.includes(Permission.finView);
+    const maySeeRegistrations = granted.includes(Permission.regView);
 
-    const [signUps, signUpsBefore, doors, doorsBefore, money, moneyBefore] =
-      await Promise.all([
-        this.registrations.totalsFor(org, current),
-        this.registrations.totalsFor(org, previous),
-        this.attendance.totalsFor(org, current),
-        this.attendance.totalsFor(org, previous),
-        finance ? this.income.incomeTotals(org, current) : null,
-        finance ? this.income.incomeTotals(org, previous) : null,
-      ]);
+    const [
+      signUps,
+      signUpsBefore,
+      doors,
+      doorsBefore,
+      money,
+      moneyBefore,
+      mix,
+    ] = await Promise.all([
+      this.registrations.totalsFor(org, current),
+      this.registrations.totalsFor(org, previous),
+      this.attendance.totalsFor(org, current),
+      this.attendance.totalsFor(org, previous),
+      finance ? this.income.incomeTotals(org, current) : null,
+      finance ? this.income.incomeTotals(org, previous) : null,
+      // Not gated: a ticket type's name and how many of it sold are neither
+      // money nor personal data, and the tile it sits under is already shown.
+      maySeeRegistrations ? this.registrations.ticketMix(org, current) : [],
+    ]);
 
     const takings = money && moneyBefore ? { money, moneyBefore } : null;
     return {
@@ -127,6 +151,7 @@ export class OverviewReportService {
         ...moneyKpis(takings),
       },
       revenue: takings ? await this.trend(org, period, current, takings) : null,
+      ticketMix: toSlices(mix),
     };
   }
 
@@ -213,6 +238,23 @@ function attendanceRate(doors: {
   checkedIn: number;
 }): number | null {
   return rate(doors.checkedIn, doors.registered);
+}
+
+/**
+ * The donut's slices, largest first.
+ *
+ * Each share is of the MIX's own total rather than of the registrations tile,
+ * so the slices add up to the whole — which is what the story asks for. They
+ * can differ: a registration with no ticket type on it counts on the tile and
+ * has no slice to sit in.
+ */
+function toSlices(mix: TicketShare[]): TicketMixSlice[] {
+  const total = mix.reduce((sum, tier) => sum + tier.seats, 0);
+  if (total === 0) return [];
+  return mix.map((tier) => ({
+    ...tier,
+    percent: Math.round((tier.seats / total) * PERCENT * 10) / 10,
+  }));
 }
 
 /** A percentage to one decimal, or null when the denominator is nothing. */

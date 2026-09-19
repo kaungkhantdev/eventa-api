@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Header, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiForbiddenResponse, ApiTags } from '@nestjs/swagger';
 import { CurrentAuth } from '../../common/decorators/current-auth.decorator';
 import {
@@ -10,6 +10,8 @@ import { ApiErrorDto } from '../../common/errors/error-envelope';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { ApiData } from '../../common/http/api-data.decorator';
+import { SkipResponseEnvelope } from '../../common/decorators/skip-envelope.decorator';
+import { CSV_MIME, toCsv } from '../../common/csv/csv';
 import type { AuthContext } from '../auth/auth.types';
 import { AttendanceReportDto } from './dto/attendance-report.dto';
 import { DiscountsReportDto } from './dto/discounts-report.dto';
@@ -27,6 +29,15 @@ import { EventsReportService } from './events-report.service';
 import { IncomeReportService } from './income-report.service';
 import { OverviewReportService } from './overview-report.service';
 import { RegistrationsReportService } from './registrations-report.service';
+import {
+  attendanceCsv,
+  discountsCsv,
+  eventsCsv,
+  incomeCsv,
+  registrationsCsv,
+  transactionsCsv,
+  type CsvTable,
+} from './reports-csv';
 import {
   toAttendanceReport,
   toDiscountsReport,
@@ -160,4 +171,116 @@ export class ReportsController {
     const view = await this.attendance.load(auth.organizationId, query);
     return toAttendanceReport(view);
   }
+
+  /* ── the same reports, as files (US-RPT-11) ──────────────────────────── */
+
+  /**
+   * Every export takes the SAME filter as the report it mirrors and is built
+   * from the same view, so the file holds exactly the rows on screen — which
+   * is the story's requirement, and is true by construction rather than by two
+   * code paths being kept in step.
+   *
+   * Paging is deliberately dropped: an export is the whole filtered set, not
+   * the twenty rows that happened to be visible.
+   */
+  @Get('registrations.csv')
+  @RequirePermissions(Permission.regView)
+  @SkipResponseEnvelope()
+  @Header('Content-Type', CSV_MIME)
+  @Header('Content-Disposition', 'attachment; filename="registrations.csv"')
+  async registrationsCsv(
+    @CurrentAuth() auth: AuthContext,
+    @Query() query: ReportFilterQueryDto,
+  ): Promise<string> {
+    const view = await this.registrations.load(
+      auth.organizationId,
+      whole(query),
+    );
+    return file(registrationsCsv(view));
+  }
+
+  @Get('attendance.csv')
+  @RequirePermissions(Permission.regView)
+  @SkipResponseEnvelope()
+  @Header('Content-Type', CSV_MIME)
+  @Header('Content-Disposition', 'attachment; filename="attendance.csv"')
+  async attendanceCsv(
+    @CurrentAuth() auth: AuthContext,
+    @Query() query: ReportFilterQueryDto,
+  ): Promise<string> {
+    const view = await this.attendance.load(auth.organizationId, whole(query));
+    return file(attendanceCsv(view));
+  }
+
+  @Get('events.csv')
+  @RequirePermissions(Permission.regView)
+  @SkipResponseEnvelope()
+  @Header('Content-Type', CSV_MIME)
+  @Header('Content-Disposition', 'attachment; filename="events.csv"')
+  async eventsCsv(
+    @CurrentAuth() auth: AuthContext,
+    @Query() query: EventsReportQueryDto,
+  ): Promise<string> {
+    const view = await this.events.load(auth, whole(query));
+    return file(eventsCsv(view));
+  }
+
+  @Get('income.csv')
+  @RequirePermissions(Permission.finView)
+  @SkipResponseEnvelope()
+  @Header('Content-Type', CSV_MIME)
+  @Header('Content-Disposition', 'attachment; filename="income.csv"')
+  async incomeCsv(
+    @CurrentAuth() auth: AuthContext,
+    @Query() query: ReportFilterQueryDto,
+  ): Promise<string> {
+    const view = await this.income.load(auth.organizationId, whole(query));
+    return file(incomeCsv(view));
+  }
+
+  @Get('discounts.csv')
+  @RequirePermissions(Permission.finView)
+  @SkipResponseEnvelope()
+  @Header('Content-Type', CSV_MIME)
+  @Header('Content-Disposition', 'attachment; filename="discounts.csv"')
+  async discountsCsv(
+    @CurrentAuth() auth: AuthContext,
+    @Query() query: ReportFilterQueryDto,
+  ): Promise<string> {
+    const view = await this.discounts.load(auth.organizationId, whole(query));
+    return file(discountsCsv(view));
+  }
+
+  @Get('transactions.csv')
+  @RequirePermissions(Permission.finView)
+  @SkipResponseEnvelope()
+  @Header('Content-Type', CSV_MIME)
+  @Header('Content-Disposition', 'attachment; filename="transactions.csv"')
+  async transactionsCsv(
+    @CurrentAuth() auth: AuthContext,
+    @Query() query: ReportFilterQueryDto,
+  ): Promise<string> {
+    const view = await this.transactions.load(
+      auth.organizationId,
+      whole(query),
+    );
+    return file(transactionsCsv(view));
+  }
 }
+
+/** The whole filtered set, not the page that happened to be on screen. */
+function whole<T extends { page?: number; limit?: number }>(query: T): T {
+  return { ...query, page: 1, limit: EXPORT_LIMIT };
+}
+
+/**
+ * How many rows an export will carry.
+ *
+ * A ceiling rather than no limit at all: the story's "very large export"
+ * criterion asks for a prepared file and a notification, which is a separate
+ * slice — until then a report that would run to tens of thousands of rows is
+ * truncated rather than allowed to time out mid-download.
+ */
+const EXPORT_LIMIT = 5000;
+
+const file = (table: CsvTable) => toCsv(table.headers, table.rows);

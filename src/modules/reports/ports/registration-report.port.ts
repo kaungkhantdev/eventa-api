@@ -68,6 +68,18 @@ export interface RegistrationSplitPage {
   totals: RegistrationTotals;
 }
 
+/**
+ * One ticket type's share of the sign-ups (US-RPT-03).
+ *
+ * SEATS, not order lines — the same definition `confirmed` uses, so the donut's
+ * centre can show the overview's own registrations figure rather than a second
+ * number that nearly matches it.
+ */
+export interface TicketShare {
+  ticketTypeName: string;
+  seats: number;
+}
+
 export abstract class RegistrationReportPort {
   abstract splitByEvent(
     organizationId: number,
@@ -82,4 +94,10 @@ export abstract class RegistrationReportPort {
     organizationId: number,
     window: RegistrationWindow,
   ): Promise<RegistrationTotals>;
+
+  /** The split by ticket type, largest first (US-RPT-03). */
+  abstract ticketMix(
+    organizationId: number,
+    window: RegistrationWindow,
+  ): Promise<TicketShare[]>;
 }

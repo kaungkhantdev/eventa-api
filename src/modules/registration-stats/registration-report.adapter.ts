@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, gte, ilike, isNull, lt, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
-import { events, orders } from '../../db/schema';
+import { events, orderItems, orders, ticketTypes } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
 import {
   RegistrationReportPort,
@@ -9,6 +9,7 @@ import {
   type RegistrationSplitQuery,
   type RegistrationTotals,
   type RegistrationWindow,
+  type TicketShare,
 } from '../reports/ports/registration-report.port';
 
 /**
@@ -88,6 +89,36 @@ export class RegistrationReportAdapter extends RegistrationReportPort {
         .innerJoin(events, eq(events.id, orders.eventId))
         .where(this.matching(organizationId, window));
       return toTotals(summary);
+    });
+  }
+
+  /**
+   * The split by ticket type (US-RPT-03).
+   *
+   * Sums SEATS rather than counting order lines, so the donut's centre is the
+   * same registrations figure the tile above it shows. Confirmed orders only,
+   * for the same reason every other report counts them.
+   */
+  async ticketMix(
+    organizationId: number,
+    window: RegistrationWindow,
+  ): Promise<TicketShare[]> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const seats = sql<number>`coalesce(sum(${orderItems.quantity}), 0)::int`;
+      return tx
+        .select({ ticketTypeName: ticketTypes.name, seats })
+        .from(orders)
+        .innerJoin(orderItems, eq(orderItems.orderId, orders.id))
+        .innerJoin(ticketTypes, eq(ticketTypes.id, orderItems.ticketTypeId))
+        .innerJoin(events, eq(events.id, orders.eventId))
+        .where(
+          and(
+            this.matching(organizationId, window),
+            eq(orders.status, 'confirmed'),
+          ),
+        )
+        .groupBy(ticketTypes.name)
+        .orderBy(desc(seats));
     });
   }
 
