@@ -142,3 +142,46 @@ export const messageTemplates = pgTable(
     index('ix_message_templates_org').on(t.organizationId),
   ],
 );
+
+/**
+ * One broadcast an organizer sent to an event's attendees (US-MSG-04).
+ *
+ * A RECORD of a send, not a queue. The sending is already done by the outbox
+ * event written in the same transaction — this row exists so the organizer can
+ * see what they have sent, which is the one thing the broadcast path could not
+ * answer. Row and outbox event live or die together: an announcement listed but
+ * never sent, and one sent but never listed, are both wrong.
+ *
+ * `recipientCount` is the attendee count AT THE MOMENT IT WAS QUEUED. eventa-worker
+ * resolves the real recipients when it sends, so this is what the organizer was
+ * told they were writing to, not a delivery receipt. Proving delivery is
+ * US-MSG-06 and needs a per-recipient table this one deliberately is not.
+ *
+ * There is no schedule column and no audience column. Nothing in the product
+ * can send later, and the broadcast path takes one event's confirmed attendees
+ * — a column for either would be a promise the send path cannot keep.
+ */
+export const announcements = pgTable(
+  'announcements',
+  {
+    id: idPk(),
+    organizationId: bigint({ mode: 'number' })
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    /** The event whose attendees were written to. */
+    eventId: uuid().notNull(),
+    subject: text().notNull(),
+    body: text().notNull(),
+    /** How many attendees it was queued for — see the note above. */
+    recipientCount: bigint({ mode: 'number' }).notNull(),
+    /** Who sent it. Kept when they leave: the send still happened. */
+    sentByUserId: uuid().references(() => users.id, { onDelete: 'set null' }),
+    sentAt: timestamp({ withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('ix_announcements_org_sent').on(t.organizationId, t.sentAt),
+    index('ix_announcements_event').on(t.organizationId, t.eventId),
+  ],
+);
