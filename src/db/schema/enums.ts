@@ -85,6 +85,30 @@ export const messageChannelEnum = pgEnum('message_channel', ['email', 'sms']);
  */
 export const deliveryStatusEnum = pgEnum('delivery_status', ['sent', 'failed']);
 
+/**
+ * Where a survey is in its life (US-MSG-09).
+ *
+ * `draft` collects nothing — it exists so a survey can be written before it is
+ * exposed to anybody. `closed` is reversible: reopening is an explicit action,
+ * because an organizer who closed one early should not have to rebuild it.
+ */
+export const surveyStatusEnum = pgEnum('survey_status', [
+  'draft',
+  'live',
+  'closed',
+]);
+
+/**
+ * What a survey question asks for (US-MSG-09). `choice` is the only one that
+ * carries options, and it is invalid with fewer than two of them — a choice
+ * between one thing is not a choice.
+ */
+export const surveyQuestionTypeEnum = pgEnum('survey_question_type', [
+  'rating',
+  'text',
+  'choice',
+]);
+
 export const notificationKindEnum = pgEnum('notification_kind', [
   'registration',
   'payment',

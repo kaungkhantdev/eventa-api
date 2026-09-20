@@ -48,6 +48,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { MessageTemplatesModule } from './modules/message-templates/message-templates.module';
 import { AnnouncementsModule } from './modules/announcements/announcements.module';
 import { MessageDeliveriesModule } from './modules/message-deliveries/message-deliveries.module';
+import { SurveysModule } from './modules/surveys/surveys.module';
 import { PayoutsModule } from './modules/payouts/payouts.module';
 import { TaxPeriodsModule } from './modules/tax-periods/tax-periods.module';
 import { DiscoverModule } from './modules/discover/discover.module';
@@ -124,6 +125,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     MessageTemplatesModule,
     AnnouncementsModule,
     MessageDeliveriesModule,
+    SurveysModule,
     PayoutsModule,
     ReportsModule,
   ],
