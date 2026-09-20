@@ -73,6 +73,18 @@ export const apiKeyStatusEnum = pgEnum('api_key_status', ['active', 'revoked']);
 /** How an automated message reaches its recipient (E7). */
 export const messageChannelEnum = pgEnum('message_channel', ['email', 'sms']);
 
+/**
+ * What became of one outbound message (US-MSG-06).
+ *
+ * Two values, and deliberately not four. `sent` means the transport accepted
+ * it; `failed` means it threw. Whether it reached an inbox, and whether anyone
+ * opened it, are facts only a provider webhook and a tracking pixel can supply
+ * — neither exists in this product, so `delivered` and `opened` would be
+ * guesses dressed as evidence. Enum values are add-only: they can join the day
+ * something actually knows.
+ */
+export const deliveryStatusEnum = pgEnum('delivery_status', ['sent', 'failed']);
+
 export const notificationKindEnum = pgEnum('notification_kind', [
   'registration',
   'payment',

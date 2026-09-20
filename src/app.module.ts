@@ -47,6 +47,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { MessageTemplatesModule } from './modules/message-templates/message-templates.module';
 import { AnnouncementsModule } from './modules/announcements/announcements.module';
+import { MessageDeliveriesModule } from './modules/message-deliveries/message-deliveries.module';
 import { PayoutsModule } from './modules/payouts/payouts.module';
 import { TaxPeriodsModule } from './modules/tax-periods/tax-periods.module';
 import { DiscoverModule } from './modules/discover/discover.module';
@@ -122,6 +123,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     NotificationsModule,
     MessageTemplatesModule,
     AnnouncementsModule,
+    MessageDeliveriesModule,
     PayoutsModule,
     ReportsModule,
   ],

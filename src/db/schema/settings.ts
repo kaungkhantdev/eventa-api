@@ -11,6 +11,7 @@ import {
 import { createdAt, idPk, updatedAt } from './_columns';
 import {
   apiKeyStatusEnum,
+  deliveryStatusEnum,
   messageChannelEnum,
   notificationKindEnum,
 } from './enums';
@@ -183,5 +184,49 @@ export const announcements = pgTable(
   (t) => [
     index('ix_announcements_org_sent').on(t.organizationId, t.sentAt),
     index('ix_announcements_event').on(t.organizationId, t.eventId),
+  ],
+);
+
+/**
+ * One outbound message and what became of it (US-MSG-06).
+ *
+ * Written by eventa-worker as it sends, one row per RECIPIENT — a broadcast to
+ * 1,340 attendees is 1,340 rows, which is the point: "prove it was sent and
+ * diagnose the failures" is a question about individuals, and a per-message
+ * summary cannot answer which address bounced.
+ *
+ * `status` is what the transport said, and nothing more. There is no
+ * `delivered` and no `opened`: those need a provider webhook and a tracking
+ * pixel, and this product has neither.
+ *
+ * `kind` is the catalog slug for an automated message (`registration-
+ * confirmation`) or `announcement` for a broadcast. Deliberately free text
+ * rather than an enum — the worker is the one that knows what it just sent,
+ * and a new message type should not need a migration in another repo before it
+ * can be logged.
+ */
+export const messageDeliveries = pgTable(
+  'message_deliveries',
+  {
+    id: idPk(),
+    organizationId: bigint({ mode: 'number' })
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    /** The event it was about, where there is one. */
+    eventId: uuid(),
+    kind: text().notNull(),
+    channel: messageChannelEnum().notNull().default('email'),
+    recipientEmail: text().notNull(),
+    /** Null where the send had only an address to go on. */
+    recipientName: text(),
+    status: deliveryStatusEnum().notNull(),
+    /** Why it failed, for diagnosing. Null on a successful send. */
+    error: text(),
+    sentAt: timestamp({ withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('ix_message_deliveries_org_sent').on(t.organizationId, t.sentAt),
+    index('ix_message_deliveries_org_status').on(t.organizationId, t.status),
   ],
 );
