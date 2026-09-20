@@ -4,6 +4,7 @@ import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { messageTemplates } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
 import type { MessageTemplateDefinition } from './message-template-catalog';
+import type { Wording } from './wording-rules';
 
 export type MessageTemplateRow = typeof messageTemplates.$inferSelect;
 
@@ -28,6 +29,42 @@ export class MessageTemplatesRepository {
     );
   }
 
+  /**
+   * Save the organizer's own wording (US-MSG-02).
+   *
+   * Blank is stored as NULL, not as an empty string: the worker treats an
+   * absent value as "use Eventa's own copy", and an empty string would send a
+   * message with no subject rather than falling back.
+   */
+  async setWording(
+    organizationId: number,
+    definition: MessageTemplateDefinition,
+    wording: Wording,
+  ): Promise<void> {
+    const columns = {
+      emailSubjectEn: blankToNull(wording.en.subject),
+      emailBodyEn: blankToNull(wording.en.body),
+      emailSubjectTh: blankToNull(wording.th.subject),
+      emailBodyTh: blankToNull(wording.th.body),
+    };
+    await withTenant(this.db, organizationId, async (tx) => {
+      await tx
+        .insert(messageTemplates)
+        .values({
+          organizationId,
+          slug: definition.slug,
+          title: definition.title,
+          description: definition.description,
+          channels: definition.channels,
+          ...columns,
+        })
+        .onConflictDoUpdate({
+          target: [messageTemplates.organizationId, messageTemplates.slug],
+          set: { ...columns, updatedAt: new Date() },
+        });
+    });
+  }
+
   async setActive(
     organizationId: number,
     definition: MessageTemplateDefinition,
@@ -50,4 +87,8 @@ export class MessageTemplatesRepository {
         });
     });
   }
+}
+
+function blankToNull(value: string): string | null {
+  return value.trim() || null;
 }

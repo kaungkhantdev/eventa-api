@@ -41,6 +41,13 @@ interface Success<T> {
 }
 interface Template {
   slug: string;
+  tags: string[];
+  wording: {
+    subjectEn: string | null;
+    bodyEn: string | null;
+    subjectTh: string | null;
+    bodyTh: string | null;
+  };
   title: string;
   description: string;
   channels: string[];
@@ -185,6 +192,85 @@ describe('Message templates (e2e — US-MSG-01)', () => {
       await setActive(adminJwt, CONFIRMATION, { active: false }).expect(200);
       const theirs = await list(otherJwt).expect(200);
       expect(find(theirs.body, CONFIRMATION).active).toBe(true);
+    });
+  });
+
+  describe('the organizer’s own wording (US-MSG-02)', () => {
+    const wording = (jwt: string, slug: string, body: unknown) =>
+      request(server)
+        .patch(`/api/v1/message-templates/${slug}/wording`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send(body);
+
+    const EN = { subject: 'You’re in, {{first_name}}', body: 'See you at {{event_name}}.' };
+    const BLANK = { subject: '', body: '' };
+
+    it('saves it, and answers with it', async () => {
+      const res = await wording(adminJwt, CONFIRMATION, {
+        en: EN,
+        th: BLANK,
+      }).expect(200);
+
+      expect(find(res.body, CONFIRMATION).wording).toEqual({
+        subjectEn: 'You’re in, {{first_name}}',
+        bodyEn: 'See you at {{event_name}}.',
+        subjectTh: null,
+        bodyTh: null,
+      });
+    });
+
+    it('stores an emptied field as NULL, so the worker falls back', async () => {
+      // An empty string would send a message with no subject rather than
+      // Eventa's own copy.
+      await wording(adminJwt, CONFIRMATION, { en: EN, th: BLANK }).expect(200);
+      await wording(adminJwt, CONFIRMATION, { en: BLANK, th: BLANK }).expect(
+        200,
+      );
+
+      const row = await pool.query<{ email_subject_en: string | null }>(
+        `SELECT email_subject_en FROM message_templates
+         WHERE organization_id = $1 AND slug = $2`,
+        [orgId, CONFIRMATION],
+      );
+      expect(row.rows[0].email_subject_en).toBeNull();
+    });
+
+    it('refuses a half-written language, and says which', async () => {
+      const res = await wording(adminJwt, CONFIRMATION, {
+        en: { subject: 'Hello', body: '' },
+        th: BLANK,
+      }).expect(422);
+      expect(JSON.stringify(res.body)).toMatch(/English/);
+    });
+
+    it('refuses a merge field this message cannot fill', async () => {
+      const res = await wording(adminJwt, CONFIRMATION, {
+        en: { subject: 'Hi', body: 'See you at {{venue}}' },
+        th: BLANK,
+      }).expect(422);
+      expect(JSON.stringify(res.body)).toMatch(/venue/);
+    });
+
+    it('refuses wording for a message nothing sends yet', async () => {
+      // Text that will never reach anybody is a draft with nowhere to go.
+      await wording(adminJwt, 'payment-receipt', {
+        en: EN,
+        th: BLANK,
+      }).expect(422);
+    });
+
+    it('offers the fields each message can actually fill', async () => {
+      const res = await list(adminJwt).expect(200);
+      expect(find(res.body, CONFIRMATION).tags).toEqual([
+        '{{first_name}}',
+        '{{event_name}}',
+      ]);
+      // Nothing sends this one, so there is nothing to fill it with.
+      expect(find(res.body, 'payment-receipt').tags).toEqual([]);
+    });
+
+    it('refuses a member without the settings permission', async () => {
+      await wording(staffJwt, CONFIRMATION, { en: EN, th: BLANK }).expect(403);
     });
   });
 

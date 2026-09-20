@@ -9,6 +9,7 @@ import {
   type TemplateDelivery,
 } from './message-template-catalog';
 import { MessageTemplatesRepository } from './message-templates.repository';
+import { assertWording, type Wording } from './wording-rules';
 
 /** A message with this workspace's decision folded in. */
 export interface MessageTemplateView {
@@ -19,6 +20,18 @@ export interface MessageTemplateView {
   delivery: TemplateDelivery;
   expected: boolean;
   active: boolean;
+  /** Merge fields this message can fill. Empty for one nothing sends. */
+  tags: string[];
+  /**
+   * The organizer's own wording, where they have written any. A null means
+   * Eventa's built-in copy is used — NOT that the message has no subject.
+   */
+  wording: {
+    subjectEn: string | null;
+    bodyEn: string | null;
+    subjectTh: string | null;
+    bodyTh: string | null;
+  };
 }
 
 /** No row stored means the message is on — see the catalog's note. */
@@ -41,10 +54,38 @@ export class MessageTemplatesService {
     const stored = new Map(rows.map((row) => [row.slug, row]));
     // Driven by the CATALOG, not by the rows: a slug that has left the catalog
     // must not resurrect itself as a card nobody can explain.
-    return MESSAGE_TEMPLATE_CATALOG.map((definition) => ({
-      ...view(definition),
-      active: stored.get(definition.slug)?.active ?? DEFAULT_ACTIVE,
-    }));
+    return MESSAGE_TEMPLATE_CATALOG.map((definition) => {
+      const row = stored.get(definition.slug);
+      return {
+        ...view(definition),
+        active: row?.active ?? DEFAULT_ACTIVE,
+        wording: {
+          subjectEn: row?.emailSubjectEn ?? null,
+          bodyEn: row?.emailBodyEn ?? null,
+          subjectTh: row?.emailSubjectTh ?? null,
+          bodyTh: row?.emailBodyTh ?? null,
+        },
+      };
+    });
+  }
+
+  /**
+   * Save an organizer's own wording (US-MSG-02).
+   *
+   * Refused for a message nothing sends, for the same reason its switch is:
+   * text that will never reach anybody is not wording, it is a draft with
+   * nowhere to go.
+   */
+  async setWording(
+    auth: AuthContext,
+    slug: string,
+    wording: Wording,
+  ): Promise<MessageTemplateView[]> {
+    const definition = assertKnown(slug);
+    assertSwitchable(definition);
+    assertWording(wording, definition.tags);
+    await this.repo.setWording(auth.organizationId, definition, wording);
+    return this.list(auth);
   }
 
   async setActive(
@@ -68,6 +109,13 @@ function view(definition: MessageTemplateDefinition): MessageTemplateView {
     delivery: definition.delivery,
     expected: definition.expected,
     active: DEFAULT_ACTIVE,
+    tags: definition.tags,
+    wording: {
+      subjectEn: null,
+      bodyEn: null,
+      subjectTh: null,
+      bodyTh: null,
+    },
   };
 }
 

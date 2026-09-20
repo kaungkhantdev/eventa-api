@@ -13,6 +13,7 @@ import { ApiList } from '../../common/http/api-data.decorator';
 import type { AuthContext } from '../auth/auth.types';
 import { MessageTemplateDto } from './dto/message-template.dto';
 import { SetTemplateActiveDto } from './dto/set-template-active.dto';
+import { SetWordingDto } from './dto/set-wording.dto';
 import {
   MessageTemplatesService,
   type MessageTemplateView,
@@ -42,6 +43,21 @@ export class MessageTemplatesController {
   @ApiList(MessageTemplateDto)
   list(@CurrentAuth() auth: AuthContext): Promise<MessageTemplateView[]> {
     return this.templates.list(auth);
+  }
+
+  /**
+   * The organizer's own wording (US-MSG-02). A language left empty falls back
+   * to Eventa's built-in copy rather than sending a blank.
+   */
+  @Patch(':slug/wording')
+  @ResponseMessage('Wording saved.')
+  @ApiList(MessageTemplateDto)
+  setWording(
+    @CurrentAuth() auth: AuthContext,
+    @Param('slug') slug: string,
+    @Body() dto: SetWordingDto,
+  ): Promise<MessageTemplateView[]> {
+    return this.templates.setWording(auth, slug, dto);
   }
 
   @Patch(':slug')

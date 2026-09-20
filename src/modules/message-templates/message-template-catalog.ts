@@ -32,6 +32,18 @@ export interface MessageTemplateDefinition {
    * rather than keeping its own copy of the list.
    */
   expected: boolean;
+  /**
+   * Merge fields this message can actually fill (US-MSG-02).
+   *
+   * These must agree with what eventa-worker substitutes for this slug — see
+   * `mergeFieldsFor` in its `confirmation-email.ts` / `event-cancelled.handler`.
+   * A field listed here that the worker does not fill would validate and then
+   * reach an attendee as literal braces; one the worker fills but that is not
+   * listed would be refused on save. Keep the two lists together.
+   *
+   * Empty for a message nothing sends: there is nothing to fill it with.
+   */
+  tags: string[];
 }
 
 /**
@@ -60,6 +72,7 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     channels: ['email'],
     delivery: 'controlled',
     expected: true,
+    tags: ['{{first_name}}', '{{event_name}}'],
   },
   {
     slug: 'cancellation-notice',
@@ -69,6 +82,7 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     channels: ['email'],
     delivery: 'controlled',
     expected: true,
+    tags: ['{{first_name}}', '{{event_name}}', '{{reason}}'],
   },
   {
     slug: 'payment-receipt',
@@ -77,6 +91,7 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     channels: ['email'],
     delivery: 'planned',
     expected: true,
+    tags: [],
   },
   {
     slug: 'event-reminder',
@@ -86,6 +101,7 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     channels: ['email'],
     delivery: 'planned',
     expected: false,
+    tags: [],
   },
   {
     slug: 'waitlist-offer',
@@ -95,6 +111,7 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     channels: ['email'],
     delivery: 'planned',
     expected: false,
+    tags: [],
   },
   {
     slug: 'post-event-thankyou',
@@ -103,6 +120,7 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     channels: ['email'],
     delivery: 'planned',
     expected: false,
+    tags: [],
   },
 ];
 
