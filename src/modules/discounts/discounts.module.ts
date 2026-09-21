@@ -1,3 +1,5 @@
+import { DiscountReportPort } from '../reports/ports/discount-report.port';
+import { DiscountReportAdapter } from './discount-report.adapter';
 import { Module } from '@nestjs/common';
 import { AccessModule } from '../access/access.module';
 import { EventsModule } from '../events/events.module';
@@ -28,6 +30,9 @@ import { DiscountsService } from './discounts.service';
   imports: [EventsModule, TicketingModule, AccessModule],
   controllers: [DiscountsController],
   providers: [
+    // Promotion payback for Reports (US-RPT-10), bound here because only this
+    // module knows what a redemption is.
+    { provide: DiscountReportPort, useClass: DiscountReportAdapter },
     DiscountsService,
     DiscountsQueryService,
     DiscountRedemptionService,
@@ -35,6 +40,6 @@ import { DiscountsService } from './discounts.service';
     DiscountsPolicy,
     DiscountCodeGenerator,
   ],
-  exports: [DiscountRedemptionService],
+  exports: [DiscountRedemptionService, DiscountReportPort],
 })
 export class DiscountsModule {}

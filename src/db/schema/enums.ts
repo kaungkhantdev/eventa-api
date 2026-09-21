@@ -73,6 +73,42 @@ export const apiKeyStatusEnum = pgEnum('api_key_status', ['active', 'revoked']);
 /** How an automated message reaches its recipient (E7). */
 export const messageChannelEnum = pgEnum('message_channel', ['email', 'sms']);
 
+/**
+ * What became of one outbound message (US-MSG-06).
+ *
+ * Two values, and deliberately not four. `sent` means the transport accepted
+ * it; `failed` means it threw. Whether it reached an inbox, and whether anyone
+ * opened it, are facts only a provider webhook and a tracking pixel can supply
+ * — neither exists in this product, so `delivered` and `opened` would be
+ * guesses dressed as evidence. Enum values are add-only: they can join the day
+ * something actually knows.
+ */
+export const deliveryStatusEnum = pgEnum('delivery_status', ['sent', 'failed']);
+
+/**
+ * Where a survey is in its life (US-MSG-09).
+ *
+ * `draft` collects nothing — it exists so a survey can be written before it is
+ * exposed to anybody. `closed` is reversible: reopening is an explicit action,
+ * because an organizer who closed one early should not have to rebuild it.
+ */
+export const surveyStatusEnum = pgEnum('survey_status', [
+  'draft',
+  'live',
+  'closed',
+]);
+
+/**
+ * What a survey question asks for (US-MSG-09). `choice` is the only one that
+ * carries options, and it is invalid with fewer than two of them — a choice
+ * between one thing is not a choice.
+ */
+export const surveyQuestionTypeEnum = pgEnum('survey_question_type', [
+  'rating',
+  'text',
+  'choice',
+]);
+
 export const notificationKindEnum = pgEnum('notification_kind', [
   'registration',
   'payment',

@@ -37,6 +37,11 @@ const PERM_GROUP: Record<string, string> = {
 interface Success<T> {
   data: T;
 }
+interface Change {
+  direction: 'up' | 'down' | 'flat';
+  percent: number | null;
+  improved: boolean | null;
+}
 interface Split {
   confirmed: number;
   pending: number;
@@ -54,6 +59,7 @@ interface Report {
   period: { from: string; to: string; days: number; trimmed: boolean };
   rows: Row[];
   totals: Split;
+  changes: Record<keyof Split, Change>;
 }
 interface Money {
   grossSatang: number;
@@ -74,6 +80,10 @@ interface AttendanceRow {
 }
 interface AttendanceReport {
   rows: AttendanceRow[];
+  changes: Record<
+    'checkedIn' | 'noShows' | 'attendanceRate' | 'onTimeRate',
+    Change
+  >;
   totals: {
     checkedIn: number;
     noShows: number | null;
@@ -85,11 +95,7 @@ interface IncomeReport {
   period: { from: string; to: string; days: number; trimmed: boolean };
   rows: (Money & { eventId: string; eventName: string })[];
   totals: Money;
-}
-interface Change {
-  direction: 'up' | 'down' | 'flat';
-  percent: number | null;
-  improved: boolean | null;
+  changes: Record<keyof Money, Change>;
 }
 interface Kpi {
   value: number | null;
@@ -110,6 +116,7 @@ interface Overview {
     change: Change;
     points: { at: string; netSatang: number }[];
   } | null;
+  ticketMix: { ticketTypeName: string; seats: number; percent: number }[];
 }
 
 describe('Reports (e2e — US-RPT)', () => {
@@ -127,6 +134,7 @@ describe('Reports (e2e — US-RPT)', () => {
   let otherJwt: string;
   let seq = 0;
   const temporaryEvents: string[] = [];
+  const temporaryCodes: string[] = [];
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -177,6 +185,15 @@ describe('Reports (e2e — US-RPT)', () => {
       `DELETE FROM ticket_types WHERE organization_id = ANY($1) AND name LIKE 'Tier %'`,
       [[orgId, otherOrgId]],
     );
+    if (temporaryCodes.length) {
+      await pool.query(
+        `DELETE FROM discount_redemptions WHERE discount_code_id = ANY($1)`,
+        [temporaryCodes],
+      );
+      await pool.query(`DELETE FROM discount_codes WHERE id = ANY($1)`, [
+        temporaryCodes.splice(0),
+      ]);
+    }
     if (temporaryEvents.length) {
       await pool.query(`DELETE FROM events WHERE id = ANY($1)`, [
         temporaryEvents.splice(0),
@@ -232,6 +249,10 @@ describe('Reports (e2e — US-RPT)', () => {
     refundSatang?: number;
     /** Seats on the order the payment settled — the average price's divisor. */
     seats?: number;
+    /** Who paid, for the ledger's search and its person column. */
+    payer?: string;
+    /** `paid` unless a case needs a failure or a charge still in flight. */
+    status?: 'paid' | 'pending' | 'failed';
     at?: string;
   }): Promise<void> {
     seq += 1;
@@ -256,8 +277,10 @@ describe('Reports (e2e — US-RPT)', () => {
     const orderId = order.rows[0].id;
     const payment = await pool.query<{ id: string }>(
       `INSERT INTO payments (organization_id, txn, order_id, event_id, payer_name, method,
-                             amount_satang, fee_amount_satang, status, paid_at, idempotency_key)
-       VALUES ($1,$2,$3,$4,'Anan','Card',$5,$6,'paid', ${at}, $7)
+                             amount_satang, fee_amount_satang, status, paid_at, created_at,
+                             idempotency_key)
+       VALUES ($1,$2,$3,$4,$8,'Card',$5,$6,$9::payment_status,
+               ${(o.status ?? 'paid') === 'paid' ? at : 'NULL'}, ${at}, $7)
        RETURNING id`,
       [
         org,
@@ -267,6 +290,8 @@ describe('Reports (e2e — US-RPT)', () => {
         o.amountSatang,
         o.feeSatang ?? 0,
         `idem-rpt-${seq}`,
+        o.payer ?? 'Anan',
+        o.status ?? 'paid',
       ],
     );
     if (o.refundSatang) {
@@ -281,15 +306,29 @@ describe('Reports (e2e — US-RPT)', () => {
   }
 
   /** An event starting at an offset from now, for the started/not-started rule. */
-  async function seedEventAt(slug: string, name: string, startsIn: string) {
+  async function seedEventAt(
+    slug: string,
+    name: string,
+    startsIn: string,
+    over: { status?: string; runsFor?: string; venue?: string | null } = {},
+  ) {
     const res = await pool.query<{ id: string }>(
       `INSERT INTO events (organization_id, slug, name, type, bucket, status, visibility,
                            start_at, end_at, timezone, organizer_name, venue_name, city, published_at)
-       VALUES ($1,$2,$3,'Conference','active','live','public',
-               now() + ($4)::interval, now() + ($4)::interval + interval '8 hours',
-               'Asia/Bangkok','Acme','QSNCC','Bangkok', now())
+       VALUES ($1,$2,$3,'Conference','active',$5::event_status,'public',
+               now() + ($4)::interval,
+               now() + ($4)::interval + ($6)::interval,
+               'Asia/Bangkok','Acme',$7,'Bangkok', now())
        RETURNING id`,
-      [orgId, slug, name, startsIn],
+      [
+        orgId,
+        slug,
+        name,
+        startsIn,
+        over.status ?? 'live',
+        over.runsFor ?? '8 hours',
+        over.venue === undefined ? 'QSNCC' : over.venue,
+      ],
     );
     temporaryEvents.push(res.rows[0].id);
     return res.rows[0].id;
@@ -757,6 +796,78 @@ describe('Reports (e2e — US-RPT)', () => {
     });
   });
 
+  describe('tiles against the previous period (US-RPT-02)', () => {
+    it('compares registrations with the window before this one', async () => {
+      await seedOrder({ seats: 2, at: `now() - interval '40 days'` });
+      await seedOrder({ seats: 4, at: 'now()' });
+
+      const r = report(await get(adminJwt, '?range=30d').expect(200));
+      expect(r.totals.confirmed).toBe(4);
+      expect(r.changes.confirmed).toMatchObject({
+        direction: 'up',
+        percent: 100,
+        improved: true,
+      });
+    });
+
+    it('reads fewer cancellations as an improvement', async () => {
+      await seedOrder({
+        status: 'cancelled',
+        seats: 4,
+        at: `now() - interval '40 days'`,
+      });
+      await seedOrder({ status: 'cancelled', seats: 1, at: 'now()' });
+
+      const r = report(await get(adminJwt, '?range=30d').expect(200));
+      expect(r.changes.cancelled).toMatchObject({
+        direction: 'down',
+        improved: true,
+      });
+    });
+
+    it('compares income with the window before this one', async () => {
+      await seedPayment({
+        amountSatang: 5_000,
+        at: `now() - interval '40 days'`,
+      });
+      await seedPayment({ amountSatang: 10_000, at: 'now()' });
+
+      const i = income(await getIncome(adminJwt, '?range=30d').expect(200));
+      expect(i.changes.grossSatang).toMatchObject({
+        direction: 'up',
+        percent: 100,
+        improved: true,
+      });
+    });
+
+    it('passes no verdict on VAT', async () => {
+      await seedPayment({
+        amountSatang: 10_000,
+        vatSatang: 700,
+        at: `now() - interval '40 days'`,
+      });
+      await seedPayment({ amountSatang: 20_000, vatSatang: 1_400 });
+
+      const i = income(await getIncome(adminJwt, '?range=30d').expect(200));
+      expect(i.changes.vatSatang.direction).toBe('up');
+      expect(i.changes.vatSatang.improved).toBeNull();
+    });
+
+    it('claims no attendance change where nothing ran before', async () => {
+      const past = await seedEventAt('rpt-cmp', 'Compared Summit', '-2 days');
+      await seedTicket({ event: past, checkedIn: 'onTime' });
+
+      const a = attendance(
+        await getAttendance(adminJwt, '?q=Compared').expect(200),
+      );
+      expect(a.changes.attendanceRate).toEqual({
+        direction: 'flat',
+        percent: null,
+        improved: null,
+      });
+    });
+  });
+
   describe('overview (US-RPT-01)', () => {
     it('reports the same revenue as the income report’s net', async () => {
       // The story's own note, proven across two modules and one database rather
@@ -887,6 +998,28 @@ describe('Reports (e2e — US-RPT)', () => {
       expect(view.kpis.attendanceRate.value).toBeCloseTo(66.7, 1);
     });
 
+    describe('the ticket-type mix (US-RPT-03)', () => {
+      it('splits the sign-ups by ticket type, largest first', async () => {
+        const past = await seedEventAt('rpt-mix', 'Mix Event', '-2 days');
+        await seedTicket({ event: past, checkedIn: false });
+        await seedTicket({ event: past, checkedIn: false });
+
+        const mix = overview(
+          await getOverview(adminJwt, spanningWindow()).expect(200),
+        ).ticketMix;
+        expect(mix.length).toBeGreaterThan(0);
+        // Every seedTicket makes its own tier, so the shares must still total
+        // the whole however they are split.
+        const total = mix.reduce((sum, slice) => sum + slice.percent, 0);
+        expect(total).toBeCloseTo(100, 0);
+      });
+
+      it('gives an empty mix when nothing was sold', async () => {
+        const mix = overview(await getOverview(adminJwt).expect(200)).ticketMix;
+        expect(mix).toEqual([]);
+      });
+    });
+
     it('narrows every tile to one event, not just the chart', async () => {
       await seedPayment({ event: summitId, amountSatang: 30_000 });
       await seedPayment({ event: galaId, amountSatang: 70_000 });
@@ -935,6 +1068,753 @@ describe('Reports (e2e — US-RPT)', () => {
 
     it('refuses a backwards window like every other report', async () => {
       await getOverview(adminJwt, '?from=2026-07-07&to=2026-07-01').expect(422);
+    });
+  });
+
+  interface EventRow {
+    eventId: string;
+    eventName: string;
+    venue: string | null;
+    lifecycle: 'upcoming' | 'live' | 'completed' | 'cancelled';
+    registrations: number;
+    revenueSatang: number | null;
+    attendanceRate: number | null;
+  }
+  interface EventsReport {
+    rows: EventRow[];
+    matchedEvents: number;
+  }
+
+  const getEvents = (jwt: string, query = '') =>
+    request(server)
+      .get(`/api/v1/reports/events${query}`)
+      .set('Authorization', `Bearer ${jwt}`);
+
+  const performance = (res: { body: unknown }) =>
+    (res.body as Success<EventsReport>).data;
+
+  describe('event performance (US-RPT-04)', () => {
+    /** Every stage of the lifecycle at once, so one call can check them all. */
+    async function seedEveryStage() {
+      return {
+        past: await seedEventAt('rpt-ep-past', 'Already Ran', '-2 days'),
+        live: await seedEventAt('rpt-ep-live', 'Running Now', '-1 hour'),
+        soon: await seedEventAt('rpt-ep-soon', 'Still To Come', '5 days'),
+        off: await seedEventAt('rpt-ep-off', 'Called Off', '3 days', {
+          status: 'cancelled',
+        }),
+      };
+    }
+
+    describe('the lifecycle', () => {
+      it('works the stage out from the clock, not from events.status', async () => {
+        // Every one of these rows is stored `live`; nothing in the API or the
+        // worker ever advances that column, so reading it would badge the lot
+        // identically.
+        await seedEveryStage();
+        const rows = performance(
+          await getEvents(adminJwt, `${spanningWindow()}&q=`).expect(200),
+        ).rows;
+        const stageOf = (name: string) =>
+          rows.find((r) => r.eventName === name)?.lifecycle;
+
+        expect(stageOf('Already Ran')).toBe('completed');
+        expect(stageOf('Running Now')).toBe('live');
+        expect(stageOf('Still To Come')).toBe('upcoming');
+      });
+
+      it('lets a cancellation beat the clock', async () => {
+        // It starts in three days, so the clock would say "upcoming" — but it
+        // was called off, and that was written deliberately.
+        await seedEveryStage();
+        const row = performance(
+          await getEvents(adminJwt, `${spanningWindow()}&q=Called`).expect(200),
+        ).rows[0];
+        expect(row.lifecycle).toBe('cancelled');
+      });
+
+      it('treats an event with no end time as running for a day', async () => {
+        await seedEventAt('rpt-ep-open', 'Open Ended', '-2 hours', {
+          runsFor: '0 seconds',
+        });
+        await pool.query(
+          `UPDATE events SET end_at = NULL WHERE slug = 'rpt-ep-open'`,
+        );
+        const row = performance(
+          await getEvents(adminJwt, `${spanningWindow()}&q=Open+Ended`).expect(
+            200,
+          ),
+        ).rows[0];
+        expect(row.lifecycle).toBe('live');
+      });
+
+      it('narrows to one stage', async () => {
+        await seedEveryStage();
+        const report = performance(
+          await getEvents(
+            adminJwt,
+            `${spanningWindow()}&status=upcoming`,
+          ).expect(200),
+        );
+        const names = report.rows.map((r) => r.eventName);
+        expect(names).toContain('Still To Come');
+        expect(names).not.toContain('Already Ran');
+        expect(names).not.toContain('Called Off');
+        // Asserted as a rule rather than a row count: the workspace's two
+        // fixture events are upcoming too, and counting them in would make this
+        // test about the fixtures instead of about the filter.
+        expect(report.rows.every((r) => r.lifecycle === 'upcoming')).toBe(true);
+        expect(report.matchedEvents).toBe(report.rows.length);
+      });
+    });
+
+    describe('the ranking', () => {
+      it('lists an event nobody signed up for, last rather than not at all', async () => {
+        // The reason this report is driven from `events`: every other per-event
+        // report starts at a fact table and cannot see one.
+        const busy = await seedEventAt('rpt-ep-busy', 'Busy One', '-2 days');
+        await seedEventAt('rpt-ep-quiet', 'Quiet One', '-2 days');
+        await seedOrder({ event: busy, seats: 5 });
+
+        const rows = performance(
+          await getEvents(adminJwt, spanningWindow()).expect(200),
+        ).rows;
+        // The workspace holds other events too; what matters is that the one
+        // with sign-ups leads and the one without is still present.
+        expect(rows[0].eventName).toBe('Busy One');
+        expect(rows[0].registrations).toBe(5);
+        const quiet = rows.find((r) => r.eventName === 'Quiet One');
+        expect(quiet?.registrations).toBe(0);
+      });
+
+      it('counts registrations as confirmed seats', async () => {
+        const one = await seedEventAt(
+          'rpt-ep-seats',
+          'Seat Counter',
+          '-2 days',
+        );
+        await seedOrder({ event: one, seats: 4, status: 'confirmed' });
+        await seedOrder({ event: one, seats: 3, status: 'cancelled' });
+
+        const row = performance(
+          await getEvents(adminJwt, `${spanningWindow()}&q=Seat`).expect(200),
+        ).rows[0];
+        expect(row.registrations).toBe(4);
+      });
+
+      it('leaves drafts out — an unpublished event has no performance', async () => {
+        await seedEventAt('rpt-ep-draft', 'Never Published', '-2 days', {
+          status: 'draft',
+        });
+        const report = performance(
+          await getEvents(adminJwt, spanningWindow()).expect(200),
+        );
+        expect(report.rows.map((r) => r.eventName)).not.toContain(
+          'Never Published',
+        );
+      });
+    });
+
+    describe('what each row carries', () => {
+      it('attaches the event’s takings, all time rather than re-windowed', async () => {
+        // The tickets sold long before the event runs; windowing the money on
+        // `paid_at` again would report it as having earned nothing.
+        const one = await seedEventAt('rpt-ep-rev', 'Earner', '-2 days');
+        await seedPayment({
+          event: one,
+          amountSatang: 107_000,
+          vatSatang: 7_000,
+          refundSatang: 10_000,
+          at: `now() - interval '200 days'`,
+        });
+
+        const row = performance(
+          await getEvents(adminJwt, `${spanningWindow()}&q=Earner`).expect(200),
+        ).rows[0];
+        expect(row.revenueSatang).toBe(90_000);
+      });
+
+      it('reports ฿0 for an event that has taken nothing', async () => {
+        await seedEventAt('rpt-ep-free', 'Free Event', '-2 days');
+        const row = performance(
+          await getEvents(adminJwt, `${spanningWindow()}&q=Free`).expect(200),
+        ).rows[0];
+        expect(row.revenueSatang).toBe(0);
+      });
+
+      it('rates attendance over the tickets issued', async () => {
+        const one = await seedEventAt('rpt-ep-att', 'Door Count', '-2 days');
+        await seedTicket({ event: one, checkedIn: 'onTime' });
+        await seedTicket({ event: one, checkedIn: 'onTime' });
+        await seedTicket({ event: one, checkedIn: false });
+
+        const row = performance(
+          await getEvents(adminJwt, `${spanningWindow()}&q=Door`).expect(200),
+        ).rows[0];
+        expect(row.attendanceRate).toBe(67);
+      });
+
+      it('reports no attendance for an event that has not happened', async () => {
+        const soon = await seedEventAt('rpt-ep-nya', 'Not Yet Run', '5 days');
+        await seedTicket({ event: soon, checkedIn: false });
+
+        const row = performance(
+          await getEvents(adminJwt, `${spanningWindow()}&q=Not+Yet`).expect(
+            200,
+          ),
+        ).rows[0];
+        expect(row.attendanceRate).toBeNull();
+      });
+
+      it('says Online where an event has no venue', async () => {
+        await seedEventAt('rpt-ep-web', 'Webinar', '-2 days', { venue: null });
+        await pool.query(
+          `UPDATE events SET is_online = true WHERE slug = 'rpt-ep-web'`,
+        );
+        const row = performance(
+          await getEvents(adminJwt, `${spanningWindow()}&q=Webinar`).expect(
+            200,
+          ),
+        ).rows[0];
+        expect(row.venue).toBe('Online');
+      });
+    });
+
+    interface DiscountRow {
+      code: string;
+      standing: 'active' | 'scheduled' | 'expired' | 'disabled';
+      terms: string | null;
+      fixedValueSatang: number | null;
+      scope: string;
+      redemptions: number;
+      discountSatang: number;
+      influencedSatang: number;
+      returnRatio: number | null;
+    }
+    interface DiscountsReport {
+      rows: DiscountRow[];
+      matchedCodes: number;
+      totals: {
+        activeCodes: number;
+        redemptions: number;
+        discountSatang: number;
+        influencedSatang: number;
+        returnRatio: number | null;
+      };
+    }
+
+    const getDiscounts = (jwt: string, query = '') =>
+      request(server)
+        .get(`/api/v1/reports/discounts${query}`)
+        .set('Authorization', `Bearer ${jwt}`);
+
+    const payback = (res: { body: unknown }) =>
+      (res.body as Success<DiscountsReport>).data;
+
+    interface LedgerRow {
+      id: string;
+      kind: 'payment' | 'refund';
+      reference: string;
+      personName: string;
+      method: string;
+      amountSatang: number;
+      outcome: 'succeeded' | 'pending' | 'refunded' | 'failed';
+      paymentId: string;
+    }
+    interface LedgerReport {
+      rows: LedgerRow[];
+      matchedEntries: number;
+      totals: {
+        entries: number;
+        payments: number;
+        failed: number;
+        refunds: number;
+        collectedSatang: number;
+        refundedSatang: number;
+        successRate: number | null;
+      };
+    }
+
+    const getLedger = (jwt: string, query = '') =>
+      request(server)
+        .get(`/api/v1/reports/transactions${query}`)
+        .set('Authorization', `Bearer ${jwt}`);
+
+    const ledger = (res: { body: unknown }) =>
+      (res.body as Success<LedgerReport>).data;
+
+    describe('transaction ledger (US-RPT-06)', () => {
+      it('lists a refund as its own row, beside the payment it reverses', async () => {
+        // The story by name: the refund is a new entry and the original amount
+        // is never rewritten.
+        await seedPayment({ amountSatang: 125_000, refundSatang: 125_000 });
+
+        const rows = ledger(await getLedger(adminJwt).expect(200)).rows;
+        const payment = rows.find((r) => r.kind === 'payment')!;
+        const refund = rows.find((r) => r.kind === 'refund')!;
+
+        expect(payment.amountSatang).toBe(125_000);
+        // Positive on the wire; the minus sign is the screen's job.
+        expect(refund.amountSatang).toBe(125_000);
+        expect(refund.paymentId).toBe(payment.paymentId);
+      });
+
+      it('derives a readable reference for a refund from its parent', async () => {
+        await seedPayment({ amountSatang: 50_000, refundSatang: 20_000 });
+
+        const rows = ledger(await getLedger(adminJwt).expect(200)).rows;
+        const payment = rows.find((r) => r.kind === 'payment')!;
+        const refund = rows.find((r) => r.kind === 'refund')!;
+        expect(refund.reference).toBe(`${payment.reference}-R1`);
+      });
+
+      it('numbers a second refund on the same payment', async () => {
+        await seedPayment({ amountSatang: 60_000, refundSatang: 20_000 });
+        await pool.query(
+          `INSERT INTO refunds (organization_id, payment_id, order_id, amount_satang, status,
+                              issued_by, idempotency_key, issued_at)
+         SELECT organization_id, id, order_id, 10000, 'succeeded',
+                (SELECT id FROM users WHERE organization_id = $1 LIMIT 1),
+                'ref-led-second', now() + interval '1 minute'
+         FROM payments WHERE organization_id = $1 LIMIT 1`,
+          [orgId],
+        );
+
+        const refs = ledger(await getLedger(adminJwt).expect(200))
+          .rows.filter((r) => r.kind === 'refund')
+          .map((r) => r.reference)
+          .sort();
+        expect(refs.some((r) => r.endsWith('-R1'))).toBe(true);
+        expect(refs.some((r) => r.endsWith('-R2'))).toBe(true);
+      });
+
+      it('marks a failed charge and keeps its money out of the takings', async () => {
+        await seedPayment({ amountSatang: 90_000, status: 'failed' });
+        await seedPayment({ amountSatang: 10_000 });
+
+        const t = ledger(await getLedger(adminJwt).expect(200)).totals;
+        expect(t.failed).toBe(1);
+        expect(t.payments).toBe(1);
+        // The failure is in the rate's denominator but not in the money.
+        expect(t.collectedSatang).toBe(10_000);
+        expect(t.successRate).toBe(50);
+      });
+
+      it('reports no success rate for a window holding only refunds', async () => {
+        // Nothing was attempted, so there is no rate — 0% would read as
+        // "everything failed".
+        const t = ledger(await getLedger(adminJwt).expect(200)).totals;
+        expect(t.entries).toBe(0);
+        expect(t.successRate).toBeNull();
+      });
+
+      it('names the method the schema knows, never a card brand', async () => {
+        // PCI SAQ-A: no brand is stored and none is coming.
+        await seedPayment({ amountSatang: 10_000 });
+        const row = ledger(await getLedger(adminJwt).expect(200)).rows[0];
+        expect(row.method).toBe('Card');
+      });
+
+      it('searches on the payer and on the reference', async () => {
+        await seedPayment({ amountSatang: 10_000, payer: 'Ploy Srisai' });
+        await seedPayment({ amountSatang: 20_000, payer: 'Somchai Wong' });
+
+        const byName = ledger(await getLedger(adminJwt, '?q=Ploy').expect(200));
+        expect(byName.rows).toHaveLength(1);
+        expect(byName.rows[0].personName).toBe('Ploy Srisai');
+
+        const reference = byName.rows[0].reference;
+        const byRef = ledger(
+          await getLedger(adminJwt, `?q=${reference}`).expect(200),
+        );
+        expect(byRef.rows).toHaveLength(1);
+      });
+
+      it('pages the entries while the tiles stay whole', async () => {
+        await seedPayment({ amountSatang: 10_000 });
+        await seedPayment({ amountSatang: 20_000 });
+
+        const page = ledger(
+          await getLedger(adminJwt, '?page=1&limit=1').expect(200),
+        );
+        expect(page.rows).toHaveLength(1);
+        expect(page.totals.entries).toBe(2);
+        expect(page.matchedEntries).toBe(2);
+      });
+
+      it('is finance-only: registration access is not enough', async () => {
+        await getLedger(staffJwt).expect(403);
+        await getLedger(adminJwt).expect(200);
+      });
+
+      it('never shows another workspace’s transactions', async () => {
+        await seedPayment({
+          org: otherOrgId,
+          event: otherEventId,
+          amountSatang: 99_000,
+        });
+        await seedPayment({ org: orgId, amountSatang: 1_000 });
+
+        const rows = ledger(await getLedger(adminJwt).expect(200)).rows;
+        expect(rows).toHaveLength(1);
+        expect(rows[0].amountSatang).toBe(1_000);
+      });
+    });
+
+    describe('discount payback (US-RPT-10)', () => {
+      /** A code, with whatever terms and validity the case needs. */
+      async function seedCode(o: {
+        code: string;
+        type?: 'percent' | 'fixed';
+        value?: number;
+        event?: string | null;
+        validFrom?: string;
+        validUntil?: string;
+        status?: string;
+      }): Promise<string> {
+        const res = await pool.query<{ id: string }>(
+          `INSERT INTO discount_codes (organization_id, event_id, code, type, value, status,
+                                     valid_from, valid_until)
+         VALUES ($1,$2,$3,$4::discount_type,$5,$6::discount_status,
+                 ${o.validFrom ?? 'NULL'}, ${o.validUntil ?? 'NULL'})
+         RETURNING id`,
+          [
+            orgId,
+            o.event === undefined ? summitId : o.event,
+            o.code,
+            o.type ?? 'percent',
+            o.value ?? 25,
+            o.status ?? 'active',
+          ],
+        );
+        temporaryCodes.push(res.rows[0].id);
+        return res.rows[0].id;
+      }
+
+      /** A redemption of `code` on a fresh order of `totalSatang`. */
+      async function seedRedemption(o: {
+        code: string;
+        amountSatang: number;
+        totalSatang: number;
+        event?: string;
+        orderStatus?: string;
+      }): Promise<void> {
+        seq += 1;
+        const order = await pool.query<{ id: string }>(
+          `INSERT INTO orders (organization_id, reference, event_id, buyer_name, buyer_email,
+                             status, payment_status, seats, subtotal_satang,
+                             vat_amount_satang, total_satang, discount_amount_satang)
+         VALUES ($1,$2,$3,'Anan','anan@rpt.test',$4,'paid',1,$5,0,$5,$6)
+         RETURNING id`,
+          [
+            orgId,
+            `ORD-DSC-${seq}`,
+            o.event ?? summitId,
+            o.orderStatus ?? 'confirmed',
+            o.totalSatang,
+            o.amountSatang,
+          ],
+        );
+        await pool.query(
+          `INSERT INTO discount_redemptions (organization_id, discount_code_id, order_id,
+                                           buyer_email, amount_satang)
+         VALUES ($1,$2,$3,'anan@rpt.test',$4)`,
+          [orgId, o.code, order.rows[0].id, o.amountSatang],
+        );
+      }
+
+      describe('a code’s payback', () => {
+        it('counts redemptions, what was given away, and what it drove', async () => {
+          const code = await seedCode({ code: 'EARLYBIRD' });
+          await seedRedemption({
+            code,
+            amountSatang: 20_000,
+            totalSatang: 80_000,
+          });
+          await seedRedemption({
+            code,
+            amountSatang: 20_000,
+            totalSatang: 80_000,
+          });
+
+          const row = payback(
+            await getDiscounts(adminJwt, '?q=EARLY').expect(200),
+          ).rows[0];
+          expect(row.redemptions).toBe(2);
+          expect(row.discountSatang).toBe(40_000);
+          expect(row.influencedSatang).toBe(160_000);
+          // Four Baht of orders for every Baht let off.
+          expect(row.returnRatio).toBe(4);
+        });
+
+        it('ignores a redemption on an order that was never confirmed', async () => {
+          // An abandoned checkout is not payback, and counting it would credit
+          // the promotion with a sale that never happened.
+          const code = await seedCode({ code: 'ABANDONED' });
+          await seedRedemption({
+            code,
+            amountSatang: 20_000,
+            totalSatang: 80_000,
+            orderStatus: 'pending',
+          });
+
+          const row = payback(
+            await getDiscounts(adminJwt, '?q=ABANDON').expect(200),
+          ).rows[0];
+          expect(row.redemptions).toBe(0);
+          expect(row.influencedSatang).toBe(0);
+        });
+
+        it('lists a code nobody has used, reading zero', async () => {
+          // The story by name: a scheduled code reads zero rather than vanishing.
+          // Needs a forward-looking window — the named ranges all end today, so
+          // a campaign that starts next week is outside them by definition, the
+          // same way an unstarted event is outside the attendance report.
+          await seedCode({
+            code: 'AUTUMN15',
+            validFrom: `now() + interval '10 days'`,
+          });
+
+          const row = payback(
+            await getDiscounts(adminJwt, `${spanningWindow()}&q=AUTUMN`).expect(
+              200,
+            ),
+          ).rows[0];
+          expect(row.standing).toBe('scheduled');
+          expect(row.redemptions).toBe(0);
+          // No ratio, rather than a zero that would read as "paid back nothing".
+          expect(row.returnRatio).toBeNull();
+        });
+
+        it('leaves out a campaign that starts beyond the window', async () => {
+          // The flip side of the case above, asserted so the window is doing
+          // the work rather than the test happening to pass.
+          await seedCode({
+            code: 'NEXTYEAR',
+            validFrom: `now() + interval '90 days'`,
+          });
+          const report = payback(
+            await getDiscounts(adminJwt, '?range=30d').expect(200),
+          );
+          expect(report.rows.map((r) => r.code)).not.toContain('NEXTYEAR');
+        });
+
+        it('describes a percentage code by its percentage', async () => {
+          await seedCode({ code: 'QUARTER', type: 'percent', value: 25 });
+          const row = payback(
+            await getDiscounts(adminJwt, '?q=QUARTER').expect(200),
+          ).rows[0];
+          expect(row.terms).toBe('25% off');
+          expect(row.fixedValueSatang).toBeNull();
+        });
+
+        it('leaves a fixed code’s amount as satang for the edge to format', async () => {
+          await seedCode({ code: 'FLAT200', type: 'fixed', value: 20_000 });
+          const row = payback(
+            await getDiscounts(adminJwt, '?q=FLAT').expect(200),
+          ).rows[0];
+          expect(row.fixedValueSatang).toBe(20_000);
+          expect(row.terms).toBeNull();
+        });
+
+        it('says which event a code is scoped to, or all of them', async () => {
+          await seedCode({ code: 'SCOPED' });
+          await seedCode({ code: 'GLOBAL', event: null });
+
+          const rows = payback(await getDiscounts(adminJwt).expect(200)).rows;
+          expect(rows.find((r) => r.code === 'SCOPED')?.scope).toBe(
+            'Tech Summit 2026',
+          );
+          expect(rows.find((r) => r.code === 'GLOBAL')?.scope).toBe(
+            'All events',
+          );
+        });
+      });
+
+      describe('the standing', () => {
+        it('works it out from the dates, not from the stored status', async () => {
+          // `status` is only settled as a side effect of listing codes on another
+          // screen; a report must not depend on somebody having visited one.
+          await seedCode({
+            code: 'STALE',
+            status: 'active',
+            validUntil: `now() - interval '2 days'`,
+          });
+          const row = payback(
+            await getDiscounts(adminJwt, '?q=STALE').expect(200),
+          ).rows[0];
+          expect(row.standing).toBe('expired');
+        });
+
+        it('lets a deliberate disable beat the dates', async () => {
+          await seedCode({ code: 'SWITCHEDOFF', status: 'disabled' });
+          const row = payback(
+            await getDiscounts(adminJwt, '?q=SWITCHED').expect(200),
+          ).rows[0];
+          expect(row.standing).toBe('disabled');
+        });
+      });
+
+      describe('the tiles', () => {
+        it('counts active codes without counting the scheduled ones', async () => {
+          await seedCode({ code: 'LIVEONE' });
+          await seedCode({
+            code: 'LATERONE',
+            validFrom: `now() + interval '10 days'`,
+          });
+
+          const totals = payback(
+            await getDiscounts(adminJwt).expect(200),
+          ).totals;
+          expect(totals.activeCodes).toBe(1);
+        });
+
+        it('sums the payback over the whole filter', async () => {
+          const one = await seedCode({ code: 'SUMONE' });
+          const two = await seedCode({ code: 'SUMTWO' });
+          await seedRedemption({
+            code: one,
+            amountSatang: 10_000,
+            totalSatang: 50_000,
+          });
+          await seedRedemption({
+            code: two,
+            amountSatang: 10_000,
+            totalSatang: 30_000,
+          });
+
+          const totals = payback(
+            await getDiscounts(adminJwt).expect(200),
+          ).totals;
+          expect(totals.redemptions).toBe(2);
+          expect(totals.discountSatang).toBe(20_000);
+          expect(totals.influencedSatang).toBe(80_000);
+          expect(totals.returnRatio).toBe(4);
+        });
+
+        it('answers a filter matching nothing with zeros, not an error', async () => {
+          const report = payback(
+            await getDiscounts(adminJwt, '?q=no-such-code').expect(200),
+          );
+          expect(report.rows).toEqual([]);
+          expect(report.totals.returnRatio).toBeNull();
+        });
+      });
+
+      describe('exporting a report (US-RPT-11)', () => {
+        const download = (jwt: string, path: string, query = '') =>
+          request(server)
+            .get(`/api/v1/reports/${path}${query}`)
+            .set('Authorization', `Bearer ${jwt}`);
+
+        it('sends a file rather than the API envelope', async () => {
+          await seedOrder({ seats: 3 });
+          const res = await download(adminJwt, 'registrations.csv').expect(200);
+
+          expect(res.headers['content-type']).toContain('csv');
+          expect(res.headers['content-disposition']).toContain(
+            'registrations.csv',
+          );
+          // A file, not `{ success, data }`.
+          expect(res.text).not.toContain('"success"');
+          expect(res.text.split('\n')[0]).toContain('Event');
+        });
+
+        it('opens with a byte-order mark so Thai reads in a spreadsheet', async () => {
+          await seedOrder({});
+          const res = await download(adminJwt, 'registrations.csv').expect(200);
+          expect(res.text.charCodeAt(0)).toBe(0xfeff);
+        });
+
+        it('holds exactly the rows the filter matched', async () => {
+          await seedOrder({ event: summitId, seats: 2 });
+          await seedOrder({ event: galaId, seats: 5 });
+
+          const all = await download(adminJwt, 'registrations.csv').expect(200);
+          const one = await download(
+            adminJwt,
+            'registrations.csv',
+            `?eventId=${galaId}`,
+          ).expect(200);
+
+          // Header plus one row per event, and a trailing newline.
+          expect(all.text.trim().split('\n')).toHaveLength(3);
+          expect(one.text.trim().split('\n')).toHaveLength(2);
+          expect(one.text).toContain('Charity Gala');
+          expect(one.text).not.toContain('Tech Summit');
+        });
+
+        it('ignores paging — an export is the whole set', async () => {
+          await seedOrder({ event: summitId });
+          await seedOrder({ event: galaId });
+
+          const res = await download(
+            adminJwt,
+            'registrations.csv',
+            '?page=1&limit=1',
+          ).expect(200);
+          expect(res.text.trim().split('\n')).toHaveLength(3);
+        });
+
+        it('writes money as a number a spreadsheet can add up', async () => {
+          await seedPayment({ amountSatang: 107_000, vatSatang: 7_000 });
+          const res = await download(adminJwt, 'income.csv').expect(200);
+          expect(res.text).toContain('1070.00');
+        });
+
+        it('keeps each export behind the same gate as its report', async () => {
+          // Finance files stay finance-only (US-RPT-12).
+          await download(staffJwt, 'income.csv').expect(403);
+          await download(staffJwt, 'transactions.csv').expect(403);
+          await download(staffJwt, 'discounts.csv').expect(403);
+          // The staff-visible ones still answer.
+          await download(staffJwt, 'registrations.csv').expect(200);
+          await download(staffJwt, 'attendance.csv').expect(200);
+          await download(staffJwt, 'events.csv').expect(200);
+        });
+
+        it('refuses a backwards window, like the report it mirrors', async () => {
+          await download(
+            adminJwt,
+            'registrations.csv',
+            '?from=2026-07-07&to=2026-07-01',
+          ).expect(422);
+        });
+      });
+
+      describe('who may read it (US-RPT-12)', () => {
+        it('is finance-only: registration access is not enough', async () => {
+          await getDiscounts(staffJwt).expect(403);
+          await getDiscounts(adminJwt).expect(200);
+        });
+      });
+    });
+
+    describe('who may read it (US-RPT-12)', () => {
+      it('gives staff the ranking with the money withheld, not a 403', async () => {
+        const one = await seedEventAt('rpt-ep-staff', 'Staff View', '-2 days');
+        await seedOrder({ event: one, seats: 2 });
+        await seedPayment({ event: one, amountSatang: 50_000 });
+
+        const row = performance(
+          await getEvents(staffJwt, `${spanningWindow()}&q=Staff`).expect(200),
+        ).rows[0];
+        // Three seats, not two: `seedPayment` brings its own confirmed order.
+        expect(row.registrations).toBe(3);
+        // Null, never 0 — "you may not see this" is not "it earned nothing".
+        expect(row.revenueSatang).toBeNull();
+      });
+
+      it('refuses an admin user without registration access', async () => {
+        await getEvents(outsiderJwt).expect(403);
+      });
+
+      it('never ranks another workspace’s events', async () => {
+        const rows = performance(
+          await getEvents(adminJwt, spanningWindow()).expect(200),
+        ).rows;
+        expect(rows.map((r) => r.eventId)).not.toContain(otherEventId);
+      });
     });
   });
 
@@ -1034,6 +1914,8 @@ async function cleanup(pool: Pool): Promise<void> {
   for (const table of [
     'audit_events',
     'outbox_events',
+    'discount_redemptions',
+    'discount_codes',
     'refunds',
     'payments',
     'check_ins',

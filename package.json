@@ -22,7 +22,8 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand"
+    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
+    "check:openapi": "nest build -p tsconfig.openapi.json && node scripts/check-openapi.cjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1102.0",

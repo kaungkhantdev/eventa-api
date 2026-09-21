@@ -1,3 +1,4 @@
+import { AnnouncementsModule } from '../announcements/announcements.module';
 import { Module } from '@nestjs/common';
 import { EventsModule } from '../events/events.module';
 import { AccessModule } from '../access/access.module';
@@ -15,6 +16,7 @@ import { EventMonitoringService } from './event-monitoring.service';
  */
 @Module({
   imports: [
+    AnnouncementsModule,
     EventsModule,
     AccessModule,
     PlatformModule,

@@ -4,6 +4,8 @@ import type {
   IncomeQuery,
   IncomeReportPort,
   IncomePage,
+  IncomeSummary,
+  IncomeWindow,
 } from './ports/income-report.port';
 
 /**
@@ -27,9 +29,28 @@ const money = {
   settledSatang: 87_000,
 };
 
-function portReturning(page: Partial<IncomePage> = {}) {
+const NO_MONEY = {
+  grossSatang: 0,
+  vatSatang: 0,
+  refundsSatang: 0,
+  feesSatang: 0,
+  netSatang: 0,
+  settledSatang: 0,
+  paidSeats: 0,
+};
+
+function portReturning(
+  page: Partial<IncomePage> = {},
+  before: Partial<IncomeSummary> = {},
+) {
   const asked: IncomeQuery[] = [];
+  const windows: IncomeWindow[] = [];
   const port: IncomeReportPort = {
+    incomeTotals: (_org: number, window: IncomeWindow) => {
+      windows.push(window);
+      return Promise.resolve({ ...NO_MONEY, ...before });
+    },
+    netByDay: () => Promise.resolve([]),
     incomeByEvent: (_org: number, query: IncomeQuery) => {
       asked.push(query);
       return Promise.resolve({
@@ -47,7 +68,7 @@ function portReturning(page: Partial<IncomePage> = {}) {
       });
     },
   };
-  return { port, asked };
+  return { port, asked, windows };
 }
 
 const serviceWith = (port: IncomeReportPort) =>
@@ -156,6 +177,49 @@ describe('IncomeReportService', () => {
       const view = await serviceWith(port).load(ORG, { eventId: 'nope' });
       expect(view.rows).toEqual([]);
       expect(view.totals.netSatang).toBe(0);
+    });
+  });
+
+  describe('against the previous period (US-RPT-02)', () => {
+    it('compares gross with the window immediately before this one', async () => {
+      const { port, windows } = portReturning({}, { grossSatang: 50_000 });
+      await serviceWith(port).load(ORG, {
+        from: '2026-07-08',
+        to: '2026-07-14',
+      });
+
+      expect(windows[0].from).toEqual(bkkMidnight('2026-07-01'));
+      expect(windows[0].to).toEqual(bkkMidnight('2026-07-08'));
+    });
+
+    it('reads more gross as an improvement', async () => {
+      const { port } = portReturning({}, { grossSatang: 53_500 });
+      expect(
+        (await serviceWith(port).load(ORG, {})).changes.grossSatang,
+      ).toMatchObject({ direction: 'up', improved: true });
+    });
+
+    it('reads FEWER refunds as an improvement', async () => {
+      const { port } = portReturning({}, { refundsSatang: 20_000 });
+      expect(
+        (await serviceWith(port).load(ORG, {})).changes.refundsSatang,
+      ).toMatchObject({ direction: 'down', improved: true });
+    });
+
+    it('reads higher fees as a warning', async () => {
+      const { port } = portReturning({}, { feesSatang: 1_000 });
+      expect(
+        (await serviceWith(port).load(ORG, {})).changes.feesSatang.improved,
+      ).toBe(false);
+    });
+
+    it('passes no verdict on VAT, whichever way it moved', async () => {
+      // It is the Revenue Department's money in both periods. Colouring it
+      // green would be claiming something about it that is not true.
+      const { port } = portReturning({}, { vatSatang: 1_000 });
+      const change = (await serviceWith(port).load(ORG, {})).changes.vatSatang;
+      expect(change.direction).toBe('up');
+      expect(change.improved).toBeNull();
     });
   });
 });

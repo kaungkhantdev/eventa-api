@@ -389,5 +389,16 @@ describe('Event Monitor — Overview / Registrations / Attendees (US-EVT-14, e2e
 });
 
 async function cleanup(pool: Pool): Promise<void> {
+  // `audit_events` does NOT cascade from organizations, and signing in writes
+  // one. Deleting the org alone therefore fails the moment this suite has run
+  // once — leaving its workspace behind and every later run failing in
+  // `beforeAll` — which is exactly what happened when a second e2e suite began
+  // running alongside it. Clear the referencing rows first, as the other
+  // suites do.
+  await pool.query(
+    `DELETE FROM audit_events WHERE organization_id IN
+       (SELECT id FROM organizations WHERE slug = $1)`,
+    [ORG.slug],
+  );
   await pool.query(`DELETE FROM organizations WHERE slug = $1`, [ORG.slug]);
 }

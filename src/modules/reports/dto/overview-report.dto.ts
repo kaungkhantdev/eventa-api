@@ -1,28 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { TREND_GRANULARITIES, type TrendGranularity } from '../revenue-trend';
-import { ReportPeriodDto } from './registrations-report.dto';
-
-/** How a figure moved against the previous equal period (US-RPT-01). */
-export class PeriodChangeDto {
-  @ApiProperty({ enum: ['up', 'down', 'flat'] })
-  direction!: 'up' | 'down' | 'flat';
-
-  @ApiProperty({
-    type: Number,
-    nullable: true,
-    description:
-      'Null where no honest percentage exists — a baseline of zero is “new”, not “+∞%”. Render “—”.',
-  })
-  percent!: number | null;
-
-  @ApiProperty({
-    type: Boolean,
-    nullable: true,
-    description:
-      'Whether the movement is GOOD for this metric — a falling refund rate is an improvement. Null when flat, or when nothing could be compared.',
-  })
-  improved!: boolean | null;
-}
+import { PeriodChangeDto, ReportPeriodDto } from './report-common.dto';
 
 export class OverviewKpiDto {
   @ApiProperty({
@@ -119,6 +97,22 @@ export class OverviewKpisDto {
   refundRate!: OverviewKpiDto | null;
 }
 
+/** One slice of the ticket-type donut (US-RPT-03). */
+export class TicketMixSliceDto {
+  @ApiProperty({ example: 'General Admission' }) ticketTypeName!: string;
+
+  @ApiProperty({
+    description: 'Seats sold of this type, confirmed orders only.',
+  })
+  seats!: number;
+
+  @ApiProperty({
+    description:
+      'Share of the MIX, to one decimal — the slices add up to the whole. Not a share of the registrations tile, which can also count a sign-up with no ticket type.',
+  })
+  percent!: number;
+}
+
 export class OverviewReportDto {
   @ApiProperty({ type: ReportPeriodDto })
   period!: ReportPeriodDto;
@@ -132,4 +126,11 @@ export class OverviewReportDto {
     description: 'Null without finance access: the panel is not shown at all.',
   })
   revenue!: RevenueTrendDto | null;
+
+  @ApiProperty({
+    type: [TicketMixSliceDto],
+    description:
+      'Largest share first. Empty when nothing was sold in the window — an empty donut, not a ring of zero-width slices.',
+  })
+  ticketMix!: TicketMixSliceDto[];
 }

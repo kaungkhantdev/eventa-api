@@ -1,12 +1,16 @@
 import { BANGKOK_OFFSET_MS, DAY_MS } from '../../common/time/bangkok';
 import type { AttendanceReportDto } from './dto/attendance-report.dto';
+import type { DiscountsReportDto } from './dto/discounts-report.dto';
+import type { TransactionsReportDto } from './dto/transactions-report.dto';
+import type { EventsReportDto } from './dto/events-report.dto';
 import type { IncomeReportDto } from './dto/income-report.dto';
 import type { OverviewReportDto } from './dto/overview-report.dto';
-import type {
-  RegistrationsReportDto,
-  ReportPeriodDto,
-} from './dto/registrations-report.dto';
+import type { RegistrationsReportDto } from './dto/registrations-report.dto';
+import type { ReportPeriodDto } from './dto/report-common.dto';
 import type { AttendanceReportView } from './attendance-report.service';
+import type { DiscountsReportView } from './discounts-report.service';
+import type { TransactionsReportView } from './transactions-report.service';
+import type { EventsReportView } from './events-report.service';
 import type { IncomeReportView } from './income-report.service';
 import type { OverviewReportView } from './overview-report.service';
 import type { RegistrationsReportView } from './registrations-report.service';
@@ -30,7 +34,9 @@ export function toRegistrationsReport(
       rejected: row.rejected,
       total: row.total,
     })),
+    matchedEvents: view.matchedEvents,
     totals: view.totals,
+    changes: view.changes,
   };
 }
 
@@ -49,7 +55,49 @@ export function toAttendanceReport(
       attendanceRate: row.attendanceRate,
       onTimeRate: row.onTimeRate,
     })),
+    matchedEvents: view.matchedEvents,
     totals: view.totals,
+    changes: view.changes,
+  };
+}
+
+export function toTransactionsReport(
+  view: TransactionsReportView,
+): TransactionsReportDto {
+  return {
+    period: toPeriod(view.period),
+    rows: view.rows.map((row) => ({ ...row, at: row.at.toISOString() })),
+    matchedEntries: view.matchedEntries,
+    totals: view.totals,
+  };
+}
+
+export function toDiscountsReport(
+  view: DiscountsReportView,
+): DiscountsReportDto {
+  return {
+    period: toPeriod(view.period),
+    rows: view.rows,
+    matchedCodes: view.matchedCodes,
+    totals: view.totals,
+  };
+}
+
+export function toEventsReport(view: EventsReportView): EventsReportDto {
+  return {
+    period: toPeriod(view.period),
+    rows: view.rows.map((row) => ({
+      eventId: row.eventId,
+      eventName: row.eventName,
+      startAt: row.startAt.toISOString(),
+      venue: row.venue,
+      city: row.city,
+      lifecycle: row.lifecycle,
+      registrations: row.registrations,
+      revenueSatang: row.revenueSatang,
+      attendanceRate: row.attendanceRate,
+    })),
+    matchedEvents: view.matchedEvents,
   };
 }
 
@@ -58,6 +106,7 @@ export function toOverviewReport(view: OverviewReportView): OverviewReportDto {
     period: toPeriod(view.period),
     kpis: view.kpis,
     revenue: view.revenue,
+    ticketMix: view.ticketMix,
   };
 }
 
@@ -75,7 +124,9 @@ export function toIncomeReport(view: IncomeReportView): IncomeReportDto {
       netSatang: row.netSatang,
       settledSatang: row.settledSatang,
     })),
+    matchedEvents: view.matchedEvents,
     totals: view.totals,
+    changes: view.changes,
   };
 }
 

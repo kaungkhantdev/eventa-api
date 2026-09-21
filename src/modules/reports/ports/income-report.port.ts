@@ -106,4 +106,25 @@ export abstract class IncomeReportPort {
     organizationId: number,
     window: IncomeWindow,
   ): Promise<NetRevenueDay[]>;
+
+  /**
+   * Net takings for a handful of named events, all time (US-RPT-04).
+   *
+   * Deliberately unwindowed. The event-performance report windows on when an
+   * event RUNS, and an event's revenue is its revenue — windowing the money
+   * again on `paid_at` would report a conference as having earned nothing
+   * because its tickets sold the month before.
+   *
+   * An event that took nothing is simply absent from the result.
+   */
+  abstract netByEvents(
+    organizationId: number,
+    eventIds: string[],
+  ): Promise<EventNet[]>;
+}
+
+/** One event's net takings. Integer satang. */
+export interface EventNet {
+  eventId: string;
+  netSatang: number;
 }

@@ -1,8 +1,12 @@
 import { Module } from '@nestjs/common';
 import { AccessModule } from '../access/access.module';
+import { DiscountsModule } from '../discounts/discounts.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { RegistrationStatsModule } from '../registration-stats/registration-stats.module';
 import { AttendanceReportService } from './attendance-report.service';
+import { DiscountsReportService } from './discounts-report.service';
+import { TransactionsReportService } from './transactions-report.service';
+import { EventsReportService } from './events-report.service';
 import { IncomeReportService } from './income-report.service';
 import { OverviewReportService } from './overview-report.service';
 import { RegistrationsReportService } from './registrations-report.service';
@@ -23,13 +27,21 @@ import { ReportsController } from './reports.controller';
 @Module({
   // AccessModule for PermissionsService, which `PermissionsGuard` on the
   // controller needs: US-RPT-12 gates every report on a permission.
-  imports: [AccessModule, PaymentsModule, RegistrationStatsModule],
+  imports: [
+    AccessModule,
+    DiscountsModule,
+    PaymentsModule,
+    RegistrationStatsModule,
+  ],
   controllers: [ReportsController],
   providers: [
     AttendanceReportService,
+    DiscountsReportService,
+    EventsReportService,
     IncomeReportService,
     OverviewReportService,
     RegistrationsReportService,
+    TransactionsReportService,
   ],
 })
 export class ReportsModule {}

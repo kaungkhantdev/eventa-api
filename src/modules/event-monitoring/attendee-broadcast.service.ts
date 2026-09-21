@@ -1,7 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Clock } from '../../common/time/clock';
-import { OutboxPort } from '../platform/outbox.port';
-import { attendeesEmailRequestedEvent } from '../events/events/attendees-email-requested.event';
+import { AnnouncementsService } from '../announcements/announcements.service';
 import { EventsService } from '../events/events.service';
 import type { EventActor } from '../events/events.types';
 import { EventStatsPort } from '../events/ports/event-stats.port';
@@ -9,17 +7,22 @@ import { BroadcastResultDto } from './dto/broadcast-result.dto';
 import type { EmailAttendeesDto } from './dto/email-attendees.dto';
 
 /**
- * "Email all attendees" (US-EVT-14) — the producer half. Validates the request and
- * writes an outbox broadcast event in the same request; the Engagement worker (E12)
- * resolves recipients and sends. Nothing is delivered synchronously here.
+ * "Email all attendees" (US-EVT-14) — the producer half. Validates the request,
+ * resolves how many attendees it is going to, and hands it to the announcements
+ * module, which writes the record and the outbox event in one transaction; the
+ * Engagement worker (E12) resolves recipients and sends. Nothing is delivered
+ * synchronously here.
+ *
+ * The record is what makes this answerable afterwards (US-MSG-04). Before it
+ * existed a broadcast reached hundreds of people and left nothing behind but an
+ * outbox row that the relay would consume.
  */
 @Injectable()
 export class AttendeeBroadcastService {
   constructor(
     private readonly events: EventsService,
     private readonly stats: EventStatsPort,
-    private readonly outbox: OutboxPort,
-    private readonly clock: Clock,
+    private readonly announcements: AnnouncementsService,
   ) {}
 
   async emailAll(
@@ -32,17 +35,13 @@ export class AttendeeBroadcastService {
       actor.organizationId,
       eventId,
     );
-    await this.outbox.enqueue(
-      attendeesEmailRequestedEvent({
-        organizationId: actor.organizationId,
-        eventId,
-        subject: input.subject,
-        message: input.message,
-        requestedByUserId: actor.userId,
-        recipientCount: recipients,
-        occurredAt: this.clock.now().toISOString(),
-      }),
-    );
+    await this.announcements.send(actor.organizationId, {
+      eventId,
+      subject: input.subject,
+      body: input.message,
+      recipientCount: recipients,
+      sentByUserId: actor.userId,
+    });
     return { eventId, recipients, queued: true };
   }
 }

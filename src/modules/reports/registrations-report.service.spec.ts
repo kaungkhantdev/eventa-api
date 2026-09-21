@@ -4,6 +4,8 @@ import type {
   RegistrationReportPort,
   RegistrationSplitPage,
   RegistrationSplitQuery,
+  RegistrationTotals,
+  RegistrationWindow,
 } from './ports/registration-report.port';
 
 /**
@@ -33,9 +35,26 @@ const row = (over: Partial<RegistrationSplitPage['rows'][number]> = {}) => ({
   ...over,
 });
 
-function portReturning(page: Partial<RegistrationSplitPage> = {}) {
+const NO_SPLIT = {
+  confirmed: 0,
+  pending: 0,
+  waitlisted: 0,
+  cancelled: 0,
+  rejected: 0,
+  total: 0,
+};
+
+function portReturning(
+  page: Partial<RegistrationSplitPage> = {},
+  before: Partial<RegistrationTotals> = {},
+) {
   const asked: RegistrationSplitQuery[] = [];
+  const windows: RegistrationWindow[] = [];
   const port: RegistrationReportPort = {
+    totalsFor: (_org: number, window: RegistrationWindow) => {
+      windows.push(window);
+      return Promise.resolve({ ...NO_SPLIT, ...before });
+    },
     splitByEvent: (_org: number, query: RegistrationSplitQuery) => {
       asked.push(query);
       return Promise.resolve({
@@ -53,7 +72,7 @@ function portReturning(page: Partial<RegistrationSplitPage> = {}) {
       });
     },
   };
-  return { port, asked };
+  return { port, asked, windows };
 }
 
 const serviceWith = (port: RegistrationReportPort) =>
@@ -159,6 +178,68 @@ describe('RegistrationsReportService', () => {
       const view = await serviceWith(port).load(ORG, { eventId: 'nope' });
       expect(view.rows).toEqual([]);
       expect(view.totals.total).toBe(0);
+    });
+  });
+
+  describe('against the previous period (US-RPT-02)', () => {
+    it('compares the tiles with the window immediately before this one', async () => {
+      const { port, windows } = portReturning(
+        {},
+        { confirmed: 200, total: 300 },
+      );
+      await serviceWith(port).load(ORG, {
+        from: '2026-07-08',
+        to: '2026-07-14',
+      });
+
+      expect(windows[0].from).toEqual(bkkMidnight('2026-07-01'));
+      expect(windows[0].to).toEqual(bkkMidnight('2026-07-08'));
+    });
+
+    it('reads more confirmed registrations as an improvement', async () => {
+      const { port } = portReturning({}, { confirmed: 200 });
+      const view = await serviceWith(port).load(ORG, {});
+      expect(view.changes.confirmed).toMatchObject({
+        direction: 'up',
+        percent: 100,
+        improved: true,
+      });
+    });
+
+    it('reads FEWER cancellations as an improvement', async () => {
+      // Down in sign, better in meaning: a cancellation is a registration lost.
+      const { port } = portReturning({}, { cancelled: 20 });
+      const view = await serviceWith(port).load(ORG, {});
+      expect(view.changes.cancelled).toMatchObject({
+        direction: 'down',
+        improved: true,
+      });
+    });
+
+    it('reads more rejections as a warning', async () => {
+      const { port } = portReturning({}, { rejected: 1 });
+      expect(
+        (await serviceWith(port).load(ORG, {})).changes.rejected.improved,
+      ).toBe(false);
+    });
+
+    it('claims no percentage against a period with nothing in it', async () => {
+      // 0 → 400 is "new", not "+40,000%".
+      const { port } = portReturning();
+      const view = await serviceWith(port).load(ORG, {});
+      expect(view.changes.confirmed).toMatchObject({
+        direction: 'up',
+        percent: null,
+      });
+    });
+
+    it('compares over the whole filter, not the page being shown', async () => {
+      const { port, windows } = portReturning({}, { total: 300 });
+      await serviceWith(port).load(ORG, { page: 3, limit: 5 });
+      // One previous-window call, unpaged: the tiles must not move as the
+      // reader pages through the rows beneath them.
+      expect(windows).toHaveLength(1);
+      expect(windows[0]).not.toHaveProperty('page');
     });
   });
 });

@@ -1,10 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, gte, ilike, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, ilike, inArray, lt, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { events, orders, payments, refunds } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
 import {
   IncomeReportPort,
+  type EventNet,
   type IncomePage,
   type IncomeQuery,
   type IncomeSummary,
@@ -138,6 +139,47 @@ export class IncomeReportAdapter extends IncomeReportPort {
 
       return rows.map((row) => ({
         day: row.day,
+        netSatang: Number(row.netSatang),
+      }));
+    });
+  }
+
+  /**
+   * Net takings for a handful of named events, all time (US-RPT-04).
+   *
+   * No window on `paid_at`: the event-performance report windows on when an
+   * event RUNS, and an event's revenue is its revenue — a conference whose
+   * tickets sold last month has not earned nothing.
+   *
+   * Same `net` expression as everywhere else in this adapter, so the figure
+   * beside an event here and the figure in the income report are the same one.
+   */
+  async netByEvents(
+    organizationId: number,
+    eventIds: string[],
+  ): Promise<EventNet[]> {
+    // An empty IN () is not valid SQL, and there is nothing to ask anyway.
+    if (eventIds.length === 0) return [];
+
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({
+          eventId: payments.eventId,
+          netSatang: this.money().netSatang,
+        })
+        .from(payments)
+        .innerJoin(orders, eq(orders.id, payments.orderId))
+        .where(
+          and(
+            eq(payments.organizationId, organizationId),
+            eq(payments.status, PAID),
+            inArray(payments.eventId, eventIds),
+          ),
+        )
+        .groupBy(payments.eventId);
+
+      return rows.map((row) => ({
+        eventId: row.eventId,
         netSatang: Number(row.netSatang),
       }));
     });
