@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { BANGKOK_TODAY_SQL } from './support/bangkok-day';
 import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
@@ -183,7 +184,7 @@ describe('Finance exports and role gating (e2e — US-FIN-13/14)', () => {
       const overdue = await seedOrder();
       const inv = (await issue(overdue)).body as Success<{ id: number }>;
       await pool.query(
-        `UPDATE invoices SET issued_at = current_date - 17, due_at = current_date - 3 WHERE id = $1`,
+        `UPDATE invoices SET issued_at = ${BANGKOK_TODAY_SQL} - 17, due_at = ${BANGKOK_TODAY_SQL} - 3 WHERE id = $1`,
         [inv.data.id],
       );
       await issue(await seedOrder()); // a second, still within its term

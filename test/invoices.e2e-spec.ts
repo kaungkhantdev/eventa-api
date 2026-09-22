@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { BANGKOK_TODAY_SQL } from './support/bangkok-day';
 import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
@@ -271,7 +272,7 @@ describe('Tax invoices (e2e — US-FIN-06/07/08/10)', () => {
       const id = (await issue(adminJwt, orderId)).body as Success<Invoice>;
       // Backdate it so its 14-day term ran out three days ago.
       await pool.query(
-        `UPDATE invoices SET issued_at = current_date - 17, due_at = current_date - 3 WHERE id = $1`,
+        `UPDATE invoices SET issued_at = ${BANGKOK_TODAY_SQL} - 17, due_at = ${BANGKOK_TODAY_SQL} - 3 WHERE id = $1`,
         [id.data.id],
       );
       const res = await list(adminJwt);
@@ -285,7 +286,7 @@ describe('Tax invoices (e2e — US-FIN-06/07/08/10)', () => {
         (await issue(adminJwt, await seedOrder())).body as Success<Invoice>
       ).data;
       await pool.query(
-        `UPDATE invoices SET due_at = current_date + 9 WHERE id = $1`,
+        `UPDATE invoices SET due_at = ${BANGKOK_TODAY_SQL} + 9 WHERE id = $1`,
         [id.id],
       );
       const [row] = ((await list(adminJwt)).body as Success<Invoice[]>).data;
