@@ -2,11 +2,13 @@ process.env.NODE_ENV = 'test';
 process.env.DATABASE_URL ??= 'postgres://eventa:eventa@localhost:5432/eventa';
 process.env.JWT_SECRET ??= 'test-secret-at-least-16-characters-long';
 
+import { readFileSync } from 'node:fs';
 import type { Server } from 'node:http';
+import { join } from 'node:path';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { hash } from '@node-rs/argon2';
-import { Pool } from 'pg';
+import { Pool, type PoolClient } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
@@ -326,6 +328,135 @@ describe('Message templates (e2e — US-MSG-01)', () => {
 
     it('refuses a member without the settings permission', async () => {
       await wording(staffJwt, CONFIRMATION, { en: EN, th: BLANK }).expect(403);
+    });
+  });
+
+  /**
+   * The row eventa-worker reads before it TEXTS somebody (US-DISC-06 AC5).
+   *
+   * `channels` is written once, on a row's first insert, and never updated —
+   * so it is a snapshot of the catalog as it stood the day a workspace first
+   * touched the message. Two things follow, and both are proved here: a row
+   * written today must carry the sms channel, and rows written before it
+   * existed must be backfilled, or a workspace that once reworded its
+   * confirmation would silently get no texts while its card showed an SMS
+   * badge.
+   */
+  describe('the channels eventa-worker reads (US-DISC-06)', () => {
+    const storedChannels = async (
+      org: number,
+      slug: string,
+    ): Promise<string[]> => {
+      // Cast to text[]: node-postgres hands back an enum array as the raw
+      // string '{email,sms}' rather than parsing it.
+      const row = await pool.query<{ channels: string[] }>(
+        `SELECT channels::text[] AS channels FROM message_templates
+          WHERE organization_id = $1 AND slug = $2`,
+        [org, slug],
+      );
+      return row.rows[0].channels;
+    };
+
+    it('writes the sms channel onto a row created today', async () => {
+      await setActive(adminJwt, CONFIRMATION, { active: false }).expect(200);
+      expect(await storedChannels(orgId, CONFIRMATION)).toEqual([
+        'email',
+        'sms',
+      ]);
+    });
+
+    it('leaves every other message on email alone', async () => {
+      await setActive(adminJwt, 'cancellation-notice', {
+        active: false,
+      }).expect(200);
+      expect(await storedChannels(orgId, 'cancellation-notice')).toEqual([
+        'email',
+      ]);
+    });
+
+    describe('the backfill for rows older than the channel', () => {
+      const MIGRATION = join(
+        __dirname,
+        '../src/db/migrations/0066_confirmation_sms_channel.sql',
+      );
+
+      /**
+       * Runs the migration file itself against seeded legacy rows, inside a
+       * transaction that is ALWAYS rolled back. The file is read from disk
+       * rather than retyped, so this tests the SQL that will actually run —
+       * and nothing it does survives the test.
+       */
+      const runMigration = async (
+        check: (client: PoolClient) => Promise<void>,
+      ): Promise<void> => {
+        const sql = readFileSync(MIGRATION, 'utf8');
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query(
+            `INSERT INTO message_templates (organization_id, slug, title, active, channels)
+             VALUES ($1, $2, 'Registration confirmation', true, '{email}'),
+                    ($1, 'cancellation-notice', 'Cancellation notice', true, '{email}')`,
+            [orgId, CONFIRMATION],
+          );
+          await client.query(sql);
+          await check(client);
+        } finally {
+          await client.query('ROLLBACK');
+          client.release();
+        }
+      };
+
+      const channelsIn = async (
+        client: PoolClient,
+        slug: string,
+      ): Promise<string[]> => {
+        const row = await client.query<{ channels: string[] }>(
+          `SELECT channels::text[] AS channels FROM message_templates
+            WHERE organization_id = $1 AND slug = $2`,
+          [orgId, slug],
+        );
+        return row.rows[0].channels;
+      };
+
+      it('adds sms to a confirmation row that predates the channel', async () => {
+        await runMigration(async (client) => {
+          expect(await channelsIn(client, CONFIRMATION)).toEqual([
+            'email',
+            'sms',
+          ]);
+        });
+      });
+
+      it('changes nothing on a second run', async () => {
+        // Drizzle applies every pending migration in ONE transaction, and a
+        // re-run must not append a second 'sms'.
+        await runMigration(async (client) => {
+          await client.query(readFileSync(MIGRATION, 'utf8'));
+          expect(await channelsIn(client, CONFIRMATION)).toEqual([
+            'email',
+            'sms',
+          ]);
+        });
+      });
+
+      it('leaves every other message untouched', async () => {
+        // Nothing else is texted, so nothing else may gain the badge.
+        await runMigration(async (client) => {
+          expect(await channelsIn(client, 'cancellation-notice')).toEqual([
+            'email',
+          ]);
+        });
+      });
+
+      it('leaves no trace once the transaction is rolled back', async () => {
+        await runMigration(() => Promise.resolve());
+        const rows = await pool.query(
+          `SELECT 1 FROM message_templates WHERE organization_id = $1`,
+          [orgId],
+        );
+        expect(rows.rowCount).toBe(0);
+      });
     });
   });
 

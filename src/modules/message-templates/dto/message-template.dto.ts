@@ -39,7 +39,7 @@ export class MessageTemplateDto {
     enum: messageChannelEnum.enumValues,
     isArray: true,
     description:
-      'Email only for now — there is no SMS provider, and a badge for one would promise a channel nothing can deliver on.',
+      'The channels this message actually goes out on. A channel is listed only once eventa-worker sends on it: today the registration confirmation is email and SMS, and every other message is email only. The organizer’s own wording applies to the email — a text is always in Eventa’s words.',
   })
   channels!: MessageChannel[];
 

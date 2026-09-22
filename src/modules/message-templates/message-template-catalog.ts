@@ -82,16 +82,37 @@ export const POST_EVENT_THANKYOU_SLUG = 'post-event-thankyou';
  * it honest: a slug becomes `controlled` on the day a handler both sends it and
  * checks `message_templates.active`, and not before.
  *
- * Email only, throughout. There is no SMS provider in the product yet, so an
- * SMS badge would promise a channel nothing can deliver on.
+ * `channels` is a promise that something sends on it, and it is kept the same
+ * way `delivery` is: a channel appears here only once eventa-worker actually
+ * sends on it. Today that is the registration confirmation and nothing else —
+ * its handler texts an attendee who gave a Thai mobile (US-DISC-06 AC5) — so
+ * every other message stays email-only.
+ *
+ * Two things follow that are easy to get wrong:
+ *
+ * - **The organizer's wording is email-only.** `message_templates` stores
+ *   `email_subject_*`/`email_body_*` and nothing else, so a text always goes
+ *   in Eventa's own words. The confirmation's description says so, because an
+ *   organizer who rewrites it and then reads their attendee's text deserves to
+ *   have been told.
+ * - **eventa-worker reads `message_templates.channels`, not this list**, and
+ *   that column is a COPY of these channels taken when a workspace first
+ *   touched the message. Rows written before the confirmation gained SMS hold
+ *   `{email}`; migration 0066 backfills them. Nothing NARROWS the column
+ *   today, which is the only reason the list view can keep returning the
+ *   catalog's channels rather than the row's — the day an endpoint lets an
+ *   organizer switch a channel off, `MessageTemplatesService.list` has to read
+ *   the stored value too.
  */
 export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
   {
     slug: 'registration-confirmation',
     title: 'Registration confirmation',
+    // The only message that is texted. The SMS carries the reference and the
+    // ticket link in Eventa's own wording — the tags below reword the EMAIL.
     description:
-      'Sent the moment a registration is confirmed — paid for, or approved on an event that requires approval — carrying the attendee’s ticket and order summary.',
-    channels: ['email'],
+      'Sent the moment a registration is confirmed — paid for, or approved on an event that requires approval — carrying the attendee’s ticket and order summary. Attendees who gave a Thai mobile number also get a short text with their reference and ticket link, in Eventa’s wording.',
+    channels: ['email', 'sms'],
     delivery: 'controlled',
     expected: true,
     defaultActive: true,

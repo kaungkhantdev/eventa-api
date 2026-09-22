@@ -170,10 +170,19 @@ describe('MessageTemplatesService (US-MSG-01/02)', () => {
       expect(bySlug(list, 'event-reminder').expected).toBe(false);
     });
 
-    it('offers no channel the product cannot deliver on', async () => {
-      // There is no SMS provider yet, so an SMS badge would be a promise.
+    it('texts only the registration confirmation', async () => {
+      // A channel badge is a promise that something sends on it. eventa-worker
+      // texts exactly one message — the confirmation (US-DISC-06 AC5) — and
+      // nothing it sends goes by SMS besides. The day another handler texts,
+      // this test is what has to change with it.
       const list = await service.list(auth);
-      expect(list.every((t) => t.channels.every((c) => c === 'email'))).toBe(
+      expect(bySlug(list, 'registration-confirmation').channels).toEqual([
+        'email',
+        'sms',
+      ]);
+      const others = list.filter((t) => t.slug !== 'registration-confirmation');
+      expect(others.every((t) => t.channels.length > 0)).toBe(true);
+      expect(others.every((t) => t.channels.every((c) => c === 'email'))).toBe(
         true,
       );
     });
