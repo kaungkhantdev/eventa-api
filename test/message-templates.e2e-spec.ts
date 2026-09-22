@@ -36,6 +36,8 @@ const PERM_GROUP: Record<string, string> = {
 };
 
 const CONFIRMATION = 'registration-confirmation';
+/** Off until a workspace switches it on — every other message starts on. */
+const REMINDER = 'event-reminder';
 
 interface Success<T> {
   data: T;
@@ -123,6 +125,15 @@ describe('Message templates (e2e — US-MSG-01)', () => {
       .set('Authorization', `Bearer ${jwt}`)
       .send(body);
 
+  /** The switch as eventa-worker will read it. */
+  const storedActive = async (org: number, slug: string): Promise<boolean> => {
+    const row = await pool.query<{ active: boolean }>(
+      `SELECT active FROM message_templates WHERE organization_id = $1 AND slug = $2`,
+      [org, slug],
+    );
+    return row.rows[0].active;
+  };
+
   const find = (body: unknown, slug: string): Template => {
     const items = (body as Success<Template[]>).data;
     const found = items.find((t) => t.slug === slug);
@@ -131,11 +142,14 @@ describe('Message templates (e2e — US-MSG-01)', () => {
   };
 
   describe('reading the list', () => {
-    it('answers with every message, switched on, before anything is stored', async () => {
+    it('answers with every message at its default before anything is stored', async () => {
       const res = await list(adminJwt).expect(200);
       const items = (res.body as Success<Template[]>).data;
-      expect(items).toHaveLength(MESSAGE_TEMPLATE_CATALOG.length);
-      expect(items.every((t) => t.active)).toBe(true);
+      expect(items.map((t) => [t.slug, t.active])).toEqual(
+        MESSAGE_TEMPLATE_CATALOG.map((d) => [d.slug, d.defaultActive]),
+      );
+      // Spelled out, because it is the one a workspace has to choose.
+      expect(find(res.body, REMINDER).active).toBe(false);
     });
 
     it('refuses a member without the settings permission', async () => {
@@ -189,6 +203,14 @@ describe('Message templates (e2e — US-MSG-01)', () => {
       expect(rows.rowCount).toBe(1);
     });
 
+    it('switches the reminder on, and the row the worker reads says so', async () => {
+      const patched = await setActive(adminJwt, REMINDER, {
+        active: true,
+      }).expect(200);
+      expect(find(patched.body, REMINDER).active).toBe(true);
+      expect(await storedActive(orgId, REMINDER)).toBe(true);
+    });
+
     it('leaves another workspace’s messages alone', async () => {
       await setActive(adminJwt, CONFIRMATION, { active: false }).expect(200);
       const theirs = await list(otherJwt).expect(200);
@@ -221,6 +243,36 @@ describe('Message templates (e2e — US-MSG-01)', () => {
         subjectTh: null,
         bodyTh: null,
       });
+      expect(find(res.body, CONFIRMATION).active).toBe(true);
+    });
+
+    const REMINDER_EN = {
+      subject: 'See you tomorrow, {{first_name}}',
+      body: '{{event_name}} starts soon.',
+    };
+
+    it('rewording the reminder does not switch it on', async () => {
+      // The first save creates the row. Were it to take the column's default
+      // (on), preparing the wording would quietly start mailing attendees.
+      const res = await wording(adminJwt, REMINDER, {
+        en: REMINDER_EN,
+        th: BLANK,
+      }).expect(200);
+
+      expect(find(res.body, REMINDER).active).toBe(false);
+      expect(await storedActive(orgId, REMINDER)).toBe(false);
+    });
+
+    it('rewording keeps a reminder that was switched on, on', async () => {
+      // A later save must not touch the switch either way.
+      await setActive(adminJwt, REMINDER, { active: true }).expect(200);
+      const res = await wording(adminJwt, REMINDER, {
+        en: REMINDER_EN,
+        th: BLANK,
+      }).expect(200);
+
+      expect(find(res.body, REMINDER).active).toBe(true);
+      expect(await storedActive(orgId, REMINDER)).toBe(true);
     });
 
     it('stores an emptied field as NULL, so the worker falls back', async () => {

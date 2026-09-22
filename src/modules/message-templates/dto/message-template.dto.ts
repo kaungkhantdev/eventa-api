@@ -58,7 +58,7 @@ export class MessageTemplateDto {
 
   @ApiProperty({
     description:
-      'Whether this workspace has it switched on. True unless switched off — a workspace that never opened these settings still sends its confirmations.',
+      'Whether this workspace has it switched on. Until a workspace chooses, each message is at its default — on, except the event reminder, which stays off until switched on.',
   })
   active!: boolean;
 

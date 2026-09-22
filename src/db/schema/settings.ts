@@ -103,8 +103,11 @@ export const notificationReads = pgTable(
  * identified by a stable `slug`.
  *
  * Only `active` is honoured today — it is the kill switch the trigger checks
- * before sending, and an ABSENT row means active, so a workspace that has
- * never touched its settings still gets its confirmations. The wording columns
+ * before sending. An ABSENT row means the catalog's `defaultActive` for that
+ * slug (message-template-catalog.ts): on for everything but the event
+ * reminder, so a workspace that has never touched its settings still gets its
+ * confirmations. The column's own default of `true` is therefore NOT the rule —
+ * an insert for an off-by-default message must say so. The wording columns
  * exist because `entities.md` specifies them and US-MSG-02 will edit them; the
  * worker renders built-in EN/TH copy until then.
  *

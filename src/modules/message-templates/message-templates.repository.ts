@@ -56,6 +56,12 @@ export class MessageTemplatesRepository {
           title: definition.title,
           description: definition.description,
           channels: definition.channels,
+          // The column defaults to on, so a first save of wording for a
+          // message that is off by default would otherwise switch it on —
+          // preparing the reminder's text would start mailing attendees.
+          // Only on INSERT: once a row exists, the switch is the organizer's
+          // and rewording must never move it.
+          active: definition.defaultActive,
           ...columns,
         })
         .onConflictDoUpdate({

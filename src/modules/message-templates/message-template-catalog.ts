@@ -33,6 +33,18 @@ export interface MessageTemplateDefinition {
    */
   expected: boolean;
   /**
+   * What an ABSENT `message_templates` row means for this message: whether a
+   * workspace that has never touched it sends it.
+   *
+   * Never false for an `expected` message — a new workspace must confirm its
+   * registrations without anybody first finding this page. eventa-worker
+   * decides what is actually SENT from its own copy of the false ones,
+   * `OFF_UNTIL_SWITCHED_ON_SLUGS` in its src/db/schema/messaging.ts, so change
+   * both together: if they disagree, the page says "Inactive" while attendees
+   * are mailed, or "Active" while nobody is.
+   */
+  defaultActive: boolean;
+  /**
    * Merge fields this message can actually fill (US-MSG-02).
    *
    * These must agree with what eventa-worker substitutes for this slug — see
@@ -52,9 +64,11 @@ export interface MessageTemplateDefinition {
  * This is a CATALOG, not a table. A template is a trigger the platform owns,
  * not something an organizer authors — a message with nothing to fire it would
  * never be sent, which is why there is no "new template". `message_templates`
- * rows carry only a workspace's DEVIATIONS from this list, and that is what
- * makes an absent row mean active: a workspace that has never opened these
- * settings still gets its confirmations.
+ * rows carry only a workspace's DEVIATIONS from this list, so an absent row
+ * means the entry's `defaultActive`: on for everything a workspace would be
+ * surprised NOT to send — a workspace that has never opened these settings
+ * still gets its confirmations — and off for the event reminder, which is mail
+ * a workspace must choose to send.
  *
  * `delivery` is a statement about eventa-worker, which owns the sending. Keep
  * it honest: a slug becomes `controlled` on the day a handler both sends it and
@@ -72,6 +86,7 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     channels: ['email'],
     delivery: 'controlled',
     expected: true,
+    defaultActive: true,
     tags: ['{{first_name}}', '{{event_name}}'],
   },
   {
@@ -82,6 +97,7 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     channels: ['email'],
     delivery: 'controlled',
     expected: true,
+    defaultActive: true,
     tags: ['{{first_name}}', '{{event_name}}', '{{reason}}'],
   },
   {
@@ -95,6 +111,7 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     channels: ['email'],
     delivery: 'controlled',
     expected: true,
+    defaultActive: true,
     tags: ['{{first_name}}', '{{event_name}}'],
   },
   {
@@ -105,6 +122,10 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     channels: ['email'],
     delivery: 'controlled',
     expected: false,
+    // Off until a workspace switches it on: once PUBLIC_WEB_URL is set, a
+    // default of on would start mailing every workspace's attendees about
+    // every event, unasked.
+    defaultActive: false,
     tags: ['{{first_name}}', '{{event_name}}', '{{event_venue}}'],
   },
   {
@@ -117,6 +138,7 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     channels: ['email'],
     delivery: 'controlled',
     expected: false,
+    defaultActive: true,
     tags: ['{{first_name}}', '{{event_name}}', '{{ticket_type}}'],
   },
   {
@@ -129,6 +151,7 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     channels: ['email'],
     delivery: 'controlled',
     expected: false,
+    defaultActive: true,
     tags: ['{{first_name}}', '{{event_name}}', '{{survey_url}}'],
   },
 ];
