@@ -202,7 +202,10 @@ describe('Message templates (e2e — US-MSG-01)', () => {
         .set('Authorization', `Bearer ${jwt}`)
         .send(body);
 
-    const EN = { subject: 'You’re in, {{first_name}}', body: 'See you at {{event_name}}.' };
+    const EN = {
+      subject: 'You’re in, {{first_name}}',
+      body: 'See you at {{event_name}}.',
+    };
     const BLANK = { subject: '', body: '' };
 
     it('saves it, and answers with it', async () => {
