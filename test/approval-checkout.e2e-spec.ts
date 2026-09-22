@@ -45,6 +45,9 @@ const WEBHOOK_EVENT_PREFIX = 'evt-appre2e-';
 const BAHT = 100;
 const PRICE = 1_000 * BAHT;
 const DECISION_YEAR = 9999;
+/** How long a case waits for a request to reach a lock, and how often it looks. */
+const LOCK_WAIT_TIMEOUT_MS = 5_000;
+const LOCK_POLL_MS = 20;
 
 interface Success<T> {
   data: T;
@@ -237,12 +240,17 @@ describe('Require approval, pay first (e2e — US-REG-02)', () => {
     return { ...(placed.body as Success<Placed>).data, holdIds };
   }
 
-  async function pay(orderId: string): Promise<void> {
+  /** Start one payment attempt; its id lets a case call back for THAT attempt. */
+  async function pay(
+    orderId: string,
+    method: 'Card' | 'PromptPay' = 'Card',
+  ): Promise<string> {
     seq += 1;
     const res = await request(server)
       .post('/api/v1/public/payments')
-      .send({ orderId, method: 'Card', idempotencyKey: `appr-pay-${seq}` });
+      .send({ orderId, method, idempotencyKey: `appr-pay-${seq}` });
     expect(res.status).toBe(201);
+    return (res.body as Success<{ paymentId: string }>).data.paymentId;
   }
 
   /** A signed provider callback, the way the stub provider reads one. */
@@ -278,6 +286,44 @@ describe('Require approval, pay first (e2e — US-REG-02)', () => {
       gatewayRef: rows[0].gateway_ref,
       amountSatang: Number(rows[0].amount_satang),
     });
+  }
+
+  /**
+   * The provider's signed callback about ONE attempt. A buyer who opened a
+   * PromptPay QR and then paid by card has two, and each reports on its own.
+   */
+  async function callback(
+    paymentId: string,
+    type: 'succeeded' | 'expired',
+  ): Promise<void> {
+    const { rows } = await pool.query<{
+      gateway_ref: string;
+      amount_satang: string;
+    }>(`SELECT gateway_ref, amount_satang FROM payments WHERE id = $1`, [
+      paymentId,
+    ]);
+    await webhook({
+      type,
+      gatewayRef: rows[0].gateway_ref,
+      amountSatang: Number(rows[0].amount_satang),
+    });
+  }
+
+  /**
+   * Wait until the connection `blockerPid` holds a lock somebody else is
+   * queued on — the moment a request has done its reads and stopped at a lock.
+   */
+  async function someoneWaitsOn(blockerPid: number): Promise<void> {
+    const deadline = Date.now() + LOCK_WAIT_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const { rows } = await pool.query(
+        `SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))`,
+        [blockerPid],
+      );
+      if (rows.length > 0) return;
+      await new Promise((resolve) => setTimeout(resolve, LOCK_POLL_MS));
+    }
+    throw new Error('Nothing queued on the lock in time.');
   }
 
   /** Buy on a paid approval event and pay: the registration now waits. */
@@ -369,10 +415,20 @@ describe('Require approval, pay first (e2e — US-REG-02)', () => {
   const paymentStatusesOf = async (orderId: string): Promise<string[]> =>
     (
       await pool.query<{ status: string }>(
-        `SELECT status FROM payments WHERE order_id = $1`,
+        `SELECT status FROM payments WHERE order_id = $1 ORDER BY created_at, id`,
         [orderId],
       )
     ).rows.map((r) => r.status);
+
+  const refundNotices = async (orderId: string) =>
+    (
+      await pool.query<{ payload: { amountSatang: number; reason: string } }>(
+        `SELECT payload FROM outbox_events
+         WHERE aggregate_id = $1 AND routing_key = 'payment.refund_required'
+         ORDER BY id`,
+        [orderId],
+      )
+    ).rows.map((r) => r.payload);
 
   describe('a free registration', () => {
     it('waits for the organizer holding its place — no ticket, no confirmation', async () => {
@@ -533,6 +589,112 @@ describe('Require approval, pay first (e2e — US-REG-02)', () => {
       expect(await ticketCount(orderId)).toBe(0);
     });
 
+    it('a second PAYMENT while it waits is refunded as a duplicate, and counts nothing twice', async () => {
+      // The buyer opened a PromptPay QR, then paid by card — and the bank app
+      // scanned the old QR anyway. Both attempts were started before either
+      // settled, so both are live.
+      const listed = await approvalEvent({ total: 1, price: PRICE });
+      const { orderId } = await buy(listed);
+      const first = await pay(orderId, 'PromptPay');
+      const second = await pay(orderId);
+
+      await callback(first, 'succeeded');
+      await callback(second, 'succeeded');
+
+      expect(await orderRow(orderId)).toMatchObject({
+        status: 'pending',
+        payment_status: 'paid',
+      });
+      expect(await soldOf(listed.tierId)).toBe(1);
+      expect(await paymentStatusesOf(orderId)).toEqual(['paid', 'paid']);
+      const { rows } = await pool.query<{ amount_satang: string }>(
+        `SELECT amount_satang FROM payments WHERE id = $1`,
+        [second],
+      );
+      expect(await refundNotices(orderId)).toEqual([
+        expect.objectContaining({
+          amountSatang: Number(rows[0].amount_satang),
+          reason: 'duplicate_payment',
+        }),
+      ]);
+
+      expect((await approve(organizerJwt, orderId)).status).toBe(201);
+      expect(await ticketCount(orderId)).toBe(1);
+      expect(await soldOf(listed.tierId)).toBe(1);
+      expect(await confirmedPayloads(orderId)).toHaveLength(1);
+    });
+
+    it('rejecting a registration that was paid for twice refunds BOTH payments', async () => {
+      const listed = await approvalEvent({ total: 1, price: PRICE });
+      const { orderId } = await buy(listed);
+      const first = await pay(orderId, 'PromptPay');
+      const second = await pay(orderId);
+      await callback(first, 'succeeded');
+      await callback(second, 'succeeded');
+
+      const res = await reject(adminJwt, orderId);
+
+      expect(res.status).toBe(201);
+      expect(await orderRow(orderId)).toMatchObject({
+        status: 'rejected',
+        payment_status: 'refunded',
+      });
+      expect(await paymentStatusesOf(orderId)).toEqual([
+        'refunded',
+        'refunded',
+      ]);
+      const keys = (await refundsOf(orderId))
+        .map((r) => `${r.status} ${r.idempotency_key}`)
+        .sort();
+      expect(keys).toEqual(
+        [
+          `succeeded registration-rejected:${orderId}:${first}`,
+          `succeeded registration-rejected:${orderId}:${second}`,
+        ].sort(),
+      );
+      expect(await soldOf(listed.tierId)).toBe(0);
+
+      // A retry finds both refunds made, and makes no third.
+      expect((await reject(adminJwt, orderId)).status).toBe(201);
+      expect(await refundsOf(orderId)).toHaveLength(2);
+    });
+
+    it('a place given back while a payment waits for the tier is not counted back in', async () => {
+      // Two places. One registration is paid and waiting; a second buyer's
+      // payment lands. The settlement reads the tier, then waits for its lock
+      // — and in that gap the first registration's place goes back (the
+      // `locker` below stands in for a rejection committing there).
+      const listed = await approvalEvent({ total: 2, price: PRICE });
+      await paidAndWaiting(listed);
+      const { orderId } = await buy(listed, 'malee@approval.test');
+      const paymentId = await pay(orderId);
+      const locker = await pool.connect();
+      try {
+        await locker.query('BEGIN');
+        const { rows } = await locker.query<{ pid: number }>(
+          `SELECT pg_backend_pid() AS pid`,
+        );
+        await locker.query(
+          `SELECT id FROM ticket_types WHERE id = $1 FOR UPDATE`,
+          [listed.tierId],
+        );
+        const settling = callback(paymentId, 'succeeded');
+        await someoneWaitsOn(rows[0].pid);
+        await locker.query(
+          `UPDATE ticket_types SET sold = GREATEST(sold - 1, 0) WHERE id = $1`,
+          [listed.tierId],
+        );
+        await locker.query('COMMIT');
+        await settling;
+      } finally {
+        locker.release();
+      }
+
+      expect((await orderRow(orderId)).payment_status).toBe('paid');
+      // Only the second registration holds a place now.
+      expect(await soldOf(listed.tierId)).toBe(1);
+    });
+
     it('approving at full capacity issues the tickets and the paid confirmation once', async () => {
       const listed = await approvalEvent({ total: 1, price: PRICE });
       const orderId = await paidAndWaiting(listed);
@@ -553,7 +715,9 @@ describe('Require approval, pay first (e2e — US-REG-02)', () => {
 
     it('rejecting refunds the payment and gives the place back', async () => {
       const listed = await approvalEvent({ total: 1, price: PRICE });
-      const orderId = await paidAndWaiting(listed);
+      const { orderId } = await buy(listed);
+      const paymentId = await pay(orderId);
+      await callback(paymentId, 'succeeded');
 
       const res = await reject(adminJwt, orderId);
 
@@ -565,7 +729,7 @@ describe('Require approval, pay first (e2e — US-REG-02)', () => {
       expect(await refundsOf(orderId)).toEqual([
         {
           status: 'succeeded',
-          idempotency_key: `registration-rejected:${orderId}`,
+          idempotency_key: `registration-rejected:${orderId}:${paymentId}`,
         },
       ]);
       expect(await paymentStatusesOf(orderId)).toEqual(['refunded']);
@@ -736,7 +900,55 @@ describe('Require approval, pay first (e2e — US-REG-02)', () => {
 
       expect((await orderRow(orderId)).status).toBe('cancelled');
       expect(await outboxKeys(orderId)).toEqual(['payment.refund_required']);
+      // A code the worker words for the buyer in their language — never an
+      // English sentence dropped into a Thai email.
+      expect(await refundNotices(orderId)).toEqual([
+        expect.objectContaining({ reason: 'seats_released' }),
+      ]);
       expect(await soldOf(listed.tierId)).toBe(0);
+    });
+
+    it('an abandoned attempt lapsing AFTER the payment keeps the seat for the decision', async () => {
+      // A PromptPay QR opened first, then the card paid. The QR's expiry
+      // arrives later — about an attempt, not about the order, which is paid.
+      const listed = await approvalEvent({
+        total: 1,
+        price: PRICE,
+        seating: 'reserved',
+      });
+      const { orderId, holdIds } = await buy(listed);
+      const abandoned = await pay(orderId, 'PromptPay');
+      const paid = await pay(orderId);
+      await callback(paid, 'succeeded');
+
+      await callback(abandoned, 'expired');
+
+      const [held] = await holdsFor(holdIds);
+      expect(held.status).toBe('active');
+      expect(held.expires_at.getUTCFullYear()).toBe(DECISION_YEAR);
+      expect((await hold(listed)).status).toBe(409);
+
+      expect((await approve(organizerJwt, orderId)).status).toBe(201);
+      const { rows } = await pool.query<{ seat_id: string }>(
+        `SELECT a.seat_id FROM seat_assignments a
+         JOIN tickets t ON t.id = a.ticket_id WHERE t.order_id = $1`,
+        [orderId],
+      );
+      expect(rows.map((r) => Number(r.seat_id))).toEqual(listed.seatIds);
+    });
+
+    it('an attempt lapsing while the order is still unpaid releases its seat, as before', async () => {
+      const listed = await approvalEvent({
+        total: 1,
+        price: PRICE,
+        seating: 'reserved',
+      });
+      const { orderId, holdIds } = await buy(listed);
+      const lapsed = await pay(orderId, 'PromptPay');
+
+      await callback(lapsed, 'expired');
+
+      expect((await holdsFor(holdIds))[0].status).toBe('released');
     });
 
     it('an anonymous release cannot free a seat an order is holding', async () => {

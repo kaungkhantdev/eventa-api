@@ -19,9 +19,10 @@ export interface RejectionRefund {
  * Registrations owns this abstraction and Payments binds it, so the money goes
  * back through THE refund path — the ledger claim, the provider call and the
  * one transaction that flips the payment — rather than a second way to move
- * money. Exactly once per registration however often it is asked: the refund
- * is keyed by the order, so a retried rejection finds the refund it already
- * made instead of making another.
+ * money. Every payment the registration took goes back — a duplicate that
+ * landed while it waited too — each exactly once however often it is asked:
+ * each refund is keyed by the order and the payment, so a retried rejection
+ * finds the refunds it already made and makes only the missing ones.
  */
 export abstract class RegistrationRefundPort {
   abstract refundRejected(

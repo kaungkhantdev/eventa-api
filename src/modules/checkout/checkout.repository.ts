@@ -33,6 +33,7 @@ import { rejectionRefunds } from '../registrations/registration-decision';
 import {
   DECISION_HOLD_EXPIRY,
   isAwaitingApproval,
+  isOnCheckoutClock,
   statusAfterRefund,
 } from './approval-rules';
 import type { OrderTotals } from './checkout-pricing';
@@ -262,17 +263,31 @@ interface SettlementContext {
 }
 
 /**
- * The same four refusals, worded for whoever is about to read them. A buyer is
- * told what happened to their money; an organizer is told what to do next.
+ * Why money that arrived is going back, as the CODE `payment.refund_required`
+ * carries. eventa-worker words each one for the buyer in their own language
+ * (`REASONS` in its refund-notice.ts) — an English sentence here landed inside
+ * the Thai email. Keep the two lists in step.
+ */
+const REFUND_REASON = {
+  tierRemoved: 'tier_removed',
+  soldOut: 'soldout',
+  seatsTaken: 'seats_unavailable',
+  seatMismatch: 'seat_mismatch',
+  seatsReleased: 'seats_released',
+  orderClosed: 'order_closed',
+} as const;
+
+/**
+ * The same four refusals, for whoever is about to read them. A buyer's is a
+ * refund reason code the worker words for them; an organizer is told, in a
+ * sentence, what to do next.
  */
 const BLOCKERS = {
   payment: {
-    noTier: 'The ticket type on this order no longer exists.',
-    soldOut: 'The tickets sold out while the payment was being made.',
-    seatsTaken: 'The seats were taken while the payment was being made.',
-    seatMismatch: 'The seat reservation no longer matches the order.',
-    seatsReleased:
-      'The seats were released before the payment arrived, so they could not be kept for approval.',
+    noTier: REFUND_REASON.tierRemoved,
+    soldOut: REFUND_REASON.soldOut,
+    seatsTaken: REFUND_REASON.seatsTaken,
+    seatMismatch: REFUND_REASON.seatMismatch,
   },
   approval: {
     noTier: 'The ticket type on this registration no longer exists.',
@@ -693,7 +708,7 @@ export class CheckoutRepository {
           tx,
           input,
           order,
-          'The order was no longer open when the payment arrived.',
+          REFUND_REASON.orderClosed,
         );
       }
       const context = await this.loadSettlement(tx, input, order);
@@ -721,10 +736,11 @@ export class CheckoutRepository {
   /**
    * The money arrived on an order that requires approval (US-REG-02): it pays
    * for places that now wait for the organizer, not for tickets. Its places are
-   * counted in `sold` here — the tier is locked by `loadSettlement` — so nobody
-   * else can take them while the organizer decides, and approval will not count
-   * them again. A GA hold then reserves nothing more and converts; a reserved
-   * seat's hold stays with the order until the decision.
+   * counted in `sold` here — `loadSettlement` locked the tier and read its count
+   * under that lock — so nobody else can take them while the organizer decides,
+   * and approval will not count them again. A GA hold then reserves nothing
+   * more and converts; a reserved seat's hold stays with the order until the
+   * decision.
    *
    * No confirmation and no receipt are queued: both go with the tickets, on
    * approval. A seat whose hold was released while the buyer paid cannot be
@@ -742,7 +758,7 @@ export class CheckoutRepository {
         tx,
         input,
         order,
-        BLOCKERS.payment.seatsReleased,
+        REFUND_REASON.seatsReleased,
       );
     }
     const line = context.line as NonNullable<SettlementContext['line']>;
@@ -765,7 +781,10 @@ export class CheckoutRepository {
     };
   }
 
-  /** Raise the (already locked) tier's `sold` by the order line. */
+  /**
+   * Raise the tier's `sold` by the order line. Absolute, so it is only right
+   * because `line.sold` was read under the tier's lock (`lockTier`).
+   */
   private async countSale(
     tx: Tx,
     line: NonNullable<SettlementContext['line']>,
@@ -949,22 +968,34 @@ export class CheckoutRepository {
       );
   }
 
-  /** Give a lapsed/failed payment's held inventory back (US-DISC-05). */
+  /**
+   * Give a lapsed payment attempt's held inventory back (US-DISC-05) — but
+   * only while the order is still on the checkout's clock.
+   *
+   * An expiry reports on ONE attempt, and an order can have several. A paid
+   * registration waiting for approval keeps its reserved seat's hold attached
+   * to the order until the decision (US-REG-02), so an abandoned attempt
+   * lapsing later must not put that paid seat back on sale. The order is
+   * locked first, so a settlement landing at the same moment takes turns with
+   * this rather than racing it.
+   */
   async releaseHoldsForOrder(
     organizationId: number,
     orderId: string,
   ): Promise<void> {
     await withTenant(this.db, organizationId, async (tx) => {
-      await tx
-        .update(seatHolds)
-        .set({ status: 'released' })
+      const [order] = await tx
+        .select()
+        .from(orders)
         .where(
           and(
-            eq(seatHolds.organizationId, organizationId),
-            eq(seatHolds.orderId, orderId),
-            eq(seatHolds.status, ACTIVE_HOLD),
+            eq(orders.id, orderId),
+            eq(orders.organizationId, organizationId),
           ),
-        );
+        )
+        .for('update');
+      if (!order || !isOnCheckoutClock(order)) return;
+      await this.releaseActiveHolds(tx, organizationId, orderId);
     });
   }
 
@@ -1124,34 +1155,48 @@ export class CheckoutRepository {
     input: SettleOrderInput,
     order: OrderRow,
   ): Promise<SettlementContext> {
-    const [line] = await tx
+    const [item] = await tx
       .select({
         orderItemId: orderItems.id,
         ticketTypeId: orderItems.ticketTypeId,
         quantity: orderItems.quantity,
-        tierName: ticketTypes.name,
-        sold: ticketTypes.sold,
-        total: ticketTypes.total,
       })
       .from(orderItems)
-      .innerJoin(ticketTypes, eq(ticketTypes.id, orderItems.ticketTypeId))
       .where(eq(orderItems.orderId, order.id))
       .limit(1);
-    // Lock the tier before judging capacity, so two settlements serialize.
-    if (line) {
-      await tx
-        .select({ id: ticketTypes.id })
-        .from(ticketTypes)
-        .where(eq(ticketTypes.id, line.ticketTypeId))
-        .for('update');
-    }
+    const tier = item ? await this.lockTier(tx, item.ticketTypeId) : null;
     const seatIds = await this.heldSeatIds(tx, input, order.id);
     return {
-      line: line ?? null,
+      line: item && tier ? { ...item, ...tier } : null,
       seatIds,
       takenSeatIds: await this.seatsAlreadyAssigned(tx, input, seatIds),
       placesCounted: isAwaitingApproval(order),
     };
+  }
+
+  /**
+   * The tier, read UNDER its row lock, so two settlements serialize and
+   * capacity is judged on the count as it stands.
+   *
+   * The lock and the read are one statement on purpose. `countSale` writes
+   * back an absolute `sold`, and a count read before the lock was taken would
+   * overwrite whatever committed while this waited for it — a rejection or a
+   * refund giving a place back — and that place would be lost for good.
+   */
+  private async lockTier(
+    tx: Tx,
+    ticketTypeId: string,
+  ): Promise<{ tierName: string; sold: number; total: number } | null> {
+    const [tier] = await tx
+      .select({
+        tierName: ticketTypes.name,
+        sold: ticketTypes.sold,
+        total: ticketTypes.total,
+      })
+      .from(ticketTypes)
+      .where(eq(ticketTypes.id, ticketTypeId))
+      .for('update');
+    return tier ?? null;
   }
 
   private async heldSeatIds(

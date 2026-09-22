@@ -300,6 +300,23 @@ describe('RegistrationDecisionsService (US-REG-02)', () => {
       expect(error.message).toMatch(/Payments/);
     });
 
+    it('says so too when the refund dies of something that is not a refusal', async () => {
+      // A network failure, or an SDK error the provider port never mapped:
+      // the rejection has committed, and a bare 500 would read as "nothing
+      // happened" — while its internals are nothing an organizer should see.
+      refunds.refundRejected.mockRejectedValue(
+        new Error('connect ETIMEDOUT 10.0.0.7:443'),
+      );
+
+      const error = await failure(rejectIt());
+
+      expect(error).toBeInstanceOf(DomainException);
+      expect(error.getStatus()).toBe(HttpStatus.BAD_GATEWAY);
+      expect(error.message).toMatch(/was rejected/i);
+      expect(error.message).toMatch(/Payments/);
+      expect(error.message).not.toMatch(/ETIMEDOUT|10\.0\.0\.7/);
+    });
+
     it('a retried rejection finishes a refund that did not go through the first time', async () => {
       approvals.findDecidable.mockResolvedValue(
         paidAndWaiting({ status: 'rejected' }),

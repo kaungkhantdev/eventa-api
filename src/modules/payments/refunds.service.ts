@@ -66,8 +66,9 @@ class RefundNoLongerPending extends Error {}
  *
  * 1. **Claim the ledger row first.** `uq_refunds_org_idem` makes the claim the
  *    thing that decides who refunds — so a second request finds the row instead
- *    of calling the provider again, and a crash after the provider call still
- *    leaves evidence that a refund was attempted.
+ *    of refunding again, and a crash after the provider call still leaves
+ *    evidence that a refund was attempted. A claim the provider never answered
+ *    is asked again under its own key (`replay`), which the provider dedupes.
  * 2. **Then call the provider**, outside any transaction, because a network
  *    call inside one holds locks for as long as Stripe takes to answer.
  * 3. **Then free the inventory in ONE transaction** with the ledger write: the
@@ -115,8 +116,27 @@ export class RefundsService {
       idempotencyKey: input.idempotencyKey,
       now: this.clock.now(),
     });
-    if (!fresh) return this.toResult(refund);
+    if (!fresh) return this.replay(payment, refund);
     return this.settleRefund(payment, refund);
+  }
+
+  /**
+   * The same key again. Usually that is answered with what the first request
+   * recorded — but not a claim still `pending` with no provider reference:
+   * that one's provider call never came back (it threw, or the process died),
+   * and no webhook can ever find a refund with no reference, so answering
+   * "pending" would leave the money where it is for good. Asking the provider
+   * again under the SAME key is safe — it answers with the refund it already
+   * made, or makes it now — and is the only way that refund ever finishes.
+   */
+  private async replay(
+    payment: PaymentRow & { gatewayRef: string },
+    refund: RefundRow,
+  ): Promise<RefundResult> {
+    if (refund.status === 'pending' && !refund.gatewayRef) {
+      return this.settleRefund(payment, refund);
+    }
+    return this.toResult(refund);
   }
 
   private async requireRefundable(

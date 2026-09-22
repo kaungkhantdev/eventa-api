@@ -1,6 +1,7 @@
 import {
   DECISION_HOLD_EXPIRY,
   isAwaitingApproval,
+  isOnCheckoutClock,
   placementFor,
   statusAfterRefund,
 } from './approval-rules';
@@ -96,6 +97,47 @@ describe('approval rules (US-REG-02 — require approval, pay first)', () => {
         expect(
           isAwaitingApproval({ status, approvalRequestedAt: requested }),
         ).toBe(false);
+      }
+    });
+  });
+
+  describe('isOnCheckoutClock — may a lapsed payment attempt free the seats?', () => {
+    const requested = new Date('2026-09-01T00:00:00Z');
+    const unpaid = {
+      status: 'pending',
+      paymentStatus: 'pending',
+      approvalRequestedAt: null,
+    } as const;
+
+    it('is an order still waiting for its money', () => {
+      expect(isOnCheckoutClock(unpaid)).toBe(true);
+    });
+
+    it('is not a paid order waiting for the organizer — its seat is held for the decision', () => {
+      expect(
+        isOnCheckoutClock({
+          ...unpaid,
+          paymentStatus: 'paid',
+          approvalRequestedAt: requested,
+        }),
+      ).toBe(false);
+    });
+
+    it('is not a free registration waiting for the organizer', () => {
+      expect(
+        isOnCheckoutClock({ ...unpaid, approvalRequestedAt: requested }),
+      ).toBe(false);
+    });
+
+    it('is not an order already paid, whatever its status says', () => {
+      expect(isOnCheckoutClock({ ...unpaid, paymentStatus: 'paid' })).toBe(
+        false,
+      );
+    });
+
+    it('is not an order that has left pending', () => {
+      for (const status of ['confirmed', 'cancelled', 'expired'] as const) {
+        expect(isOnCheckoutClock({ ...unpaid, status })).toBe(false);
       }
     });
   });

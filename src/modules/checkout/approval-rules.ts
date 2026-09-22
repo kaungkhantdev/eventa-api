@@ -1,6 +1,7 @@
-import type { orderStatusEnum } from '../../db/schema';
+import type { orderStatusEnum, paymentStatusEnum } from '../../db/schema';
 
 type OrderStatus = (typeof orderStatusEnum.enumValues)[number];
+type PaymentStatus = (typeof paymentStatusEnum.enumValues)[number];
 
 /**
  * "Require approval" with money in it (US-REG-02): the buyer PAYS FIRST, and
@@ -48,6 +49,27 @@ export function isAwaitingApproval(order: {
   approvalRequestedAt: Date | null;
 }): boolean {
   return order.status === 'pending' && order.approvalRequestedAt !== null;
+}
+
+/**
+ * Still waiting for the buyer's money, on the checkout's clock — the only time
+ * a payment attempt lapsing may give the order's seats back.
+ *
+ * One order can have several attempts (a PromptPay QR opened, then a card
+ * paid), and each lapses on its own. Once any of them has paid, or the order
+ * waits for the organizer, a stale attempt's expiry says nothing about the
+ * order: the seats are paid for, or held for a decision.
+ */
+export function isOnCheckoutClock(order: {
+  status: OrderStatus;
+  paymentStatus: PaymentStatus;
+  approvalRequestedAt: Date | null;
+}): boolean {
+  return (
+    order.status === 'pending' &&
+    order.paymentStatus !== 'paid' &&
+    order.approvalRequestedAt === null
+  );
 }
 
 /**

@@ -63,6 +63,8 @@ export abstract class OrderPaymentPort {
   /**
    * The payment lapsed or failed for good (e.g. a PromptPay code expired) —
    * give the held inventory back so someone else can buy it (US-DISC-05).
+   * A no-op once the order is paid or waiting for the organizer: the lapse was
+   * one stale attempt's, and the seats are no longer the checkout's to free.
    */
   abstract releaseHolds(organizationId: number, orderId: string): Promise<void>;
 

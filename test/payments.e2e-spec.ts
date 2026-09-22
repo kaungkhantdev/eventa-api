@@ -418,12 +418,17 @@ describe('Paying for an order (e2e — US-DISC-05)', () => {
 
       expect(await ticketCount(orderId)).toBe(0);
       expect((await orderState(orderId)).status).toBe('cancelled');
-      const { rows } = await pool.query<{ routing_key: string }>(
-        `SELECT routing_key FROM outbox_events WHERE organization_id = $1`,
+      const { rows } = await pool.query<{
+        routing_key: string;
+        reason: string;
+      }>(
+        `SELECT routing_key, payload->>'reason' AS reason
+         FROM outbox_events WHERE organization_id = $1`,
         [orgId],
       );
-      expect(rows.map((r) => r.routing_key)).toEqual([
-        'payment.refund_required',
+      // A code, which eventa-worker words in the buyer's own language.
+      expect(rows).toEqual([
+        { routing_key: 'payment.refund_required', reason: 'soldout' },
       ]);
     });
   });

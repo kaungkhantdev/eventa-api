@@ -179,6 +179,45 @@ describe('RefundsService (US-FIN-02)', () => {
     expect(result.status).toBe('succeeded');
   });
 
+  describe('a key that arrives again while its refund is still pending', () => {
+    it('asks the provider again, under the SAME key, when the first call never came back', async () => {
+      // The first request claimed the row and then the provider call threw —
+      // a timeout, an insufficient balance. With no provider reference no
+      // webhook can ever finish it, so answering "pending" would leave the
+      // money where it is for good.
+      repo.claimRefund.mockResolvedValue({
+        refund: refundRow({ idempotencyKey: 'k-1', gatewayRef: null }),
+        fresh: false,
+      });
+      const result = await refund();
+      expect(provider.refund).toHaveBeenCalledWith(
+        expect.objectContaining({ idempotencyKey: 'k-1', amountSatang: TOTAL }),
+      );
+      expect(orders.refundOrder).toHaveBeenCalled();
+      expect(result.status).toBe('succeeded');
+    });
+
+    it('surfaces the provider refusing again rather than reporting it pending', async () => {
+      repo.claimRefund.mockResolvedValue({
+        refund: refundRow({ idempotencyKey: 'k-1', gatewayRef: null }),
+        fresh: false,
+      });
+      provider.refund.mockRejectedValue(new Error('balance_insufficient'));
+      await expect(refund()).rejects.toThrow('balance_insufficient');
+      expect(orders.refundOrder).not.toHaveBeenCalled();
+    });
+
+    it('does not ask again for a refund the provider accepted — its webhook finishes it', async () => {
+      repo.claimRefund.mockResolvedValue({
+        refund: refundRow({ gatewayRef: 're_pending' }),
+        fresh: false,
+      });
+      const result = await refund();
+      expect(provider.refund).not.toHaveBeenCalled();
+      expect(result.status).toBe('pending');
+    });
+  });
+
   it('refuses a payment that never completed', async () => {
     repo.findPaymentForRefund.mockResolvedValue(payment({ status: 'pending' }));
     await expect(refund()).rejects.toMatchObject({ code: 'CONFLICT' });

@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { Permission } from '../../common/decorators/require-permissions.decorator';
 import { DomainException } from '../../common/errors/domain.exception';
+import { ErrorCode } from '../../common/errors/error-codes';
 import { PermissionsService } from '../access/permissions.service';
 import type { AuthContext } from '../auth/auth.types';
 import type {
@@ -40,6 +41,13 @@ export const NO_SEAT_FREE =
 const REFUND_DID_NOT_GO_THROUGH =
   'The registration was rejected, but its refund did not go through:';
 const FINISH_FROM_PAYMENTS = 'Issue the refund from Payments.';
+/**
+ * In place of the words of a failure that was not a refusal — a timeout, an
+ * error nothing mapped — whose text is internals, not something to show. A
+ * retried rejection asks the provider again under the same key.
+ */
+const REFUND_INTERRUPTED =
+  'it was interrupted before it could be confirmed. Reject it again to retry the refund, or issue it from Payments.';
 
 /**
  * The organizer's decision on a sign-up (US-REG-02).
@@ -62,6 +70,8 @@ const FINISH_FROM_PAYMENTS = 'Issue the refund from Payments.';
  */
 @Injectable()
 export class RegistrationDecisionsService {
+  private readonly logger = new Logger(RegistrationDecisionsService.name);
+
   constructor(
     private readonly approvals: RegistrationApprovalPort,
     private readonly refunds: RegistrationRefundPort,
@@ -122,9 +132,9 @@ export class RegistrationDecisionsService {
 
   /**
    * Give a rejected registration's money back. The rejection has already
-   * committed, so a refusal from the provider must say so: the organizer is
-   * told the registration IS rejected, why the money did not move, and where
-   * to finish it — never a bare error that reads as "nothing happened".
+   * committed, so ANY failure from here on must say so: the organizer is told
+   * the registration IS rejected, that the money did not move, and where to
+   * finish it — never a bare error that reads as "nothing happened".
    */
   private async refundRejection(
     auth: AuthContext,
@@ -133,13 +143,36 @@ export class RegistrationDecisionsService {
     try {
       await this.refunds.refundRejected(auth, orderId);
     } catch (error) {
-      if (!(error instanceof DomainException)) throw error;
-      throw new DomainException(
+      throw this.rejectedButNotRefunded(orderId, error);
+    }
+  }
+
+  /**
+   * A refusal carries words written for a person — the provider's reason — and
+   * they are passed on. Anything else is logged in full here, because the
+   * exception filter will only see the wrapper, and the organizer is told the
+   * refund was interrupted rather than shown its internals.
+   */
+  private rejectedButNotRefunded(
+    orderId: string,
+    error: unknown,
+  ): DomainException {
+    if (error instanceof DomainException) {
+      return new DomainException(
         error.code,
         `${REFUND_DID_NOT_GO_THROUGH} ${error.message} ${FINISH_FROM_PAYMENTS}`,
         error.getStatus(),
       );
     }
+    this.logger.error(
+      { orderId },
+      error instanceof Error ? error.stack : String(error),
+    );
+    return new DomainException(
+      ErrorCode.INTERNAL_ERROR,
+      `${REFUND_DID_NOT_GO_THROUGH} ${REFUND_INTERRUPTED}`,
+      HttpStatus.BAD_GATEWAY,
+    );
   }
 
   private async accessOf(auth: AuthContext): Promise<DeciderAccess> {

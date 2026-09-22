@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, ilike, inArray, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, ne, or, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
   events,
@@ -363,16 +363,17 @@ export class PaymentsRepository {
   }
 
   /**
-   * The payment that paid for an order, for refunding it (US-REG-02): the
-   * newest one still paid, else the newest already refunded — which says the
-   * money has gone back. Never a pending or failed attempt: no money moved.
+   * Every payment whose money reached the order, for refunding it (US-REG-02):
+   * paid, or already refunded — which says that money has gone back. Oldest
+   * first, so the one that paid for the registration leads and a duplicate
+   * follows. Never a pending or failed attempt: no money moved.
    */
-  async findSettledPaymentForOrder(
+  async findSettledPaymentsForOrder(
     organizationId: number,
     orderId: string,
-  ): Promise<PaymentRow | null> {
-    return withTenant(this.db, organizationId, async (tx) => {
-      const [row] = await tx
+  ): Promise<PaymentRow[]> {
+    return withTenant(this.db, organizationId, (tx) =>
+      tx
         .select()
         .from(payments)
         .where(
@@ -382,10 +383,8 @@ export class PaymentsRepository {
             inArray(payments.status, ['paid', 'refunded']),
           ),
         )
-        .orderBy(sql`${payments.status} = 'paid' DESC`, desc(payments.paidAt))
-        .limit(1);
-      return row ?? null;
-    });
+        .orderBy(asc(payments.paidAt), asc(payments.createdAt)),
+    );
   }
 
   /** The payment an admin may refund — tenant-scoped, so another org's is invisible. */
