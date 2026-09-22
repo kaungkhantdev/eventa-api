@@ -23,8 +23,12 @@ export interface SettlementResult {
    * here first; nothing changed (exactly-once). `refund_required` — the money
    * arrived but the inventory could not be honoured (seats gone, tier sold out
    * while the buyer paid); the order is cancelled and a refund event queued.
+   * `awaiting_approval` — the event requires approval (US-REG-02): the money
+   * paid for places now held for the organizer's decision; no ticket until an
+   * approval, and a rejection refunds it.
    */
-  outcome: 'settled' | 'already_settled' | 'refund_required';
+  outcome:
+    'settled' | 'already_settled' | 'refund_required' | 'awaiting_approval';
   reference: string;
   ticketCount: number;
 }

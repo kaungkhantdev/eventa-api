@@ -138,6 +138,17 @@ export class SeatHoldService {
     await this.repo.release(actor.organizationId, holdIds);
   }
 
+  /**
+   * Release only holds no order has taken over — the one release an anonymous
+   * caller may ask for. See `SeatHoldRepository.releaseUnattached`.
+   */
+  async releaseUnattached(
+    actor: SeatHoldActor,
+    holdIds: number[],
+  ): Promise<void> {
+    await this.repo.releaseUnattached(actor.organizationId, holdIds);
+  }
+
   /** Sweep this tenant's lapsed holds to `expired`, freeing their inventory. */
   async expireStale(actor: SeatHoldActor, now?: Date): Promise<number> {
     return this.repo.expireStale(actor.organizationId, now ?? this.clock.now());

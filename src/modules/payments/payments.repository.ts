@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, ilike, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, ilike, inArray, ne, or, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
   events,
@@ -360,6 +360,32 @@ export class PaymentsRepository {
       .update(payments)
       .set({ gatewayRef })
       .where(eq(payments.id, paymentId));
+  }
+
+  /**
+   * The payment that paid for an order, for refunding it (US-REG-02): the
+   * newest one still paid, else the newest already refunded — which says the
+   * money has gone back. Never a pending or failed attempt: no money moved.
+   */
+  async findSettledPaymentForOrder(
+    organizationId: number,
+    orderId: string,
+  ): Promise<PaymentRow | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(payments)
+        .where(
+          and(
+            eq(payments.organizationId, organizationId),
+            eq(payments.orderId, orderId),
+            inArray(payments.status, ['paid', 'refunded']),
+          ),
+        )
+        .orderBy(sql`${payments.status} = 'paid' DESC`, desc(payments.paidAt))
+        .limit(1);
+      return row ?? null;
+    });
   }
 
   /** The payment an admin may refund — tenant-scoped, so another org's is invisible. */

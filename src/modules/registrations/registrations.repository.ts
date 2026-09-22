@@ -101,6 +101,7 @@ export class RegistrationsRepository {
       cancelledAt: orders.cancelledAt,
       waitlistPosition: waitlistPosition(),
       offerExpiresAt: orders.offerExpiresAt,
+      approvalRequestedAt: orders.approvalRequestedAt,
     };
   }
 
@@ -196,5 +197,6 @@ function toRow(row: Record<string, unknown>): RegistrationRow {
         ? null
         : Number(row.waitlistPosition),
     offerExpiresAt: (row.offerExpiresAt as Date | null) ?? null,
+    approvalRequestedAt: (row.approvalRequestedAt as Date | null) ?? null,
   };
 }

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AccessModule } from '../access/access.module';
 import { CheckoutModule } from '../checkout/checkout.module';
+import { PaymentsModule } from '../payments/payments.module';
 import { RegistrationDecisionsService } from './registration-decisions.service';
 import { RegistrationEntryService } from './registration-entry.service';
 import { RegistrationsController } from './registrations.controller';
@@ -25,9 +26,12 @@ import { RegistrationInsightsAdapter } from './registration-insights.adapter';
  * priced, reserved and placed by the attendee checkout's own code) — so this
  * module never touches orders, tickets, tiers or seat holds itself. No
  * `forwardRef` — Checkout has no reason to ask the queue anything back.
+ * `PaymentsModule` binds `RegistrationRefundPort`: rejecting a registration
+ * paid for while it awaited approval refunds it through THE refund path. No
+ * cycle — Payments imports only Access, Checkout and PaymentSettings.
  */
 @Module({
-  imports: [AccessModule, CheckoutModule],
+  imports: [AccessModule, CheckoutModule, PaymentsModule],
   controllers: [RegistrationsController],
   providers: [
     {

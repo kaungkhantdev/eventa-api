@@ -1,7 +1,13 @@
 import { formatBaht } from '../../common/money/baht';
-import { canApprove, canOffer, canReject } from './registration-decision';
+import {
+  canApprove,
+  canOffer,
+  canReject,
+  rejectionRefunds,
+} from './registration-decision';
+import { isAwaitingApproval } from '../checkout/approval-rules';
 import type { RegistrationEntryDto } from './dto/registrations.dto';
-import type { RegistrationRow } from './registrations.types';
+import type { QueueAccess, RegistrationRow } from './registrations.types';
 
 /**
  * One queue row. Money is MASKED for a caller without finance access — the
@@ -10,14 +16,16 @@ import type { RegistrationRow } from './registrations.types';
  *
  * `canApprove`/`canReject` are decided server-side from the same rules the
  * write path enforces, so the console can never offer an action the API would
- * refuse.
+ * refuse — including a rejection that refunds, which needs the refund
+ * permission too (US-REG-02).
  */
 export function toRegistrationEntry(
   row: RegistrationRow,
-  canViewMoney: boolean,
+  access: QueueAccess,
 ): RegistrationEntryDto {
+  const { canViewMoney } = access;
   const approve = canApprove(row);
-  const reject = canReject(row);
+  const reject = canReject(row, { mayRefund: access.canRefund });
   return {
     id: row.id,
     reference: row.reference,
@@ -42,6 +50,8 @@ export function toRegistrationEntry(
     canOffer: canOffer(row).allowed,
     waitlistPosition: row.waitlistPosition,
     offerExpiresAt: row.offerExpiresAt?.toISOString() ?? null,
+    awaitingApproval: isAwaitingApproval(row),
+    rejectRefunds: rejectionRefunds(row),
   };
 }
 

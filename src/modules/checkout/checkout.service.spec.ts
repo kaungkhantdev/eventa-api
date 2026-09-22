@@ -34,6 +34,7 @@ function event(o: Partial<CheckoutEvent> = {}): CheckoutEvent {
     organizerName: 'Acme',
     seatingMode: 'ga',
     waitlistEnabled: false,
+    requiresApproval: false,
     ...o,
   };
 }
@@ -96,6 +97,7 @@ describe('CheckoutService (US-DISC-04)', () => {
         { id: 22, expiresAt: new Date('2026-06-01T00:10:00Z') },
       ]),
       release: jest.fn().mockResolvedValue(undefined),
+      releaseUnattached: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<SeatHoldService>;
     repo = {
       orgRates: jest
@@ -325,17 +327,21 @@ describe('CheckoutService (US-DISC-04)', () => {
   });
 
   describe('release — the buyer walked away', () => {
-    it('frees the inventory for the next person', async () => {
+    it('frees the inventory for the next person — only holds no order has taken over', async () => {
+      // Anonymous, and hold ids are sequential: a hold an order is keeping
+      // (a paid seat awaiting approval, US-REG-02) must not be one a stranger
+      // can release by guessing its number.
       await service.release({ eventId: EVENT_ID, holdIds: [11, 12] });
-      expect(holds.release).toHaveBeenCalledWith(
+      expect(holds.releaseUnattached).toHaveBeenCalledWith(
         { organizationId: ORG },
         [11, 12],
       );
+      expect(holds.release).not.toHaveBeenCalled();
     });
 
     it('does nothing when there is nothing to release', async () => {
       await service.release({ eventId: EVENT_ID, holdIds: [] });
-      expect(holds.release).not.toHaveBeenCalled();
+      expect(holds.releaseUnattached).not.toHaveBeenCalled();
     });
   });
 });

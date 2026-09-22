@@ -83,6 +83,9 @@ const UPDATABLE_KEYS: (keyof NewEventValues & keyof UpdateEventInput)[] = [
   'seatingMode',
   'capacity',
   'waitlistEnabled',
+  // Applies to registrations placed from now on: each order keeps the rule it
+  // was placed under (orders.requires_approval), so a flip never strands one.
+  'requiresApproval',
   'coverImage',
   'accentColor',
   'contactEmail',
@@ -192,6 +195,7 @@ export class EventsService {
       // A setting, not a queue: the copy starts with the waitlist switched on
       // or off as the original was, and with nobody on it (US-EVT-13).
       waitlistEnabled: src.waitlistEnabled,
+      requiresApproval: src.requiresApproval,
       coverImage: src.coverImage,
       accentColor: src.accentColor,
       organizerName: src.organizerName,

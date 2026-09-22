@@ -148,11 +148,15 @@ export class CheckoutService {
     };
   }
 
-  /** Give the inventory back — the buyer abandoned the checkout. */
+  /**
+   * Give the inventory back — the buyer abandoned the checkout before placing
+   * an order. Anonymous, so it frees only holds no order has taken over: a
+   * placed order's seats are that order's to give up (US-REG-02).
+   */
   async release(input: ReleaseCheckoutInput): Promise<void> {
     if (input.holdIds.length === 0) return;
     const { event } = await this.view.load(input.eventId);
-    await this.holds.release(
+    await this.holds.releaseUnattached(
       { organizationId: event.organizationId },
       input.holdIds,
     );

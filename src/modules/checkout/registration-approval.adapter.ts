@@ -10,6 +10,7 @@ import {
   type OfferResult,
   RegistrationApprovalPort,
   type RejectionInput,
+  type RejectionResult,
 } from '../registrations/ports/registration-approval.port';
 import {
   type ApprovalSettlement,
@@ -141,6 +142,7 @@ export class RegistrationApprovalAdapter extends RegistrationApprovalPort {
       status: order.status,
       paymentStatus: order.paymentStatus,
       totalSatang: order.totalSatang,
+      approvalRequestedAt: order.approvalRequestedAt,
     };
   }
 
@@ -193,13 +195,14 @@ export class RegistrationApprovalAdapter extends RegistrationApprovalPort {
     organizationId: number,
     orderId: string,
     input: RejectionInput,
-  ): Promise<{ reference: string }> {
+  ): Promise<RejectionResult> {
     const now = this.clock.now();
     return this.repo.rejectOrder({
       organizationId,
       orderId,
       decidedBy: input.decidedBy,
       reason: input.reason,
+      mayRefund: input.mayRefund,
       buildRejectedEvent: (order) =>
         registrationRejectedEvent({
           organizationId,

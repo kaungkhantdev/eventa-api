@@ -82,7 +82,7 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     slug: 'registration-confirmation',
     title: 'Registration confirmation',
     description:
-      'Sent the moment a registration is paid for, carrying the attendee’s ticket and order summary.',
+      'Sent the moment a registration is confirmed — paid for, or approved on an event that requires approval — carrying the attendee’s ticket and order summary.',
     channels: ['email'],
     delivery: 'controlled',
     expected: true,
@@ -107,7 +107,7 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     // settings (US-SET-10) — and eventa-worker sends only when both are on.
     // Saying so here is what stops one of them looking broken.
     description:
-      'An itemized receipt, VAT included, sent when a registration is paid for. Also needs “Email receipts” on in payment settings.',
+      'An itemized receipt, VAT included, sent when a paid registration is confirmed — at payment, or at approval on an event that requires approval. Also needs “Email receipts” on in payment settings.',
     channels: ['email'],
     delivery: 'controlled',
     expected: true,

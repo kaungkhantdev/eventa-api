@@ -125,6 +125,14 @@ export class UpdateEventDto {
   @IsBoolean()
   waitlistEnabled?: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Hold each registration for the organizer to approve or reject before it is confirmed (US-REG-02). A paid registration pays first; rejecting it refunds the payment. Applies to registrations placed after the change.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  requiresApproval?: boolean;
+
   @ApiPropertyOptional({ maxLength: 500 })
   @IsOptional()
   @IsString()

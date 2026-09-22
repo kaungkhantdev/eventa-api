@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  boolean,
   char,
   check,
   index,
@@ -111,6 +112,19 @@ export const orders = pgTable(
     offeredBy: uuid().references(() => users.id, { onDelete: 'set null' }),
     offerExpiresAt: timestamp({ withTimezone: true }),
     offerSkipped: smallint(),
+    /**
+     * The event's "Require approval" rule as the buyer was told it at checkout
+     * (US-REG-02) — a snapshot, so flipping the event's switch later, or while
+     * this buyer's payment is in flight, never changes the deal they made.
+     */
+    requiresApproval: boolean().notNull().default(false),
+    /**
+     * When the organizer's decision became the only thing left: at placement
+     * for a free order, when the money landed for a paid one. Pending with this
+     * set is "awaiting approval" — on the organizer's clock, not the buyer's,
+     * so nothing expires it.
+     */
+    approvalRequestedAt: timestamp({ withTimezone: true }),
     cancelledAt: timestamp({ withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

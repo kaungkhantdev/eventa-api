@@ -11,7 +11,7 @@ import {
 } from './dto/registrations.dto';
 import { toRegistrationEntry } from './registrations.mapper';
 import { RegistrationsRepository } from './registrations.repository';
-import type { RegistrationFilters } from './registrations.types';
+import type { QueueAccess, RegistrationFilters } from './registrations.types';
 
 export interface ListRegistrationsQuery {
   page?: number;
@@ -57,14 +57,14 @@ export class RegistrationsService {
       eventId: query.eventId,
       search: query.search,
     };
-    const [result, counts, canViewMoney] = await Promise.all([
+    const [result, counts, access] = await Promise.all([
       this.repo.page(auth.organizationId, filters),
       this.repo.countByStatus(auth.organizationId, countFilters),
-      this.canViewMoney(auth),
+      this.accessOf(auth),
     ]);
     return {
       page: Paginated.of(
-        result.items.map((row) => toRegistrationEntry(row, canViewMoney)),
+        result.items.map((row) => toRegistrationEntry(row, access)),
         result.total,
         page,
         limit,
@@ -73,11 +73,14 @@ export class RegistrationsService {
     };
   }
 
-  private async canViewMoney(auth: AuthContext): Promise<boolean> {
+  private async accessOf(auth: AuthContext): Promise<QueueAccess> {
     const granted = await this.permissions.getFor(
       auth.organizationId,
       auth.userId,
     );
-    return granted.includes(Permission.finView);
+    return {
+      canViewMoney: granted.includes(Permission.finView),
+      canRefund: granted.includes(Permission.finRefund),
+    };
   }
 }

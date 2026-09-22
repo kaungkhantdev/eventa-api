@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { DomainException } from '../../common/errors/domain.exception';
 import type { Env } from '../../config/env.validation';
 import { Clock } from '../../common/time/clock';
+import { isAwaitingApproval, placementFor } from './approval-rules';
 import { CheckoutService, type PricedSelection } from './checkout.service';
 import {
   CheckoutRepository,
@@ -44,6 +45,11 @@ export interface OrganizerEntry {
  * placed as `pending` with its seats still held, and the tickets are minted when
  * the payment settles (US-DISC-05) — so nobody holds a QR for something they
  * have not paid for.
+ *
+ * On an event that requires approval (US-REG-02) no order is ticketed here: a
+ * free one is placed waiting for the organizer with its places counted, and a
+ * paid one is placed for payment exactly as above — it starts waiting when the
+ * money lands. The tickets and the confirmation come with the approval.
  */
 /** Said for a bad id and for somebody else's alike — the two must not be
  *  distinguishable, or the endpoint becomes a way to probe for orders. */
@@ -85,8 +91,12 @@ export class CheckoutOrderService {
   ): Promise<{ order: OrderRow; tickets: TicketRow[] }> {
     const { summary, event } = priced;
     const now = this.clock.now();
-    // Nothing owed → the registration is complete the moment it is placed.
-    const issueTickets = !summary.paymentRequired;
+    // Nothing owed and nobody to ask → complete the moment it is placed.
+    const { issueTickets, requiresApproval, awaitsDecision } = placementFor({
+      requiresApproval: event.requiresApproval,
+      paymentRequired: summary.paymentRequired,
+      organizerEntry: entry !== undefined,
+    });
     // US-REG-03's "Send confirmation" toggle. Off means the ticket is created
     // quietly for the organizer to hand over — so no outbox row is written at
     // all, rather than one the worker is asked to ignore.
@@ -106,6 +116,8 @@ export class CheckoutOrderService {
       discountCodeId: priced.discountCodeId,
       createdBy: entry?.createdBy,
       issueTickets,
+      requiresApproval,
+      awaitsDecision,
       qrTokens: issueTickets
         ? Array.from({ length: summary.quantity }, () => generateQrToken())
         : [],
@@ -152,9 +164,14 @@ export class CheckoutOrderService {
     const found = await this.repo.findGuestOrder(orderId);
     if (!found) throw DomainException.notFound(ORDER_NOT_FOUND);
     const { order, tickets, eventName, lines } = found;
+    const awaitingApproval = isAwaitingApproval(order);
     // The buyer's actual deadline. Without it the page can only say "awaiting
     // payment", which stays true and stops being useful the moment it lapses.
-    const holdExpiresAt = await this.repo.holdExpiryForOrder(order.id);
+    // A registration awaiting approval has none: its reserved seat's hold runs
+    // to a sentinel date, and showing that as a deadline would be a lie.
+    const holdExpiresAt = awaitingApproval
+      ? null
+      : await this.repo.holdExpiryForOrder(order.id);
     return {
       orderId: order.id,
       reference: order.reference,
@@ -177,8 +194,10 @@ export class CheckoutOrderService {
         status: ticket.status,
       })),
       // Owed until the money has actually arrived — a pending order is exactly
-      // when somebody comes looking for this page.
-      paymentRequired: order.paymentStatus !== 'paid',
+      // when somebody comes looking for this page. Awaiting approval owes
+      // nothing: a paid one has paid, and a free one never owed.
+      paymentRequired: !awaitingApproval && order.paymentStatus !== 'paid',
+      awaitingApproval,
       placedAt: order.createdAt.toISOString(),
       holdExpiresAt: holdExpiresAt?.toISOString() ?? null,
     };
@@ -209,6 +228,7 @@ export class CheckoutOrderService {
       })),
       // Only a fully-placed, paid-up order has anything to show yet.
       paymentRequired: summary.paymentRequired,
+      awaitingApproval: isAwaitingApproval(order),
     };
   }
 }

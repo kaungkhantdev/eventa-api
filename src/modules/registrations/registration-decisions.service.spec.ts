@@ -1,13 +1,18 @@
+import { HttpStatus } from '@nestjs/common';
 import { RegistrationDecisionsService } from './registration-decisions.service';
-import type { DomainException } from '../../common/errors/domain.exception';
+import { DomainException } from '../../common/errors/domain.exception';
+import { ErrorCode } from '../../common/errors/error-codes';
+import type { PermissionsService } from '../access/permissions.service';
 import type { AuthContext } from '../auth/auth.types';
 import type {
   DecidableOrder,
   RegistrationApprovalPort,
 } from './ports/registration-approval.port';
+import type { RegistrationRefundPort } from './ports/registration-refund.port';
 import {
   APPROVE_BLOCKED_UNPAID,
   OFFER_NOT_WAITLISTED,
+  REJECT_NEEDS_REFUND_PERMISSION,
 } from './registration-decision';
 import { NO_SEAT_FREE } from './registration-decisions.service';
 
@@ -37,11 +42,26 @@ const decidable = (o: Partial<DecidableOrder> = {}): DecidableOrder => ({
   status: 'pending',
   paymentStatus: 'pending',
   totalSatang: 0,
+  approvalRequestedAt: null,
   ...o,
 });
 
+/** Paid for, and waiting for the organizer (US-REG-02 — pay first). */
+const paidAndWaiting = (o: Partial<DecidableOrder> = {}): DecidableOrder =>
+  decidable({
+    paymentStatus: 'paid',
+    totalSatang: 105_000,
+    approvalRequestedAt: new Date('2026-09-01T00:00:00Z'),
+    ...o,
+  });
+
+const REGISTRATION_MANAGER = ['regView', 'regManage'];
+const FINANCE_ADMIN = [...REGISTRATION_MANAGER, 'finRefund'];
+
 describe('RegistrationDecisionsService (US-REG-02)', () => {
   let approvals: jest.Mocked<RegistrationApprovalPort>;
+  let refunds: jest.Mocked<RegistrationRefundPort>;
+  let permissions: jest.Mocked<PermissionsService>;
   let service: RegistrationDecisionsService;
 
   beforeEach(() => {
@@ -53,14 +73,24 @@ describe('RegistrationDecisionsService (US-REG-02)', () => {
         ticketCount: 2,
         reason: null,
       }),
-      reject: jest.fn().mockResolvedValue({ reference: REFERENCE }),
+      reject: jest
+        .fn()
+        .mockResolvedValue({ reference: REFERENCE, refundDue: false }),
       offer: jest.fn().mockResolvedValue({
         outcome: 'offered',
         reference: REFERENCE,
         offerExpiresAt: new Date('2026-08-02T03:00:00Z'),
       }),
     };
-    service = new RegistrationDecisionsService(approvals);
+    refunds = {
+      refundRejected: jest
+        .fn()
+        .mockResolvedValue({ status: 'succeeded', amountSatang: 105_000 }),
+    };
+    permissions = {
+      getFor: jest.fn().mockResolvedValue(REGISTRATION_MANAGER),
+    } as unknown as jest.Mocked<PermissionsService>;
+    service = new RegistrationDecisionsService(approvals, refunds, permissions);
   });
 
   describe('approving', () => {
@@ -156,6 +186,7 @@ describe('RegistrationDecisionsService (US-REG-02)', () => {
       expect(approvals.reject).toHaveBeenCalledWith(ORG, ORDER, {
         decidedBy: 'u-1',
         reason: 'Duplicate sign-up',
+        mayRefund: false,
       });
     });
 
@@ -201,6 +232,95 @@ describe('RegistrationDecisionsService (US-REG-02)', () => {
       await expect(
         service.reject(auth, ORDER, { confirm: true, reason: null }),
       ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+  });
+
+  describe('rejecting a registration paid for while it waited (US-REG-02)', () => {
+    const rejectIt = () =>
+      service.reject(auth, ORDER, { confirm: true, reason: 'Not a member' });
+
+    beforeEach(() => {
+      approvals.findDecidable.mockResolvedValue(paidAndWaiting());
+      approvals.reject.mockResolvedValue({
+        reference: REFERENCE,
+        refundDue: true,
+      });
+      permissions.getFor.mockResolvedValue(FINANCE_ADMIN);
+    });
+
+    it('rejects first, then refunds — so an approval racing it cannot win after the money went back', async () => {
+      await expect(rejectIt()).resolves.toMatchObject({ outcome: 'rejected' });
+
+      expect(permissions.getFor).toHaveBeenCalledWith(ORG, 'u-1');
+      expect(refunds.refundRejected).toHaveBeenCalledWith(auth, ORDER);
+      const [rejected] = approvals.reject.mock.invocationCallOrder;
+      const [refunded] = refunds.refundRejected.mock.invocationCallOrder;
+      expect(rejected).toBeLessThan(refunded);
+    });
+
+    it('refunds nothing for a free registration', async () => {
+      approvals.findDecidable.mockResolvedValue(
+        decidable({ approvalRequestedAt: new Date('2026-09-01T00:00:00Z') }),
+      );
+      approvals.reject.mockResolvedValue({
+        reference: REFERENCE,
+        refundDue: false,
+      });
+
+      await rejectIt();
+
+      expect(refunds.refundRejected).not.toHaveBeenCalled();
+    });
+
+    it('refuses someone without the refund permission, and decides nothing', async () => {
+      permissions.getFor.mockResolvedValue(REGISTRATION_MANAGER);
+
+      const error = await failure(rejectIt());
+
+      expect(error.getStatus()).toBe(HttpStatus.FORBIDDEN);
+      expect(error.message).toBe(REJECT_NEEDS_REFUND_PERMISSION);
+      expect(approvals.reject).not.toHaveBeenCalled();
+      expect(refunds.refundRejected).not.toHaveBeenCalled();
+    });
+
+    it('says the registration WAS rejected when the refund then fails, and where to finish it', async () => {
+      refunds.refundRejected.mockRejectedValue(
+        new DomainException(
+          ErrorCode.INTERNAL_ERROR,
+          'The provider refused the refund: card expired.',
+          HttpStatus.BAD_GATEWAY,
+        ),
+      );
+
+      const error = await failure(rejectIt());
+
+      expect(error.getStatus()).toBe(HttpStatus.BAD_GATEWAY);
+      expect(error.message).toMatch(/was rejected/i);
+      expect(error.message).toMatch(/card expired/);
+      expect(error.message).toMatch(/Payments/);
+    });
+
+    it('a retried rejection finishes a refund that did not go through the first time', async () => {
+      approvals.findDecidable.mockResolvedValue(
+        paidAndWaiting({ status: 'rejected' }),
+      );
+
+      await rejectIt();
+
+      expect(approvals.reject).toHaveBeenCalled();
+      expect(refunds.refundRejected).toHaveBeenCalledWith(auth, ORDER);
+    });
+
+    it('will not let someone without the refund permission retry that refund either', async () => {
+      approvals.findDecidable.mockResolvedValue(
+        paidAndWaiting({ status: 'rejected' }),
+      );
+      permissions.getFor.mockResolvedValue(REGISTRATION_MANAGER);
+
+      const error = await failure(rejectIt());
+
+      expect(error.getStatus()).toBe(HttpStatus.FORBIDDEN);
+      expect(refunds.refundRejected).not.toHaveBeenCalled();
     });
   });
 

@@ -53,6 +53,7 @@ describe('SeatHoldService', () => {
       holdSeats: jest.fn(),
       holdQuantity: jest.fn(),
       release: jest.fn().mockResolvedValue(undefined),
+      releaseUnattached: jest.fn().mockResolvedValue(undefined),
       expireStale: jest.fn().mockResolvedValue(0),
       ticketTypeIdsForSeats: jest.fn().mockResolvedValue([]),
     } as unknown as jest.Mocked<SeatHoldRepository>;
@@ -257,6 +258,11 @@ describe('SeatHoldService', () => {
     it('delegates release to the repository', async () => {
       await service.release(actor, [1, 2]);
       expect(repo.release).toHaveBeenCalledWith(1, [1, 2]);
+    });
+
+    it('delegates a release of holds no order has taken over', async () => {
+      await service.releaseUnattached(actor, [1, 2]);
+      expect(repo.releaseUnattached).toHaveBeenCalledWith(1, [1, 2]);
     });
 
     it('expires stale holds using the clock when no time is given', async () => {

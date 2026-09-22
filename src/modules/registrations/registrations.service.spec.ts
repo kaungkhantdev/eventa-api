@@ -32,6 +32,7 @@ const row = (o: Partial<RegistrationRow> = {}): RegistrationRow => ({
   cancelledAt: null,
   waitlistPosition: null,
   offerExpiresAt: null,
+  approvalRequestedAt: null,
   ...o,
 });
 
@@ -180,6 +181,61 @@ describe('RegistrationsService (US-REG-01)', () => {
       const [item] = (await list()).page.items;
       expect(item.canApprove).toBe(false);
       expect(item.canReject).toBe(false);
+    });
+  });
+
+  describe('awaiting approval (US-REG-02 — pay first)', () => {
+    const REQUESTED = new Date('2026-06-02T00:00:00Z');
+    const paidAndWaiting = () =>
+      row({ paymentStatus: 'paid', approvalRequestedAt: REQUESTED });
+
+    it('says a registration is waiting for a decision, and a pending payment is not', async () => {
+      repo.page.mockResolvedValue({
+        items: [paidAndWaiting(), row()],
+        total: 2,
+      });
+      const [waiting, unpaid] = (await list()).page.items;
+      expect(waiting.awaitingApproval).toBe(true);
+      expect(unpaid.awaitingApproval).toBe(false);
+    });
+
+    it('offers approve, and a reject that refunds, to someone who may refund', async () => {
+      permissions.getFor.mockResolvedValue([
+        'regView',
+        'regManage',
+        'finRefund',
+      ]);
+      repo.page.mockResolvedValue({ items: [paidAndWaiting()], total: 1 });
+      const [item] = (await list()).page.items;
+      expect(item.canApprove).toBe(true);
+      expect(item.canReject).toBe(true);
+      expect(item.rejectRefunds).toBe(true);
+    });
+
+    it('explains to someone who may not refund why they cannot reject it', async () => {
+      permissions.getFor.mockResolvedValue(['regView', 'regManage']);
+      repo.page.mockResolvedValue({ items: [paidAndWaiting()], total: 1 });
+      const [item] = (await list()).page.items;
+      expect(item.canApprove).toBe(true);
+      expect(item.canReject).toBe(false);
+      expect(item.rejectBlockedReason).toMatch(/refund permission/);
+    });
+
+    it('rejecting a free one refunds nothing', async () => {
+      repo.page.mockResolvedValue({
+        items: [row({ totalSatang: 0, approvalRequestedAt: REQUESTED })],
+        total: 1,
+      });
+      const [item] = (await list()).page.items;
+      expect(item.awaitingApproval).toBe(true);
+      expect(item.rejectRefunds).toBe(false);
+    });
+
+    it('still masks the amount from a caller without finance access', async () => {
+      permissions.getFor.mockResolvedValue(['regView', 'finRefund']);
+      repo.page.mockResolvedValue({ items: [paidAndWaiting()], total: 1 });
+      const [item] = (await list()).page.items;
+      expect(item.totalSatang).toBeNull();
     });
   });
 

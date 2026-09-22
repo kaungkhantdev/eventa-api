@@ -118,6 +118,7 @@ export interface UpdateEventInput {
   seatingMode?: SeatingMode;
   capacity?: number | null;
   waitlistEnabled?: boolean;
+  requiresApproval?: boolean;
   coverImage?: string | null;
   accentColor?: string | null;
   contactEmail?: string | null;

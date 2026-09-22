@@ -35,6 +35,7 @@ function event(o: Partial<CheckoutEvent> = {}): CheckoutEvent {
     organizerName: 'Acme',
     seatingMode: 'ga',
     waitlistEnabled: false,
+    requiresApproval: false,
     ...o,
   };
 }

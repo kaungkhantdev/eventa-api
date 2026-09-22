@@ -27,6 +27,11 @@ export interface CheckoutEvent {
   seatingMode: SeatingMode;
   /** The organizer's switch for a sold-out ticket's waitlist (US-REG-04). */
   waitlistEnabled: boolean;
+  /**
+   * Each registration waits for the organizer's decision (US-REG-02) — a paid
+   * one after its payment lands. Copied onto the order when it is placed.
+   */
+  requiresApproval: boolean;
 }
 
 /** A sellable tier as the checkout needs it — resolved through `TicketCatalogPort`. */

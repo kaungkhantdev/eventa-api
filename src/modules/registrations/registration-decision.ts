@@ -7,6 +7,8 @@ export const APPROVE_BLOCKED_UNPAID =
   "Payment isn't complete yet, so this registration can't be approved.";
 export const REJECT_BLOCKED_PAID =
   'Money has been captured for this registration — cancel and refund it instead of rejecting.';
+export const REJECT_NEEDS_REFUND_PERMISSION =
+  'Rejecting this registration refunds its payment, and refunds need the refund permission — ask an Admin.';
 const ALREADY_REJECTED =
   'This registration was rejected, and a rejection cannot be undone.';
 const NOT_AWAITING =
@@ -19,6 +21,18 @@ export interface DecidableRegistration {
   status: OrderStatus;
   paymentStatus: PaymentStatus;
   totalSatang: number;
+  /**
+   * When it started waiting for the organizer on an event that requires
+   * approval (US-REG-02); null for anything else. Money taken while this is
+   * set was taken on the promise of a decision, so a "no" gives it back.
+   */
+  approvalRequestedAt: Date | null;
+}
+
+/** What the person deciding may do beyond deciding. */
+export interface DeciderAccess {
+  /** Holds the refund permission (US-FIN-02) — refunds are Finance's call. */
+  mayRefund: boolean;
 }
 
 export interface Verdict {
@@ -46,16 +60,40 @@ export function canApprove(registration: DecidableRegistration): Verdict {
 }
 
 /**
- * Whether an organizer may reject (US-REG-02). Rejecting frees the seat but
- * moves no money, so it is refused once anything has been captured — that path
- * is cancel-and-refund, which puts the reversal through the refund ledger
- * where it can be reconciled.
+ * Whether an organizer may reject (US-REG-02). Rejecting frees the seat.
+ *
+ * Money captured on an ordinary sale is refused here — that path is
+ * cancel-and-refund, which puts the reversal through the refund ledger where
+ * it can be reconciled. Money taken while the registration waited for
+ * approval is different: the buyer paid on the promise of a decision, so
+ * rejecting refunds it, through that same ledger. A refund is Finance's
+ * privilege, so that rejection needs the refund permission too.
  */
-export function canReject(registration: DecidableRegistration): Verdict {
+export function canReject(
+  registration: DecidableRegistration,
+  access: DeciderAccess,
+): Verdict {
   const terminal = terminalReason(registration.status);
   if (terminal) return refuse(terminal);
+  if (rejectionRefunds(registration)) {
+    return access.mayRefund
+      ? { allowed: true, reason: null }
+      : refuse(REJECT_NEEDS_REFUND_PERMISSION);
+  }
   if (registration.paymentStatus === 'paid') return refuse(REJECT_BLOCKED_PAID);
   return { allowed: true, reason: null };
+}
+
+/**
+ * Rejecting this registration gives money back: it was paid for while waiting
+ * for approval, and the payment is still held. True of a rejection whose
+ * refund has not gone through yet, too — a retried reject finishes it.
+ */
+export function rejectionRefunds(registration: DecidableRegistration): boolean {
+  return (
+    registration.paymentStatus === 'paid' &&
+    registration.approvalRequestedAt !== null
+  );
 }
 
 /**

@@ -147,6 +147,20 @@ export class RegistrationEntryDto {
     description: 'When a waitlist offer lapses and passes to the next in line.',
   })
   offerExpiresAt!: string | null;
+
+  @ApiProperty({
+    description:
+      'Waiting for the organizer to approve or reject it (US-REG-02) — paid ' +
+      'for already if it cost anything, ticketed only on approval.',
+  })
+  awaitingApproval!: boolean;
+
+  @ApiProperty({
+    description:
+      'Rejecting this registration refunds its payment — it was paid for ' +
+      'while it waited for approval.',
+  })
+  rejectRefunds!: boolean;
 }
 
 /** Live tab totals across the whole filtered queue. */

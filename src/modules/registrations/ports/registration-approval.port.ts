@@ -42,6 +42,23 @@ export interface OfferResult {
 export interface RejectionInput {
   decidedBy: string;
   reason: string | null;
+  /**
+   * The decider holds the refund permission. Re-checked under the order's row
+   * lock: a payment can land between the organizer reading the list and
+   * clicking Reject, turning a plain rejection into one that refunds.
+   */
+  mayRefund: boolean;
+}
+
+/**
+ * What rejecting did. `refundDue` — the registration was paid for while it
+ * waited for approval and the money has not gone back yet: the caller refunds
+ * it now. Also true when a rejection is retried after its refund failed, so
+ * the retry can finish it.
+ */
+export interface RejectionResult {
+  reference: string;
+  refundDue: boolean;
 }
 
 /**
@@ -72,15 +89,16 @@ export abstract class RegistrationApprovalPort {
   ): Promise<ApprovalResult>;
 
   /**
-   * Reject: release the held seat so it can go to someone else and queue the
+   * Reject: give the places back so they can go to someone else and queue the
    * notice. Terminal — the status re-check happens under the order's row lock,
-   * so two organizers deciding at once cannot both win.
+   * so two organizers deciding at once cannot both win. Moves no money itself:
+   * `refundDue` tells the caller when there is money to give back.
    */
   abstract reject(
     organizationId: number,
     orderId: string,
     input: RejectionInput,
-  ): Promise<{ reference: string }>;
+  ): Promise<RejectionResult>;
 
   /**
    * Offer a waitlisted registration a seat to pay for (US-REG-04): hold it for

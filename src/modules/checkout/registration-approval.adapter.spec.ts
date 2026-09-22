@@ -149,3 +149,61 @@ describe('RegistrationApprovalAdapter.offer (US-REG-04)', () => {
     expect((error as DomainException).getStatus()).toBe(404);
   });
 });
+
+describe('RegistrationApprovalAdapter — deciding (US-REG-02)', () => {
+  const REQUESTED = new Date('2026-08-01T02:00:00.000Z');
+  let repo: jest.Mocked<CheckoutRepository>;
+  let adapter: RegistrationApprovalAdapter;
+
+  beforeEach(() => {
+    repo = {
+      orderById: jest.fn().mockResolvedValue({
+        ...entry().order,
+        status: 'pending',
+        paymentStatus: 'paid',
+        approvalRequestedAt: REQUESTED,
+      }),
+      rejectOrder: jest
+        .fn()
+        .mockResolvedValue({ reference: 'ORD-AAAA1111', refundDue: true }),
+    } as unknown as jest.Mocked<CheckoutRepository>;
+    const config = {
+      getOrThrow: (key: string) =>
+        key === 'WAITLIST_OFFER_HOURS' ? OFFER_HOURS : 'https://web.test',
+    } as unknown as ConfigService<Env, true>;
+    adapter = new RegistrationApprovalAdapter(
+      repo,
+      {} as CheckoutEventPort,
+      { now: () => NOW },
+      config,
+      {} as SeatHoldService,
+    );
+  });
+
+  it('shows the decision when the registration started waiting for it', async () => {
+    await expect(adapter.findDecidable(ORG, 'o-1')).resolves.toMatchObject({
+      status: 'pending',
+      paymentStatus: 'paid',
+      approvalRequestedAt: REQUESTED,
+    });
+  });
+
+  it('rejects under the lock with the decider’s refund permission, and says whether money is owed back', async () => {
+    await expect(
+      adapter.reject(ORG, 'o-1', {
+        decidedBy: 'u-1',
+        reason: 'Not a member',
+        mayRefund: true,
+      }),
+    ).resolves.toEqual({ reference: 'ORD-AAAA1111', refundDue: true });
+    expect(repo.rejectOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: ORG,
+        orderId: 'o-1',
+        decidedBy: 'u-1',
+        reason: 'Not a member',
+        mayRefund: true,
+      }),
+    );
+  });
+});

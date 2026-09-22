@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
+import { Permission } from '../../common/decorators/require-permissions.decorator';
 import { DomainException } from '../../common/errors/domain.exception';
+import { PermissionsService } from '../access/permissions.service';
 import type { AuthContext } from '../auth/auth.types';
 import type {
   DecisionOutcomeDto,
@@ -9,11 +11,15 @@ import {
   type DecidableOrder,
   RegistrationApprovalPort,
 } from './ports/registration-approval.port';
+import { RegistrationRefundPort } from './ports/registration-refund.port';
 import {
+  type DeciderAccess,
+  REJECT_NEEDS_REFUND_PERMISSION,
   type Verdict,
   canApprove,
   canOffer,
   canReject,
+  rejectionRefunds,
 } from './registration-decision';
 
 export interface RejectRegistrationCommand {
@@ -30,6 +36,11 @@ const UNAVAILABLE = 'This registration can no longer be approved.';
 export const NO_SEAT_FREE =
   'No seat is free on this ticket — raise its capacity, or wait for one to free up.';
 
+/** The provider's own words follow the colon — they are written for a person. */
+const REFUND_DID_NOT_GO_THROUGH =
+  'The registration was rejected, but its refund did not go through:';
+const FINISH_FROM_PAYMENTS = 'Issue the refund from Payments.';
+
 /**
  * The organizer's decision on a sign-up (US-REG-02).
  *
@@ -44,10 +55,18 @@ export const NO_SEAT_FREE =
  * Approving does not mint tickets here — it runs THE settlement transaction
  * through the port, the same one a card payment runs. There is exactly one
  * code path in this system that can issue a QR.
+ *
+ * Rejecting a registration paid for while it waited for approval refunds it —
+ * through `RegistrationRefundPort`, THE refund path — and so needs the refund
+ * permission as well as the decision one.
  */
 @Injectable()
 export class RegistrationDecisionsService {
-  constructor(private readonly approvals: RegistrationApprovalPort) {}
+  constructor(
+    private readonly approvals: RegistrationApprovalPort,
+    private readonly refunds: RegistrationRefundPort,
+    private readonly permissions: PermissionsService,
+  ) {}
 
   async approve(
     auth: AuthContext,
@@ -80,14 +99,55 @@ export class RegistrationDecisionsService {
     if (!command.confirm) {
       throw DomainException.validation(NEEDS_CONFIRMATION);
     }
-    const order = await this.mustFind(auth, orderId);
-    this.assertDecidable(order, 'rejected', canReject);
-    const { reference } = await this.approvals.reject(
+    const [order, access] = await Promise.all([
+      this.mustFind(auth, orderId),
+      this.accessOf(auth),
+    ]);
+    // Before anything is written, and on a retry too: a rejection that
+    // refunds is a refund, and refunds are Finance's (US-FIN-02).
+    if (rejectionRefunds(order) && !access.mayRefund) {
+      throw DomainException.forbidden(REJECT_NEEDS_REFUND_PERMISSION);
+    }
+    this.assertDecidable(order, 'rejected', (o) => canReject(o, access));
+    // Rejected FIRST, under the order's lock, so an approval racing this one
+    // cannot issue tickets after the money has gone back.
+    const { reference, refundDue } = await this.approvals.reject(
       auth.organizationId,
       orderId,
-      { decidedBy: auth.userId, reason: command.reason },
+      { decidedBy: auth.userId, reason: command.reason, ...access },
     );
+    if (refundDue) await this.refundRejection(auth, orderId);
     return { outcome: 'rejected', reference, ticketCount: 0 };
+  }
+
+  /**
+   * Give a rejected registration's money back. The rejection has already
+   * committed, so a refusal from the provider must say so: the organizer is
+   * told the registration IS rejected, why the money did not move, and where
+   * to finish it — never a bare error that reads as "nothing happened".
+   */
+  private async refundRejection(
+    auth: AuthContext,
+    orderId: string,
+  ): Promise<void> {
+    try {
+      await this.refunds.refundRejected(auth, orderId);
+    } catch (error) {
+      if (!(error instanceof DomainException)) throw error;
+      throw new DomainException(
+        error.code,
+        `${REFUND_DID_NOT_GO_THROUGH} ${error.message} ${FINISH_FROM_PAYMENTS}`,
+        error.getStatus(),
+      );
+    }
+  }
+
+  private async accessOf(auth: AuthContext): Promise<DeciderAccess> {
+    const granted = await this.permissions.getFor(
+      auth.organizationId,
+      auth.userId,
+    );
+    return { mayRefund: granted.includes(Permission.finRefund) };
   }
 
   /**

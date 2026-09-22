@@ -67,4 +67,12 @@ export class OrderPlacedDto {
 
   @ApiProperty({ description: 'True while the order still awaits payment' })
   paymentRequired!: boolean;
+
+  @ApiProperty({
+    description:
+      'True when the registration now waits for the organizer to approve it ' +
+      '(US-REG-02) — no ticket until they do. A paid order starts waiting only ' +
+      'once its payment lands, so it reads false here.',
+  })
+  awaitingApproval!: boolean;
 }
