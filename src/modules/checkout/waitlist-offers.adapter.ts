@@ -1,7 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { DomainException } from '../../common/errors/domain.exception';
 import { Clock } from '../../common/time/clock';
 import { SeatHoldService } from '../registration/seat-hold.service';
-import { WaitlistOffersPort } from '../ticketing/ports/waitlist-offers.port';
+import {
+  type WaitlistOfferOutcome,
+  WaitlistOffersPort,
+} from '../ticketing/ports/waitlist-offers.port';
 import { CheckoutRepository, type WaitlistEntry } from './checkout.repository';
 import { CheckoutEventPort } from './ports/checkout-event.port';
 import { RegistrationApprovalAdapter } from './registration-approval.adapter';
@@ -50,26 +54,46 @@ export class WaitlistOffersAdapter extends WaitlistOffersPort {
   /**
    * Never rejects: the capacity change this follows is already saved, and an
    * organizer's edit must not fail because an offer did. A failure part-way
-   * is logged for operations and the offers already made are reported.
+   * reports the offers already made and that it was cut short — the new
+   * places left over are on public sale, and only the organizer can still
+   * put them in front of the line.
    */
   async offerNewPlaces(
     organizationId: number,
     eventId: string,
     ticketTypeId: string,
-  ): Promise<number> {
+  ): Promise<WaitlistOfferOutcome> {
     const served: string[] = [];
     try {
       const event = await this.events.findOwnedById(organizationId, eventId);
       if (event && autoOffersWaitlist(event)) {
         await this.serveInOrder(organizationId, ticketTypeId, served);
       }
+      return { offered: served.length, interrupted: false };
     } catch (err) {
-      this.logger.warn(
-        { err, eventId, ticketTypeId, offered: served.length },
-        STOPPED_EARLY,
-      );
+      this.logStoppedEarly(err, {
+        eventId,
+        ticketTypeId,
+        offered: served.length,
+      });
+      return { offered: served.length, interrupted: true };
     }
-    return served.length;
+  }
+
+  /**
+   * A domain refusal — the registration was decided, or withdrawn, by someone
+   * else between the line being read and served — is a race lost to a person,
+   * so a warning. Anything else is a fault operations must see.
+   */
+  private logStoppedEarly(
+    err: unknown,
+    context: { eventId: string; ticketTypeId: string; offered: number },
+  ): void {
+    if (err instanceof DomainException) {
+      this.logger.warn({ err, ...context }, STOPPED_EARLY);
+    } else {
+      this.logger.error({ err, ...context }, STOPPED_EARLY);
+    }
   }
 
   /**

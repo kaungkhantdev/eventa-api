@@ -31,6 +31,7 @@ interface UpdatedTicket {
   sold: number;
   total: number;
   waitlistOffered: number;
+  waitlistOfferInterrupted: boolean;
 }
 
 /**
@@ -182,6 +183,7 @@ describe('Raising capacity offers the waitlist the new places (e2e — US-REG-04
     const ticket = await updated(paidTier, { total: SOLD_OUT_AT + 2 });
 
     expect(ticket.waitlistOffered).toBe(2);
+    expect(ticket.waitlistOfferInterrupted).toBe(false);
     for (const id of [first, second]) {
       const row = await orderRow(id);
       expect(row.status).toBe('pending');
@@ -284,8 +286,11 @@ describe('Raising capacity offers the waitlist the new places (e2e — US-REG-04
     const freeRaise = await updated(freeTier, { total: SOLD_OUT_AT + 1 });
     const paidRaise = await updated(paidTier, { total: SOLD_OUT_AT + 1 });
 
-    expect(freeRaise.waitlistOffered).toBe(0);
-    expect(paidRaise.waitlistOffered).toBe(0);
+    for (const raise of [freeRaise, paidRaise]) {
+      // Nobody offered, and nothing failed: the organizer decides here.
+      expect(raise.waitlistOffered).toBe(0);
+      expect(raise.waitlistOfferInterrupted).toBe(false);
+    }
     for (const id of [free, paid]) {
       const row = await orderRow(id);
       expect(row.status).toBe('waitlisted');

@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { DomainException } from '../../common/errors/domain.exception';
 import type { Clock } from '../../common/time/clock';
 import type { SeatHoldService } from '../registration/seat-hold.service';
 import type {
@@ -46,6 +47,10 @@ const NO_SEAT: OfferResult = {
   reference: 'x',
   offerExpiresAt: null,
 };
+/** The line ran out, or the person at the front did not fit. */
+const finished = (offered: number) => ({ offered, interrupted: false });
+/** Something failed part-way: places may be left that the line never saw. */
+const cutShort = (offered: number) => ({ offered, interrupted: true });
 const approved = (outcome: ApprovalResult['outcome']): ApprovalResult => ({
   outcome,
   reference: 'x',
@@ -68,6 +73,7 @@ describe('WaitlistOffersAdapter (US-REG-04)', () => {
 
   beforeEach(() => {
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     repo = { frontOfLine: jest.fn().mockResolvedValue(null) };
     events = { findOwnedById: jest.fn().mockResolvedValue(OPEN_EVENT) };
     approvals = {
@@ -97,7 +103,9 @@ describe('WaitlistOffersAdapter (US-REG-04)', () => {
       .mockResolvedValueOnce(offered('B'))
       .mockResolvedValueOnce(NO_SEAT);
 
-    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toBe(2);
+    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toEqual(
+      finished(2),
+    );
 
     expect(repo.frontOfLine).toHaveBeenCalledWith(ORG, TIER);
     expect(approvals.offer.mock.calls).toEqual([
@@ -112,7 +120,9 @@ describe('WaitlistOffersAdapter (US-REG-04)', () => {
     line(inLine('A', 315_000, 3), inLine('B'));
     approvals.offer.mockResolvedValue(NO_SEAT);
 
-    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toBe(0);
+    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toEqual(
+      finished(0),
+    );
 
     expect(repo.frontOfLine).toHaveBeenCalledTimes(1);
     expect(approvals.offer).toHaveBeenCalledTimes(1);
@@ -132,7 +142,9 @@ describe('WaitlistOffersAdapter (US-REG-04)', () => {
     events.findOwnedById.mockResolvedValue(event);
     line(inLine('A'));
 
-    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toBe(0);
+    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toEqual(
+      finished(0),
+    );
 
     expect(events.findOwnedById).toHaveBeenCalledWith(ORG, EVENT);
     expect(repo.frontOfLine).not.toHaveBeenCalled();
@@ -142,7 +154,9 @@ describe('WaitlistOffersAdapter (US-REG-04)', () => {
   it('confirms a free registration through approval, holding its place first', async () => {
     line(inLine('F', 0, 2));
 
-    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toBe(1);
+    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toEqual(
+      finished(1),
+    );
 
     expect(holds.holdForOffer).toHaveBeenCalledWith(
       { organizationId: ORG },
@@ -164,7 +178,9 @@ describe('WaitlistOffersAdapter (US-REG-04)', () => {
     approvals.offer.mockResolvedValue(offered('P'));
     approvals.approve.mockResolvedValue(approved('unavailable'));
 
-    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toBe(1);
+    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toEqual(
+      finished(1),
+    );
 
     expect(holds.release).toHaveBeenCalledWith({ organizationId: ORG }, [55]);
     expect(repo.frontOfLine).toHaveBeenCalledTimes(2);
@@ -174,7 +190,9 @@ describe('WaitlistOffersAdapter (US-REG-04)', () => {
     line(inLine('F', 0), inLine('Z'));
     approvals.approve.mockRejectedValue(new Error('connection reset'));
 
-    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toBe(0);
+    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toEqual(
+      cutShort(0),
+    );
 
     expect(holds.release).toHaveBeenCalledWith({ organizationId: ORG }, [55]);
     expect(repo.frontOfLine).toHaveBeenCalledTimes(1);
@@ -184,28 +202,53 @@ describe('WaitlistOffersAdapter (US-REG-04)', () => {
     line(inLine('F', 0), inLine('Z'));
     holds.holdForOffer.mockResolvedValue(null);
 
-    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toBe(0);
+    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toEqual(
+      finished(0),
+    );
 
     expect(approvals.approve).not.toHaveBeenCalled();
     expect(holds.release).not.toHaveBeenCalled();
   });
 
-  it('reports the offers already made when one fails, instead of throwing', async () => {
+  it('says it was cut short, with the offers already made, when one fails', async () => {
+    // The allocation is already saved and on sale: the organizer has to know
+    // the rest of the new places never reached the line.
     line(inLine('A'), inLine('B'), inLine('C'));
     approvals.offer
       .mockResolvedValueOnce(offered('A'))
-      .mockRejectedValueOnce(new Error('decided elsewhere'));
+      .mockRejectedValueOnce(new Error('connection reset'));
 
-    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toBe(1);
+    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toEqual(
+      cutShort(1),
+    );
 
     expect(approvals.offer).toHaveBeenCalledTimes(2);
-    expect(Logger.prototype.warn).toHaveBeenCalled();
+    expect(Logger.prototype.error).toHaveBeenCalled();
   });
 
-  it('reports nothing offered when the event cannot even be read', async () => {
+  it('says it was cut short when the event cannot even be read', async () => {
     events.findOwnedById.mockRejectedValue(new Error('connection reset'));
 
-    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toBe(0);
+    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toEqual(
+      cutShort(0),
+    );
+    expect(Logger.prototype.error).toHaveBeenCalled();
+  });
+
+  it('treats a registration someone else decided first as a race, not a fault', async () => {
+    // Still cut short — the places behind it were not offered — but a domain
+    // refusal is the line losing a race with a person, not a broken system.
+    line(inLine('A'), inLine('B'));
+    approvals.offer.mockRejectedValue(
+      DomainException.conflict('decided by someone else'),
+    );
+
+    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toEqual(
+      cutShort(0),
+    );
+
+    expect(Logger.prototype.warn).toHaveBeenCalled();
+    expect(Logger.prototype.error).not.toHaveBeenCalled();
   });
 
   it('never serves the same registration twice', async () => {
@@ -213,13 +256,17 @@ describe('WaitlistOffersAdapter (US-REG-04)', () => {
     repo.frontOfLine.mockResolvedValue(inLine('A'));
     approvals.offer.mockResolvedValue(offered('A'));
 
-    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toBe(1);
+    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toEqual(
+      finished(1),
+    );
 
     expect(approvals.offer).toHaveBeenCalledTimes(1);
   });
 
   it('offers nobody when nobody is waiting', async () => {
-    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toBe(0);
+    await expect(adapter.offerNewPlaces(ORG, EVENT, TIER)).resolves.toEqual(
+      finished(0),
+    );
     expect(approvals.offer).not.toHaveBeenCalled();
     expect(holds.holdForOffer).not.toHaveBeenCalled();
   });

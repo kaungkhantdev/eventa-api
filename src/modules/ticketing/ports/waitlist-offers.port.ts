@@ -12,13 +12,26 @@
  */
 export abstract class WaitlistOffersPort {
   /**
-   * Resolves to how many waitlisted registrations were given a place. Never
-   * rejects: the capacity change it follows is already saved, and an offer
-   * that fails part-way reports the ones already made.
+   * Never rejects: the capacity change it follows is already saved. An offer
+   * that fails part-way reports the ones already made and says it was cut
+   * short.
    */
   abstract offerNewPlaces(
     organizationId: number,
     eventId: string,
     ticketTypeId: string,
-  ): Promise<number>;
+  ): Promise<WaitlistOfferOutcome>;
+}
+
+/** What a raised allocation's new places did for the waitlist. */
+export interface WaitlistOfferOutcome {
+  /** Waitlisted registrations given a place, in line order. */
+  readonly offered: number;
+  /**
+   * The offers stopped on a failure, not because the line ran out or the
+   * person at the front did not fit. The raised allocation is saved and on
+   * sale regardless, so places the line never saw may now go to the public
+   * first: the organizer needs to know to offer the rest by hand.
+   */
+  readonly interrupted: boolean;
 }

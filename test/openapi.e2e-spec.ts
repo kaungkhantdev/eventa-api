@@ -109,6 +109,12 @@ describe('OpenAPI (e2e)', () => {
         | undefined;
       expect(schema?.properties?.waitlistOffered?.type).toBe('number');
       expect(schema?.required).toContain('waitlistOffered');
+      // A failure part-way is told apart from "the front did not fit", so the
+      // organizer knows to offer the rest by hand.
+      expect(schema?.properties?.waitlistOfferInterrupted?.type).toBe(
+        'boolean',
+      );
+      expect(schema?.required).toContain('waitlistOfferInterrupted');
       // Still the whole ticket, so the edit form can re-render from it.
       expect(schema?.properties).toHaveProperty('sold');
     });

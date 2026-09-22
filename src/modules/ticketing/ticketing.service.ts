@@ -8,7 +8,10 @@ import { EventsService } from '../events/events.service';
 import { TicketResponseDto } from './dto/ticket-response.dto';
 import type { UpdatedTicketResponseDto } from './dto/updated-ticket-response.dto';
 import { CheckoutActivityPort } from './ports/checkout-activity.port';
-import { WaitlistOffersPort } from './ports/waitlist-offers.port';
+import {
+  type WaitlistOfferOutcome,
+  WaitlistOffersPort,
+} from './ports/waitlist-offers.port';
 import { toTicketResponse, toUpdatedTicketResponse } from './ticketing.mapper';
 import { TicketingPolicy } from './ticketing.policy';
 import { TicketingRepository } from './ticketing.repository';
@@ -35,6 +38,11 @@ const UPDATABLE_KEYS: (keyof NewTicketValues & keyof UpdateTicketInput)[] = [
 
 const WAITLIST_OFFER_FAILED =
   'Raised a ticket allocation, but offering the new places to its waitlist failed';
+/** No new places, so nothing was offered and nothing went wrong. */
+const NOTHING_TO_OFFER: WaitlistOfferOutcome = {
+  offered: 0,
+  interrupted: false,
+};
 
 /** Manage an event's sellable ticket tiers (the Ticketing bounded context). */
 @Injectable()
@@ -154,27 +162,29 @@ export class TicketingService {
     before: TicketRow,
     after: TicketRow,
   ): Promise<UpdatedTicketResponseDto> {
-    const offered = await this.offerRaisedPlaces(organizationId, before, after);
+    const outcome = await this.offerRaisedPlaces(organizationId, before, after);
     const current =
-      offered > 0
+      outcome.offered > 0
         ? await this.load(organizationId, after.eventId, after.id)
         : after;
     const rate = await this.repo.orgVatRate(organizationId);
-    return toUpdatedTicketResponse(current, rate, offered);
+    return toUpdatedTicketResponse(current, rate, outcome);
   }
 
   /**
    * Offer a raised allocation's new places to the people waiting for them.
-   * Runs after the save has committed, and a failure is logged and reported
-   * as nobody offered — never thrown: the organizer's capacity change stands
+   * Runs after the save has committed; a failure is reported as the offers
+   * being cut short, never thrown — the organizer's capacity change stands
    * whatever happens to an offer, and they can still offer by hand.
    */
   private async offerRaisedPlaces(
     organizationId: number,
     before: TicketRow,
     after: TicketRow,
-  ): Promise<number> {
-    if (!this.policy.raisesAllocation(before.total, after.total)) return 0;
+  ): Promise<WaitlistOfferOutcome> {
+    if (!this.policy.raisesAllocation(before.total, after.total)) {
+      return NOTHING_TO_OFFER;
+    }
     try {
       return await this.waitlist.offerNewPlaces(
         organizationId,
@@ -182,8 +192,12 @@ export class TicketingService {
         after.id,
       );
     } catch (err) {
+      // The port promises not to reject, and its adapter keeps that promise.
+      // This guards the promise, not the adapter: the save above has
+      // committed, so a rejection must not reach the organizer as a 500 for
+      // a change that stands. How many were offered is then unknown.
       this.logger.error({ err, ticketTypeId: after.id }, WAITLIST_OFFER_FAILED);
-      return 0;
+      return { offered: 0, interrupted: true };
     }
   }
 

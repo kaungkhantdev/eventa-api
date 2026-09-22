@@ -44,6 +44,9 @@ function ticketRow(o: Partial<TicketRow> = {}): TicketRow {
   };
 }
 
+/** What the waitlist made of a raise — every offer tried, none cut short. */
+const OFFERS_FINISHED = (offered: number) => ({ offered, interrupted: false });
+
 describe('TicketingService', () => {
   let repo: jest.Mocked<TicketingRepository>;
   let events: jest.Mocked<EventsService>;
@@ -77,7 +80,9 @@ describe('TicketingService', () => {
     events = {
       getEvent: jest.fn().mockResolvedValue({ id: eventId }),
     } as unknown as jest.Mocked<EventsService>;
-    waitlist = { offerNewPlaces: jest.fn().mockResolvedValue(0) };
+    waitlist = {
+      offerNewPlaces: jest.fn().mockResolvedValue(OFFERS_FINISHED(0)),
+    };
     const clock: Clock = { now: () => NOW };
     service = new TicketingService(
       repo,
@@ -291,12 +296,31 @@ describe('TicketingService', () => {
     afterEach(() => jest.restoreAllMocks());
 
     it('offers the new places to the waitlist and says how many', async () => {
-      waitlist.offerNewPlaces.mockResolvedValue(2);
+      waitlist.offerNewPlaces.mockResolvedValue(OFFERS_FINISHED(2));
       const res = await service.updateTicket(actor, eventId, 't1', {
         total: 120,
       });
       expect(waitlist.offerNewPlaces).toHaveBeenCalledWith(1, 'e1', 't1');
-      expect(res.waitlistOffered).toBe(2);
+      expect(res).toMatchObject({
+        waitlistOffered: 2,
+        waitlistOfferInterrupted: false,
+      });
+    });
+
+    it('says when the offers were cut short, so the rest can be offered by hand', async () => {
+      // The allocation is saved and on sale either way; without this the
+      // organizer could not tell a failure from "the front did not fit".
+      waitlist.offerNewPlaces.mockResolvedValue({
+        offered: 1,
+        interrupted: true,
+      });
+      const res = await service.updateTicket(actor, eventId, 't1', {
+        total: 120,
+      });
+      expect(res).toMatchObject({
+        waitlistOffered: 1,
+        waitlistOfferInterrupted: true,
+      });
     });
 
     it('offers only after the new allocation is saved', async () => {
@@ -317,8 +341,12 @@ describe('TicketingService', () => {
         total: 90,
       });
       expect(waitlist.offerNewPlaces).not.toHaveBeenCalled();
-      expect(renamed.waitlistOffered).toBe(0);
-      expect(cut.waitlistOffered).toBe(0);
+      for (const res of [renamed, cut]) {
+        expect(res).toMatchObject({
+          waitlistOffered: 0,
+          waitlistOfferInterrupted: false,
+        });
+      }
     });
 
     it('does not treat a tier leaving unlimited as new places', async () => {
@@ -329,19 +357,25 @@ describe('TicketingService', () => {
       expect(waitlist.offerNewPlaces).not.toHaveBeenCalled();
     });
 
-    it('keeps the capacity change when the waitlist offer fails', async () => {
+    it('keeps the capacity change, and says the offers were cut short, if the waitlist throws', async () => {
+      // The port promises not to reject; were it to, the saved change must
+      // not come back as a 500 — nor as a quiet "nobody offered".
       waitlist.offerNewPlaces.mockRejectedValue(new Error('broker down'));
       const res = await service.updateTicket(actor, eventId, 't1', {
         total: 120,
       });
       expect(repo.update).toHaveBeenCalled();
-      expect(res).toMatchObject({ total: 120, waitlistOffered: 0 });
+      expect(res).toMatchObject({
+        total: 120,
+        waitlistOffered: 0,
+        waitlistOfferInterrupted: true,
+      });
       expect(Logger.prototype.error).toHaveBeenCalled();
     });
 
     it('answers with the ticket as it stands after the offers', async () => {
       // A free place confirmed off the waitlist counts as sold.
-      waitlist.offerNewPlaces.mockResolvedValue(1);
+      waitlist.offerNewPlaces.mockResolvedValue(OFFERS_FINISHED(1));
       repo.findTicket
         .mockResolvedValueOnce(
           ticketRow({ status: 'soldout', sold: 100, total: 100, version: 1 }),
