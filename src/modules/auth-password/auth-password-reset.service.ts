@@ -8,12 +8,28 @@ import { Persona } from '../auth/auth.types';
 import { MessageResponseDto } from '../../common/http/message-response.dto';
 import { passwordResetRequestedEvent } from './events/password-reset-requested.event';
 import { passwordFingerprint } from './auth-password-fingerprint';
+import {
+  decideReset,
+  type ResettableAccount,
+} from './auth-password-reset.eligibility';
 import { PasswordRepository } from './auth-password.repository';
 import { PasswordService } from './auth-password.service';
 import { TokenService } from '../auth/token.service';
 import { LoginThrottleService } from '../auth/login-throttle.service';
 
+/**
+ * The same words however many links went out. Counting them would tell an
+ * anonymous caller how many workspaces the address belongs to — which sign-in
+ * reveals only after the password checks out. Each email names its own.
+ */
 const LINK_ON_ITS_WAY = 'A password-reset link is on its way.';
+
+/**
+ * How many accounts on one address a single request looks at. Each usable one
+ * gets its own email, so this bounds what an anonymous caller can make the form
+ * send — the same bound sign-in puts on the accounts it checks.
+ */
+const MAX_RESET_ACCOUNTS = 10;
 
 /** What each audience's account is called, for a message someone has to act on. */
 const AUDIENCE: Record<Persona, string> = {
@@ -26,31 +42,24 @@ function noSuchAccount(persona: Persona): string {
   return `No ${AUDIENCE[persona]} account uses that email address. Check the spelling, try your ${other} account, or create one.`;
 }
 
-const SOCIAL_ONLY =
-  'That account signs in with Google, so it has no password to reset. Use “Continue with Google” instead.';
-
-/**
- * Why a reset cannot help this account yet, keyed on the status blocking it.
- *
- * Only `Active` can sign in, and `reset` deliberately does not change status —
- * so without this an unconfirmed account completed the whole flow, was told
- * "please sign in", and was refused at the door. A success that ends in a
- * locked door is worse than an honest refusal, and every message here names the
- * one thing that actually unblocks them.
- */
-const CANNOT_RESET: Record<string, string> = {
-  Unconfirmed:
-    'That account has not been confirmed yet, so there is no sign-in for a password to unlock. Open the confirmation link emailed when it was created — signing in sends a fresh one.',
-  Invited:
-    'That invitation has not been accepted yet. Open the invitation email to finish setting the account up, and choose a password there.',
-  Suspended:
-    'That account is suspended, so resetting its password would not let it back in. Ask a workspace admin to reactivate it.',
-};
 const RESET_DONE = 'Your password has been reset. Please sign in.';
 const INVALID_LINK =
   'This reset link is invalid or has expired. Request a new one.';
 const REUSED_PASSWORD =
   'Please choose a password different from your current one.';
+
+/**
+ * Which workspace an email should say it opens. An organizer can hold accounts
+ * in several and gets a link for each, so each says which. An attendee's only
+ * realm is the platform organization, not a workspace they chose — naming it
+ * would only puzzle them.
+ */
+function workspaceNamed(
+  account: ResettableAccount,
+  audience: Persona,
+): string | undefined {
+  return audience === Persona.Admin ? account.workspaceName : undefined;
+}
 
 /** Forgotten-password reset by email link (US-ACC-04). */
 @Injectable()
@@ -91,26 +100,23 @@ export class PasswordResetService {
     // the timing difference between a hit and a miss.
     await this.throttle.assertNotLocked(identity, 'reset');
 
-    const user = await this.repo.findByEmailPersona(email, audience);
-    if (!user) {
+    const accounts = await this.repo.findResetAccounts(
+      email,
+      audience,
+      MAX_RESET_ACCOUNTS,
+    );
+    if (accounts.length === 0) {
       await this.throttle.recordFailure(identity, 'reset');
       throw DomainException.notFound(noSuchAccount(audience));
     }
-    // Neither of these counts as a miss against the lock: both are the
-    // account's own state, not somebody guessing at whether it exists.
-    if (!user.passwordHash) {
-      throw DomainException.validation(SOCIAL_ONLY);
-    }
-    const blocked = CANNOT_RESET[user.status];
-    if (blocked) throw DomainException.validation(blocked);
+    // A refusal from here on is not a miss against the lock: it is about the
+    // accounts' own state, not somebody guessing at whether one exists.
+    const decision = decideReset(accounts);
+    if ('refuse' in decision) throw DomainException.validation(decision.refuse);
 
-    await this.sendResetLink(
-      user.id,
-      user.organizationId,
-      user.name,
-      email,
-      user.passwordHash,
-    );
+    for (const account of decision.send) {
+      await this.sendResetLink(account, email, audience);
+    }
     return { message: LINK_ON_ITS_WAY };
   }
 
@@ -141,23 +147,22 @@ export class PasswordResetService {
   }
 
   private async sendResetLink(
-    userId: string,
-    organizationId: number,
-    name: string,
+    account: ResettableAccount,
     email: string,
-    passwordHash: string,
+    audience: Persona,
   ): Promise<void> {
     const token = await this.tokens.signPasswordReset({
-      userId,
-      organizationId,
-      passwordFingerprint: passwordFingerprint(passwordHash),
+      userId: account.id,
+      organizationId: account.organizationId,
+      passwordFingerprint: passwordFingerprint(account.passwordHash),
     });
     await this.outbox.enqueue(
       passwordResetRequestedEvent({
-        organizationId,
-        userId,
-        name,
+        organizationId: account.organizationId,
+        userId: account.id,
+        name: account.name,
         email,
+        workspaceName: workspaceNamed(account, audience),
         resetUrl: `${this.publicWebUrl}/reset-password?token=${token}`,
         occurredAt: this.clock.now().toISOString(),
       }),

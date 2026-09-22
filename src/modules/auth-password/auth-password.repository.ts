@@ -1,16 +1,31 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, isNull, ne } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
-import { authSessions, users } from '../../db/schema';
+import {
+  authSessions,
+  organizations,
+  socialIdentities,
+  users,
+  type memberStatusEnum,
+  type socialProviderEnum,
+} from '../../db/schema';
 import { withTenant } from '../../db/tenant';
 import type { Persona } from '../auth/auth.types';
 
-export interface PasswordUser {
+export type AccountStatus = (typeof memberStatusEnum.enumValues)[number];
+export type LinkedProvider = (typeof socialProviderEnum.enumValues)[number];
+
+/** One account an address holds in the audience being reset (US-ACC-04). */
+export interface ResetAccount {
   id: string;
   organizationId: number;
+  /** The workspace it belongs to, so a reset email can say which one it opens. */
+  workspaceName: string;
   name: string;
-  status: string;
+  status: AccountStatus;
   passwordHash: string | null;
+  /** The social sign-ins linked to it — what an account with no password uses. */
+  providers: LinkedProvider[];
 }
 
 /** Data access for password reset (US-ACC-04) and change (US-ACC-05). */
@@ -18,29 +33,63 @@ export interface PasswordUser {
 export class PasswordRepository {
   constructor(@Inject(DRIZZLE) private readonly db: Database) {}
 
-  /** Find an account by email + audience (pre-auth; used by forgot-password). */
-  async findByEmailPersona(
+  /**
+   * Every account an address holds in one audience, across workspaces
+   * (pre-auth; used by forgot-password).
+   *
+   * All of them, not the first: an address can be an owner in one workspace and
+   * an invitee in another, and which row came back first used to decide whether
+   * the owner got a link at all. A deleted workspace is left out, as sign-in
+   * leaves it out — a link into one would end at a door that never opens.
+   * Oldest first, so the emails go out in a stable order.
+   */
+  async findResetAccounts(
     email: string,
     persona: Persona,
-  ): Promise<PasswordUser | null> {
-    const [row] = await this.db
+    limit: number,
+  ): Promise<ResetAccount[]> {
+    const rows = await this.db
       .select({
         id: users.id,
         organizationId: users.organizationId,
+        workspaceName: organizations.name,
         name: users.name,
         status: users.status,
         passwordHash: users.passwordHash,
       })
       .from(users)
+      .innerJoin(organizations, eq(organizations.id, users.organizationId))
       .where(
         and(
           eq(users.email, email),
           eq(users.persona, persona),
           isNull(users.deletedAt),
+          isNull(organizations.deletedAt),
         ),
       )
-      .limit(1);
-    return row ?? null;
+      .orderBy(asc(users.createdAt), asc(users.id))
+      .limit(limit);
+    const linked = await this.linkedProviders(rows.map((row) => row.id));
+    return rows.map((row) => ({ ...row, providers: linked.get(row.id) ?? [] }));
+  }
+
+  /** The social providers linked to each account, keyed by user id. */
+  private async linkedProviders(
+    userIds: string[],
+  ): Promise<Map<string, LinkedProvider[]>> {
+    const byUser = new Map<string, LinkedProvider[]>();
+    if (userIds.length === 0) return byUser;
+    const links = await this.db
+      .select({
+        userId: socialIdentities.userId,
+        provider: socialIdentities.provider,
+      })
+      .from(socialIdentities)
+      .where(inArray(socialIdentities.userId, userIds));
+    for (const { userId, provider } of links) {
+      byUser.set(userId, [...(byUser.get(userId) ?? []), provider]);
+    }
+    return byUser;
   }
 
   /** The current password hash for a signed-in user (used by change-password). */

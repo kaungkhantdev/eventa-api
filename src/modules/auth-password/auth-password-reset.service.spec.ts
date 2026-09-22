@@ -5,7 +5,10 @@ import type { OutboxPort } from '../platform/outbox.port';
 import { Persona } from '../auth/auth.types';
 import { PasswordResetService } from './auth-password-reset.service';
 import { passwordFingerprint } from './auth-password-fingerprint';
-import type { PasswordRepository } from './auth-password.repository';
+import type {
+  PasswordRepository,
+  ResetAccount,
+} from './auth-password.repository';
 import type { PasswordService } from './auth-password.service';
 import type { TokenService } from '../auth/token.service';
 import type { LoginThrottleService } from '../auth/login-throttle.service';
@@ -28,13 +31,25 @@ async function refusalFrom(promise: Promise<unknown>): Promise<string> {
 
 const CURRENT_HASH = 'argon2-current-hash';
 const FINGERPRINT = passwordFingerprint(CURRENT_HASH);
-const user = {
+const user: ResetAccount = {
   id: 'u1',
   organizationId: 7,
+  workspaceName: 'Acme Events',
   name: 'Somchai',
   status: 'Active',
   passwordHash: CURRENT_HASH,
+  providers: [],
 };
+
+/** The same person's account in a second workspace (US-ACC-02). */
+const inWorkspaceB = (overrides: Partial<ResetAccount>): ResetAccount => ({
+  ...user,
+  id: 'u2',
+  organizationId: 8,
+  workspaceName: 'Bangkok Summits',
+  passwordHash: 'argon2-other-hash',
+  ...overrides,
+});
 
 describe('PasswordResetService', () => {
   let repo: jest.Mocked<PasswordRepository>;
@@ -46,7 +61,7 @@ describe('PasswordResetService', () => {
 
   beforeEach(() => {
     repo = {
-      findByEmailPersona: jest.fn().mockResolvedValue(user),
+      findResetAccounts: jest.fn().mockResolvedValue([user]),
       currentHash: jest.fn().mockResolvedValue(CURRENT_HASH),
       setPassword: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<PasswordRepository>;
@@ -107,7 +122,7 @@ describe('PasswordResetService', () => {
      * The throttle below is what keeps that from being a way to farm the list.
      */
     it('says plainly when no account matches, and sends nothing', async () => {
-      repo.findByEmailPersona.mockResolvedValue(null);
+      repo.findResetAccounts.mockResolvedValue([]);
       await expect(service.forgot('ghost@acme.co.th')).rejects.toMatchObject({
         code: 'NOT_FOUND',
       });
@@ -115,11 +130,11 @@ describe('PasswordResetService', () => {
     });
 
     it('names the audience it searched, so the other one can be tried', async () => {
-      repo.findByEmailPersona.mockResolvedValue(null);
+      repo.findResetAccounts.mockResolvedValue([]);
       await expect(
         refusalFrom(service.forgot('ghost@acme.co.th', Persona.Attendee)),
       ).resolves.toMatch(/attendee/i);
-      repo.findByEmailPersona.mockResolvedValue(null);
+      repo.findResetAccounts.mockResolvedValue([]);
       await expect(
         refusalFrom(service.forgot('ghost@acme.co.th')),
       ).resolves.toMatch(/organizer/i);
@@ -130,10 +145,9 @@ describe('PasswordResetService', () => {
      * "no account" answer would be a lie — and it has nothing to reset.
      */
     it('does not claim a social-only account is missing', async () => {
-      repo.findByEmailPersona.mockResolvedValue({
-        ...user,
-        passwordHash: null,
-      });
+      repo.findResetAccounts.mockResolvedValue([
+        { ...user, passwordHash: null, providers: ['google'] },
+      ]);
       await expect(
         refusalFrom(service.forgot('owner@acme.co.th')),
       ).resolves.toMatch(/google/i);
@@ -142,9 +156,10 @@ describe('PasswordResetService', () => {
 
     it('defaults to the organizer audience', async () => {
       await service.forgot('owner@acme.co.th');
-      expect(repo.findByEmailPersona).toHaveBeenCalledWith(
+      expect(repo.findResetAccounts).toHaveBeenCalledWith(
         'owner@acme.co.th',
         Persona.Admin,
+        expect.any(Number),
       );
     });
   });
@@ -159,10 +174,9 @@ describe('PasswordResetService', () => {
    */
   describe('forgot — an account has to be usable to be reset', () => {
     it('refuses an unconfirmed account and says what to do instead', async () => {
-      repo.findByEmailPersona.mockResolvedValue({
-        ...user,
-        status: 'Unconfirmed',
-      });
+      repo.findResetAccounts.mockResolvedValue([
+        { ...user, status: 'Unconfirmed' },
+      ]);
       await expect(
         refusalFrom(service.forgot('owner@acme.co.th')),
       ).resolves.toMatch(/confirm/i);
@@ -176,27 +190,27 @@ describe('PasswordResetService', () => {
      * somebody's inbox.
      */
     it('sends nothing at all when it refuses', async () => {
-      repo.findByEmailPersona.mockResolvedValue({
-        ...user,
-        status: 'Unconfirmed',
-      });
+      repo.findResetAccounts.mockResolvedValue([
+        { ...user, status: 'Unconfirmed' },
+      ]);
       await expect(service.forgot('owner@acme.co.th')).rejects.toBeDefined();
       expect(outbox.enqueue).not.toHaveBeenCalled();
       expect(tokens.signPasswordReset).not.toHaveBeenCalled();
     });
 
     it('refuses a suspended account, pointing at the person who can undo it', async () => {
-      repo.findByEmailPersona.mockResolvedValue({
-        ...user,
-        status: 'Suspended',
-      });
+      repo.findResetAccounts.mockResolvedValue([
+        { ...user, status: 'Suspended' },
+      ]);
       await expect(
         refusalFrom(service.forgot('owner@acme.co.th')),
       ).resolves.toMatch(/suspend/i);
     });
 
     it('refuses an unaccepted invitation, naming the invitation', async () => {
-      repo.findByEmailPersona.mockResolvedValue({ ...user, status: 'Invited' });
+      repo.findResetAccounts.mockResolvedValue([
+        { ...user, status: 'Invited' },
+      ]);
       await expect(
         refusalFrom(service.forgot('owner@acme.co.th')),
       ).resolves.toMatch(/invitation/i);
@@ -204,10 +218,190 @@ describe('PasswordResetService', () => {
 
     /** A blocked status is the account's own state, not a wrong guess at it. */
     it('does not count a blocked status against the brute-force lock', async () => {
-      repo.findByEmailPersona.mockResolvedValue({
-        ...user,
-        status: 'Unconfirmed',
-      });
+      repo.findResetAccounts.mockResolvedValue([
+        { ...user, status: 'Unconfirmed' },
+      ]);
+      await expect(service.forgot('owner@acme.co.th')).rejects.toBeDefined();
+      expect(throttle.recordFailure).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * "Signs in with Google" sends a LinkedIn-only organizer, or an Apple-only
+   * attendee, to a provider they never used. The provider named is the one the
+   * account is actually linked to.
+   */
+  describe('forgot — a social-only account is sent to its own provider', () => {
+    const socialOnly = (providers: ResetAccount['providers']) =>
+      repo.findResetAccounts.mockResolvedValue([
+        { ...user, passwordHash: null, providers },
+      ]);
+
+    it('names LinkedIn for a LinkedIn-only organizer, and not Google', async () => {
+      socialOnly(['linkedin']);
+      const message = await refusalFrom(service.forgot('owner@acme.co.th'));
+      expect(message).toMatch(/Continue with LinkedIn/);
+      expect(message).not.toMatch(/google/i);
+    });
+
+    it('names Apple for an Apple-only attendee', async () => {
+      socialOnly(['apple']);
+      const message = await refusalFrom(
+        service.forgot('fan@acme.co.th', Persona.Attendee),
+      );
+      expect(message).toMatch(/Continue with Apple/);
+      expect(message).not.toMatch(/google/i);
+    });
+
+    it('names every provider linked, so none of them is wrong', async () => {
+      socialOnly(['linkedin', 'google']);
+      const message = await refusalFrom(service.forgot('owner@acme.co.th'));
+      expect(message).toMatch(/Google/);
+      expect(message).toMatch(/LinkedIn/);
+    });
+  });
+
+  /**
+   * What is wrong with an account comes before whether it has a password.
+   *
+   * An invited teammate has no password until they accept, and a suspended
+   * account may never have had one. Asked in the other order, both were told
+   * to "Continue with Google" — which cannot let either of them in.
+   */
+  describe('forgot — the status speaks before the missing password', () => {
+    it('tells an invitee with no password about the invitation', async () => {
+      repo.findResetAccounts.mockResolvedValue([
+        { ...user, status: 'Invited', passwordHash: null },
+      ]);
+      const message = await refusalFrom(service.forgot('owner@acme.co.th'));
+      expect(message).toMatch(/invitation/i);
+      expect(message).not.toMatch(/google/i);
+    });
+
+    it('tells a suspended social-only account it is suspended', async () => {
+      repo.findResetAccounts.mockResolvedValue([
+        {
+          ...user,
+          status: 'Suspended',
+          passwordHash: null,
+          providers: ['google'],
+        },
+      ]);
+      const message = await refusalFrom(service.forgot('owner@acme.co.th'));
+      expect(message).toMatch(/suspend/i);
+      expect(message).not.toMatch(/google/i);
+    });
+  });
+
+  /**
+   * One address can hold an account in several workspaces (US-ACC-02): a
+   * person who owns one workspace and is invited into another has two rows
+   * that merely share an email. The answer is about all of them, never about
+   * whichever row the database happened to return first.
+   */
+  describe('forgot — an address with accounts in several workspaces', () => {
+    const invitedToB = inWorkspaceB({ status: 'Invited', passwordHash: null });
+
+    it.each([
+      ['listed first', [user, invitedToB]],
+      ['listed last', [invitedToB, user]],
+    ])(
+      'sends the link for the active account, whether it is %s',
+      async (_order, accounts) => {
+        repo.findResetAccounts.mockResolvedValue(accounts);
+
+        const res = await service.forgot('owner@acme.co.th');
+
+        expect(res.message).toMatch(/on its way/i);
+        expect(tokens.signPasswordReset).toHaveBeenCalledTimes(1);
+        expect(tokens.signPasswordReset).toHaveBeenCalledWith(
+          expect.objectContaining({ userId: 'u1', organizationId: 7 }),
+        );
+      },
+    );
+
+    /**
+     * A link resets exactly one account's password, so two usable accounts get
+     * two links — otherwise the second workspace stays locked however often
+     * the form is used.
+     */
+    it('sends one link per account that can use one', async () => {
+      const activeInB = inWorkspaceB({});
+      repo.findResetAccounts.mockResolvedValue([user, activeInB]);
+
+      await service.forgot('owner@acme.co.th');
+
+      const signed = tokens.signPasswordReset.mock.calls.map(([c]) => c);
+      expect(signed).toEqual([
+        { userId: 'u1', organizationId: 7, passwordFingerprint: FINGERPRINT },
+        {
+          userId: 'u2',
+          organizationId: 8,
+          passwordFingerprint: passwordFingerprint('argon2-other-hash'),
+        },
+      ]);
+      expect(outbox.enqueue).toHaveBeenCalledTimes(2);
+    });
+
+    /** Two links in one inbox are only usable if each says which it opens. */
+    it('names the workspace in each organizer email', async () => {
+      repo.findResetAccounts.mockResolvedValue([user, inWorkspaceB({})]);
+
+      await service.forgot('owner@acme.co.th');
+
+      const named = outbox.enqueue.mock.calls.map(
+        ([event]) => event.payload.workspaceName,
+      );
+      expect(named).toEqual(['Acme Events', 'Bangkok Summits']);
+    });
+
+    /**
+     * An attendee's one realm is the platform organization, not a workspace
+     * they chose, so naming it would only puzzle them.
+     */
+    it('names no workspace in an attendee email', async () => {
+      await service.forgot('fan@acme.co.th', Persona.Attendee);
+      const [[event]] = outbox.enqueue.mock.calls;
+      expect(event.payload).not.toHaveProperty('workspaceName');
+    });
+
+    it('does not say how many workspaces the address is in', async () => {
+      repo.findResetAccounts.mockResolvedValue([user, inWorkspaceB({})]);
+      const one = await service.forgot('owner@acme.co.th');
+      repo.findResetAccounts.mockResolvedValue([user]);
+      const two = await service.forgot('owner@acme.co.th');
+      expect(one.message).toBe(two.message);
+    });
+
+    it('gives the most useful refusal when no account can use a link', async () => {
+      repo.findResetAccounts.mockResolvedValue([
+        { ...user, status: 'Suspended' },
+        inWorkspaceB({ status: 'Unconfirmed' }),
+      ]);
+      await expect(
+        refusalFrom(service.forgot('owner@acme.co.th')),
+      ).resolves.toMatch(/confirm/i);
+    });
+
+    /**
+     * A social-only account that is active can sign in right now, which beats
+     * any account that is waiting on something.
+     */
+    it('prefers the account that can already sign in another way', async () => {
+      repo.findResetAccounts.mockResolvedValue([
+        inWorkspaceB({ status: 'Invited', passwordHash: null }),
+        { ...user, passwordHash: null, providers: ['linkedin'] },
+      ]);
+      await expect(
+        refusalFrom(service.forgot('owner@acme.co.th')),
+      ).resolves.toMatch(/Continue with LinkedIn/);
+    });
+
+    it('does not count an address with accounts as a miss', async () => {
+      repo.findResetAccounts.mockResolvedValue([
+        { ...user, status: 'Suspended' },
+        invitedToB,
+      ]);
       await expect(service.forgot('owner@acme.co.th')).rejects.toBeDefined();
       expect(throttle.recordFailure).not.toHaveBeenCalled();
     });
@@ -231,11 +425,11 @@ describe('PasswordResetService', () => {
         code: 'TOO_MANY_REQUESTS',
       });
       // Refused before the lookup: a locked identity learns nothing at all.
-      expect(repo.findByEmailPersona).not.toHaveBeenCalled();
+      expect(repo.findResetAccounts).not.toHaveBeenCalled();
     });
 
     it('counts a miss against the identity that was probed', async () => {
-      repo.findByEmailPersona.mockResolvedValue(null);
+      repo.findResetAccounts.mockResolvedValue([]);
       await expect(service.forgot('ghost@acme.co.th')).rejects.toBeDefined();
       expect(throttle.recordFailure).toHaveBeenCalledWith(
         expect.stringContaining('ghost@acme.co.th'),
@@ -248,7 +442,7 @@ describe('PasswordResetService', () => {
      * could lock somebody out of the one form that exists to let them back in.
      */
     it('checks and counts on the reset count, not the sign-in one', async () => {
-      repo.findByEmailPersona.mockResolvedValue(null);
+      repo.findResetAccounts.mockResolvedValue([]);
       await expect(service.forgot('ghost@acme.co.th')).rejects.toBeDefined();
       const [checked, scope] = throttle.assertNotLocked.mock.calls[0];
       const [counted, countScope] = throttle.recordFailure.mock.calls[0];
@@ -257,7 +451,7 @@ describe('PasswordResetService', () => {
     });
 
     it('keys the count per audience — two realms are two identities', async () => {
-      repo.findByEmailPersona.mockResolvedValue(null);
+      repo.findResetAccounts.mockResolvedValue([]);
       await expect(
         service.forgot('ghost@acme.co.th', Persona.Attendee),
       ).rejects.toBeDefined();

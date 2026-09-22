@@ -23,6 +23,11 @@ const ORG_SLUG = 'reset-co';
  */
 const COLLIDING_SLUG = 'forgot';
 const SIGN_IN_MAX_ATTEMPTS = 5; // LOGIN_MAX_ATTEMPTS' default
+/** A second workspace the owner's address also has accounts in. */
+const WORKSPACE_B = { name: 'Reset Co B', slug: 'reset-co-b' };
+const WORKSPACE_GONE = { name: 'Reset Co Gone', slug: 'reset-co-gone' };
+const LINKEDIN_ONLY = 'reset-linkedin@reset-e2e.test';
+const INVITEE = 'reset-invitee@reset-e2e.test';
 const collidingSignInKeys = [
   `login:fail:${COLLIDING_SLUG}|admin|${OWNER}`,
   `login:lock:${COLLIDING_SLUG}|admin|${OWNER}`,
@@ -171,7 +176,126 @@ describe('Forgotten-password reset (US-ACC-04, e2e)', () => {
 
     expect(res.status).toBe(200);
   });
+
+  /**
+   * The lookup behind the form weighs every account on the address, joined to
+   * its workspace and its social links — proved here against Postgres rather
+   * than a mock, because the join and the fold are where it could go wrong.
+   */
+  describe('accounts in more than one workspace', () => {
+    let workspaceB: number;
+
+    beforeAll(async () => {
+      workspaceB = await seedWorkspace(pool, WORKSPACE_B);
+      const gone = await seedWorkspace(pool, WORKSPACE_GONE);
+      await pool.query(
+        `UPDATE organizations SET deleted_at = now() WHERE id = $1`,
+        [gone],
+      );
+      // The owner, invited into B and not yet accepted: no password there.
+      await seedAccount(pool, workspaceB, OWNER, 'Invited');
+      // And an active account with a password in a deleted workspace.
+      await seedAccount(pool, gone, OWNER, 'Active', 'argon2-unused');
+    });
+
+    const resetEventsSince = async (sinceId: number) =>
+      (
+        await pool.query<{ userId: string; workspaceName: string | null }>(
+          `SELECT payload->>'userId' "userId",
+                  payload->>'workspaceName' "workspaceName"
+             FROM outbox_events
+            WHERE routing_key = 'identity.password_reset_requested'
+              AND payload->>'email' = $1 AND id > $2
+            ORDER BY id`,
+          [OWNER, sinceId],
+        )
+      ).rows;
+
+    it('sends the owner one link, for the workspace they can sign in to', async () => {
+      const since = await lastOutboxId(pool);
+
+      const res = await request(server)
+        .post('/api/v1/auth/forgot-password')
+        .send({ email: OWNER });
+
+      expect(res.status).toBe(200);
+      const { rows } = await pool.query<{ id: string }>(
+        `SELECT u.id FROM users u JOIN organizations o ON o.id = u.organization_id
+          WHERE o.slug = $1 AND u.email = $2`,
+        [ORG_SLUG, OWNER],
+      );
+      expect(await resetEventsSince(since)).toEqual([
+        { userId: rows[0].id, workspaceName: 'Reset Co' },
+      ]);
+    });
+
+    it('tells an invitee with no password about the invitation', async () => {
+      await seedAccount(pool, workspaceB, INVITEE, 'Invited');
+      const res = await request(server)
+        .post('/api/v1/auth/forgot-password')
+        .send({ email: INVITEE });
+
+      expect(res.status).toBe(422);
+      expect((res.body as { message: string }).message).toMatch(/invitation/);
+    });
+
+    it('sends a LinkedIn-only account to LinkedIn, not Google', async () => {
+      const userId = await seedAccount(
+        pool,
+        workspaceB,
+        LINKEDIN_ONLY,
+        'Active',
+      );
+      await pool.query(
+        `INSERT INTO social_identities (organization_id, user_id, provider, subject, email)
+         VALUES ($1, $2, 'linkedin', $3, $4)`,
+        [workspaceB, userId, `li-${userId}`, LINKEDIN_ONLY],
+      );
+
+      const res = await request(server)
+        .post('/api/v1/auth/forgot-password')
+        .send({ email: LINKEDIN_ONLY });
+
+      expect(res.status).toBe(422);
+      const { message } = res.body as { message: string };
+      expect(message).toMatch(/Continue with LinkedIn/);
+      expect(message).not.toMatch(/Google/);
+    });
+  });
 });
+
+async function seedWorkspace(
+  pool: Pool,
+  workspace: { name: string; slug: string },
+): Promise<number> {
+  const { rows } = await pool.query<{ id: string }>(
+    `INSERT INTO organizations (name, slug) VALUES ($1, $2) RETURNING id`,
+    [workspace.name, workspace.slug],
+  );
+  return Number(rows[0].id);
+}
+
+async function seedAccount(
+  pool: Pool,
+  organizationId: number,
+  email: string,
+  status: string,
+  passwordHash: string | null = null,
+): Promise<string> {
+  const { rows } = await pool.query<{ id: string }>(
+    `INSERT INTO users (organization_id, name, email, persona, status, password_hash)
+     VALUES ($1, 'Reset Seed', $2, 'admin', $3, $4) RETURNING id`,
+    [organizationId, email, status, passwordHash],
+  );
+  return rows[0].id;
+}
+
+async function lastOutboxId(pool: Pool): Promise<number> {
+  const { rows } = await pool.query<{ id: string | null }>(
+    `SELECT max(id) id FROM outbox_events`,
+  );
+  return Number(rows[0].id ?? 0);
+}
 
 async function cleanup(pool: Pool): Promise<void> {
   await pool.query(
