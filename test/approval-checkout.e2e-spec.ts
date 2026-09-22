@@ -511,11 +511,17 @@ describe('Require approval, pay first (e2e — US-REG-02)', () => {
       const view = await request(server).get(
         `/api/v1/public/checkout/${listed.slug}`,
       );
-      const [tier] = (
-        view.body as Success<{ tiers: { remaining: number; status: string }[] }>
-      ).data.tiers;
+      const opened = (
+        view.body as Success<{
+          tiers: { remaining: number; status: string }[];
+          notes: { approval: string | null };
+        }>
+      ).data;
+      const [tier] = opened.tiers;
       expect(tier.remaining).toBe(0);
       expect(tier.status).toBe('soldout');
+      // Said at checkout, before anybody pays.
+      expect(opened.notes.approval).toMatch(/refunded in full/i);
     });
 
     it('a second success callback changes nothing', async () => {

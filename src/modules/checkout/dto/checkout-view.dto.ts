@@ -130,6 +130,15 @@ export class CheckoutNotesDto {
 
   @ApiProperty({ nullable: true, type: String })
   delivery!: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description:
+      'Set when the event requires approval (US-REG-02): each registration ' +
+      'waits for the organizer, and a paid one is refunded if not approved.',
+  })
+  approval!: string | null;
 }
 
 /** Everything the checkout page needs before the buyer picks anything. */

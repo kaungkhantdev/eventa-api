@@ -23,6 +23,12 @@ const UNLIMITED = 0;
 const GA_SEATING_NOTE = 'Seating is first-come, first-served.';
 const ONLINE_DELIVERY_NOTE =
   'A join link will be emailed to you before the event starts.';
+/**
+ * Said before anybody pays (US-REG-02): the money is taken now, the ticket
+ * comes with the organizer's approval, and a "no" gives the money back.
+ */
+const APPROVAL_NOTE =
+  "The organizer reviews each registration before confirming it. If yours isn't approved, any payment is refunded in full.";
 
 /**
  * Assembles what a buyer sees when checkout opens (US-DISC-04), and loads the
@@ -177,6 +183,7 @@ export class CheckoutViewService {
     return {
       seating: event.seatingMode === 'ga' ? GA_SEATING_NOTE : null,
       delivery: event.isOnline ? ONLINE_DELIVERY_NOTE : null,
+      approval: event.requiresApproval ? APPROVAL_NOTE : null,
     };
   }
 

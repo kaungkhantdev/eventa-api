@@ -203,6 +203,20 @@ describe('CheckoutViewService (US-DISC-04)', () => {
       expect(view.notes.delivery).toMatch(/join link/i);
     });
 
+    it('tells the buyer, before they pay, that the organizer reviews each registration (US-REG-02)', async () => {
+      events.findPublishedBySlug.mockResolvedValue(
+        event({ requiresApproval: true }),
+      );
+      const view = await service.view(SLUG);
+      expect(view.notes.approval).toMatch(/organizer reviews/i);
+      expect(view.notes.approval).toMatch(/refunded in full/i);
+    });
+
+    it('says nothing about approval when the event does not require it', async () => {
+      const view = await service.view(SLUG);
+      expect(view.notes.approval).toBeNull();
+    });
+
     it('draws the seat map for a reserved-seating event', async () => {
       events.findPublishedBySlug.mockResolvedValue(
         event({ seatingMode: 'reserved' }),
