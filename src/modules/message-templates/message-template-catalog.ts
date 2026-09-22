@@ -92,8 +92,10 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
   {
     slug: 'cancellation-notice',
     title: 'Cancellation notice',
+    // eventa-worker's `cancellationRecipients`: a registration still waiting
+    // for approval may have paid, and is told too — with its own refund line.
     description:
-      'Sent to every confirmed attendee when an event is cancelled, with the organizer’s reason.',
+      'Sent to every confirmed attendee — and everyone whose registration is still awaiting approval — when an event is cancelled, with the organizer’s reason.',
     channels: ['email'],
     delivery: 'controlled',
     expected: true,
