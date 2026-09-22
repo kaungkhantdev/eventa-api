@@ -80,6 +80,7 @@ describe('OverviewReportService (US-RPT-01)', () => {
         .mockResolvedValueOnce(INCOME_NOW)
         .mockResolvedValueOnce(INCOME_BEFORE),
       netByDay: jest.fn().mockResolvedValue([]),
+      netByEvents: jest.fn(),
     };
     registrations = {
       splitByEvent: jest.fn(),

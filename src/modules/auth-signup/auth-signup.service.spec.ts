@@ -9,6 +9,7 @@ import type { SignupRepository } from './auth-signup.repository';
 import type { ResendThrottleService } from './resend-throttle.service';
 import type { TokenService } from '../auth/token.service';
 import { IDENTITY_EMAIL_VERIFICATION_REQUESTED } from './events/email-verification-requested.event';
+import { outboxDouble } from '../../../test/support/outbox-double';
 
 const NOW = new Date('2026-07-31T00:00:00.000Z');
 const newAccount = {
@@ -57,9 +58,7 @@ describe('SignupService', () => {
         .fn()
         .mockResolvedValue({ sub: 'u1', org: 7 }),
     } as unknown as jest.Mocked<TokenService>;
-    outbox = {
-      enqueue: jest.fn().mockResolvedValue(undefined),
-    };
+    outbox = outboxDouble();
     const clock: Clock = { now: () => NOW };
     const config = {
       getOrThrow: jest.fn().mockReturnValue('https://web.test'),

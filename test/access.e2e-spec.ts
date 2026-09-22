@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'access-e2e', name: 'Access E2E' };
@@ -73,7 +74,7 @@ describe('Access / RBAC management (e2e)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
   });
 
@@ -335,7 +336,10 @@ describe('Access / RBAC management (e2e)', () => {
 
   describe('invite flow', () => {
     const INVITEE = 'invitee@access-e2e.test';
-    const INVITEE_PW = 'invitee-strong-password';
+    // Letters AND a digit — the shared password rule every way of setting one
+    // enforces. Without the digit every accept here was a 400 before the token
+    // was even looked at.
+    const INVITEE_PW = 'invitee-strong-password-1';
     let inviteToken: string;
 
     interface InviteData {

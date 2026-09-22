@@ -2,9 +2,10 @@ import type { Clock } from '../../common/time/clock';
 import { EVENTS_ATTENDEES_EMAIL_REQUESTED } from '../events/events/attendees-email-requested.event';
 import type { AnnouncementsRepository } from './announcements.repository';
 import { AnnouncementsService } from './announcements.service';
+import { organizerAuth } from '../../../test/support/auth-context';
 
 const NOW = new Date('2026-07-31T09:00:00.000Z');
-const auth = { organizationId: 1, userId: 'u1', sessionId: 's1' };
+const auth = organizerAuth();
 
 const send = {
   eventId: 'e1',

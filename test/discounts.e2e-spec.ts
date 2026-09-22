@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'disc-e2e', name: 'Discounts E2E' };
@@ -64,7 +65,7 @@ describe('Discount codes (e2e — US-TKT-07…12)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
 
     eventId = await createEvent(await token(ADMIN, ORG.slug), 'Jazz Festival');
@@ -595,6 +596,14 @@ async function seedOrg(
 }
 
 async function cleanup(pool: Pool): Promise<void> {
+  // `audit_events` does not cascade from organizations, and signing in writes
+  // one — so deleting the org alone fails from the second run on, leaving the
+  // workspace behind for every later run (the monitor suite's fix, 6a2b6cc).
+  await pool.query(
+    `DELETE FROM audit_events WHERE organization_id IN
+       (SELECT id FROM organizations WHERE slug = ANY($1))`,
+    [[ORG.slug, ORG2.slug]],
+  );
   await pool.query(`DELETE FROM organizations WHERE slug = ANY($1)`, [
     [ORG.slug, ORG2.slug],
   ]);

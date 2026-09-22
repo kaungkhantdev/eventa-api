@@ -91,8 +91,17 @@ export class StubPaymentProvider extends PaymentProviderPort {
     return parseEvent(rawBody);
   }
 
-  /** A stand-in dashboard URL; null mirrors "no account connected yet". */
-  payoutSettingsLink(accountId: string | null): Promise<string | null> {
+  /**
+   * A stand-in dashboard URL; null mirrors "no account connected yet".
+   *
+   * Takes the workspace first, as the port does. With only `accountId` the
+   * stub read the organization id as the account id — so it never answered
+   * "not connected", and the payouts e2e could not test that branch.
+   */
+  payoutSettingsLink(
+    _organizationId: number,
+    accountId: string | null,
+  ): Promise<string | null> {
     if (!accountId) return Promise.resolve(null);
     return Promise.resolve(
       `https://fake-provider.test/express/${accountId}/payouts`,

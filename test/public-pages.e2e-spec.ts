@@ -9,6 +9,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const ORG = { slug: 'page-e2e', name: 'Page E2E' };
 const LIVE = 'live-summit';
@@ -61,7 +62,7 @@ describe('Public event page (e2e — US-PAGE-01…08)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
   }, 30000);
 

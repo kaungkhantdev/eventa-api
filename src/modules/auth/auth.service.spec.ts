@@ -14,6 +14,7 @@ import type { LoginThrottleService } from './login-throttle.service';
 import type { SignupService } from '../auth-signup/auth-signup.service';
 import { PasswordService } from '../auth-password/auth-password.service';
 import { TokenService } from './token.service';
+import { outboxDouble } from '../../../test/support/outbox-double';
 
 const clock: Clock = { now: () => new Date('2026-01-01T00:00:00Z') };
 
@@ -90,9 +91,7 @@ describe('AuthService', () => {
       accessTtlSeconds: 900,
       refreshTtlSeconds: 604800,
     } as unknown as jest.Mocked<TokenService>;
-    outbox = {
-      enqueue: jest.fn().mockResolvedValue(undefined),
-    };
+    outbox = outboxDouble();
     throttle = {
       assertNotLocked: jest.fn().mockResolvedValue(undefined),
       recordFailure: jest.fn().mockResolvedValue(undefined),
@@ -404,7 +403,13 @@ describe('AuthService', () => {
    * shown nowhere — so the password decides instead.
    */
   describe('login without a workspace', () => {
-    const noWorkspace = { email: input.email, password: input.password };
+    // No `orgSlug`: the sign-in form that does not ask which workspace.
+    const noWorkspace: LoginInput = {
+      email: input.email,
+      password: input.password,
+      device: input.device,
+      ip: input.ip,
+    };
 
     function candidate(slug: string, name: string): LoginUser {
       return { user: userRow(), org: { ...org, slug, name } };

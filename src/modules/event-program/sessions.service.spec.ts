@@ -3,6 +3,7 @@ import { EventsService } from '../events/events.service';
 import { SessionsRepository } from './sessions.repository';
 import { SessionsService } from './sessions.service';
 import type { SessionRow } from './sessions.types';
+import { refusalOf } from '../../../test/support/refusal';
 
 const actor = { organizationId: 1, userId: 'u1' };
 const eventId = 'e1';
@@ -16,6 +17,7 @@ function sessionRow(o: Partial<SessionRow> = {}): SessionRow {
     startTime: '09:00:00',
     endTime: '10:00:00',
     title: 'Opening',
+    description: null,
     type: 'Keynote',
     room: 'Main Hall',
     color: null,
@@ -155,16 +157,16 @@ describe('SessionsService', () => {
           endTime: '10:30:00',
         }),
       ]);
-      const err = await service
-        .createSession(actor, eventId, {
+      const err = await refusalOf(
+        service.createSession(actor, eventId, {
           day: 1,
           startTime: '09:00',
           endTime: '10:00',
           title: 'Opening',
           type: 'Keynote',
           room: 'Main Hall',
-        })
-        .catch((e: unknown) => e as DomainException);
+        }),
+      );
       expect(err).toBeInstanceOf(DomainException);
       expect(err.message).toMatch(/Main Hall/);
       expect(err.message).toMatch(/09:30/);
@@ -233,7 +235,7 @@ describe('SessionsService', () => {
 
       it('refuses the first attempt, naming the speaker and the clash', async () => {
         clashing();
-        const err = await book().catch((e: unknown) => e as DomainException);
+        const err = await refusalOf(book());
         expect(err).toBeInstanceOf(DomainException);
         expect(err.message).toMatch(/Dr Suda/);
         expect(err.message).toMatch(/Panel/);
@@ -348,9 +350,7 @@ describe('SessionsService', () => {
 
   describe('deleteSession confirmation (US-PROG-04)', () => {
     it('refuses without an explicit confirm, and says why', async () => {
-      const err = await service
-        .deleteSession(actor, eventId, 'ss1')
-        .catch((e: unknown) => e as DomainException);
+      const err = await refusalOf(service.deleteSession(actor, eventId, 'ss1'));
       expect(err).toBeInstanceOf(DomainException);
       expect(err.message).toMatch(/will NOT notify/i);
       expect(err.message).toMatch(/cannot be undone/i);

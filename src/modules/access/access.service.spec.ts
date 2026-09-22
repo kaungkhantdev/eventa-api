@@ -2,6 +2,7 @@ import { DomainException } from '../../common/errors/domain.exception';
 import { TokenService } from '../auth/token.service';
 import { AccessRepository } from './access.repository';
 import { AccessService } from './access.service';
+import { PermissionsService } from './permissions.service';
 
 const orgId = 1;
 
@@ -23,7 +24,11 @@ describe('AccessService', () => {
     tokens = {
       signInvite: jest.fn().mockResolvedValue('invite.jwt'),
     } as unknown as jest.Mocked<TokenService>;
-    service = new AccessService(repo, tokens);
+    // Nothing here grants access, so what the actor holds is never read.
+    const permissions = {
+      getFor: jest.fn().mockResolvedValue([]),
+    } as unknown as jest.Mocked<PermissionsService>;
+    service = new AccessService(repo, tokens, permissions);
   });
 
   describe('changeMemberRole', () => {

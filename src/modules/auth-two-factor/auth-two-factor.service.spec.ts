@@ -6,8 +6,10 @@ import type { OutboxPort } from '../platform/outbox.port';
 import type { ProfileService } from '../users/profile.service';
 import { AuthTwoFactorRepository } from './auth-two-factor.repository';
 import { AuthTwoFactorService } from './auth-two-factor.service';
+import { organizerAuth } from '../../../test/support/auth-context';
+import { outboxDouble } from '../../../test/support/outbox-double';
 
-const auth = { organizationId: 1, userId: 'u1', sessionId: 's1' };
+const auth = organizerAuth();
 const NOW = new Date('2026-08-01T00:00:00Z');
 const KEY = Buffer.alloc(32, 7).toString('base64');
 
@@ -38,7 +40,7 @@ describe('AuthTwoFactorService (US-SET-03 / US-ACC-07)', () => {
       consumeRecoveryCode: jest.fn().mockResolvedValue(false),
       countUnusedCodes: jest.fn().mockResolvedValue(8),
     } as unknown as jest.Mocked<AuthTwoFactorRepository>;
-    outbox = { enqueue: jest.fn().mockResolvedValue(undefined) };
+    outbox = outboxDouble();
     const profile = {
       get: jest
         .fn()

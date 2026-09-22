@@ -9,6 +9,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const OLD_PASSWORD = 'oldpass1word';
 const NEW_PASSWORD = 'newpass2word';
@@ -35,7 +36,7 @@ describe('Change password while signed in (US-ACC-05, e2e)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
 
     await request(server).post('/api/v1/auth/register').send({

@@ -9,6 +9,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const ORG = { slug: 'checkout-e2e', name: 'Checkout E2E' };
 const OTHER_ORG = { slug: 'checkout-e2e-other', name: 'Checkout E2E Other' };
@@ -82,7 +83,7 @@ describe('Checkout (e2e — US-DISC-04)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
   }, 30000);
 

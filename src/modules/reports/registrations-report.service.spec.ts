@@ -51,6 +51,7 @@ function portReturning(
   const asked: RegistrationSplitQuery[] = [];
   const windows: RegistrationWindow[] = [];
   const port: RegistrationReportPort = {
+    ticketMix: () => Promise.resolve([]),
     totalsFor: (_org: number, window: RegistrationWindow) => {
       windows.push(window);
       return Promise.resolve({ ...NO_SPLIT, ...before });

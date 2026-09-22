@@ -2,8 +2,9 @@ import { DomainException } from '../../common/errors/domain.exception';
 import { AuthSessionsRepository } from './auth-sessions.repository';
 import { AuthSessionsService } from './auth-sessions.service';
 import type { SessionRow } from './auth-sessions.types';
+import { organizerAuth } from '../../../test/support/auth-context';
 
-const auth = { organizationId: 1, userId: 'u1', sessionId: 'current' };
+const auth = organizerAuth({ sessionId: 'current' });
 
 function row(id: string, over: Partial<SessionRow> = {}): SessionRow {
   return {

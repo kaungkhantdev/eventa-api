@@ -1,4 +1,5 @@
 import type { ConfigService } from '@nestjs/config';
+import type { Env } from '../../config/env.validation';
 import type { EventResponseDto } from '../events/dto/event-response.dto';
 import type { EventsService } from '../events/events.service';
 import { EventSharingService } from './event-sharing.service';
@@ -25,7 +26,7 @@ function build(event: EventResponseDto) {
   } as unknown as jest.Mocked<EventsService>;
   const config = {
     getOrThrow: jest.fn().mockReturnValue('https://web.test'),
-  } as unknown as ConfigService;
+  } as unknown as ConfigService<Env, true>;
   return { events, service: new EventSharingService(events, config) };
 }
 

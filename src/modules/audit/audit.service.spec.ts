@@ -2,8 +2,9 @@ import type { PermissionsService } from '../access/permissions.service';
 import { AuditRepository, type AuditRecord } from './audit.repository';
 import { AuditService } from './audit.service';
 import { maskSecrets } from './dto/audit-entry.dto';
+import { organizerAuth } from '../../../test/support/auth-context';
 
-const auth = { organizationId: 1, userId: 'u1', sessionId: 's1' };
+const auth = organizerAuth();
 
 function record(over: Partial<AuditRecord> = {}): AuditRecord {
   return {

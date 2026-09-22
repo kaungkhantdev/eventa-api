@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'dash-e2e', name: 'Dashboard E2E' };
@@ -102,7 +103,7 @@ describe('Dashboard and operations home (e2e — E11)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
 
     adminJwt = await token(ADMIN, ORG.slug);
@@ -168,7 +169,10 @@ describe('Dashboard and operations home (e2e — E11)', () => {
     const event = o.event ?? eventId;
     const tier = o.tier ?? tierId;
     const total = o.totalSatang ?? 0;
-    const at = o.registeredAt ?? 'now()';
+    // A few seconds back, not `now()`: the window ends at the API's own clock,
+    // and a row stamped by the database's clock a few milliseconds "later"
+    // falls outside it — which made revenue read 0 on some runs.
+    const at = o.registeredAt ?? "now() - interval '5 seconds'";
     const order = await pool.query<{ id: string }>(
       `INSERT INTO orders (organization_id, reference, event_id, buyer_name, buyer_email,
                            status, payment_status, seats, subtotal_satang,

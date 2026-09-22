@@ -12,6 +12,7 @@ import { AppModule } from '../src/app.module';
 import { PaymentProviderPort } from '../src/modules/payments/ports/payment-provider.port';
 import { StubPaymentProvider } from './support/stub-payment.provider';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'po-e2e', name: 'Payouts E2E' };
@@ -80,7 +81,7 @@ describe('Payouts (e2e — US-FIN-03/04/05)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
 
     adminJwt = await token(ADMIN);

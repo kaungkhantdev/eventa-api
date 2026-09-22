@@ -9,6 +9,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const OLD_PASSWORD = 'oldpass1word';
 const NEW_PASSWORD = 'newpass2word';
@@ -34,7 +35,7 @@ describe('Forgotten-password reset (US-ACC-04, e2e)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
 
     await registerAndConfirm();
@@ -74,20 +75,30 @@ describe('Forgotten-password reset (US-ACC-04, e2e)', () => {
     await request(server).post('/api/v1/auth/verify-email').send({ token });
   }
 
-  it('emails a reset link and never reveals whether the email exists', async () => {
+  it('emails a reset link to an account that exists', async () => {
     const known = await request(server)
       .post('/api/v1/auth/forgot-password')
       .send({ email: OWNER });
-    const unknown = await request(server)
-      .post('/api/v1/auth/forgot-password')
-      .send({ email: 'nobody@reset-e2e.test' });
 
     expect(known.status).toBe(200);
-    expect(unknown.status).toBe(200);
-    expect((known.body as Body<{ message: string }>).data.message).toBe(
-      (unknown.body as Body<{ message: string }>).data.message,
-    );
     expect(await tokenFrom('identity.password_reset_requested')).not.toBe('');
+  });
+
+  it('says plainly when no account uses the address', async () => {
+    // A deliberate product decision (a14cd8f): silence for an address with no
+    // account reads as a mail that was sent and lost. The cost — the endpoint
+    // confirms whether an account exists — is bounded by the sign-in throttle,
+    // which counts each miss.
+    // A fresh address every run: each miss counts against the throttle, which
+    // outlives the run, so a fixed one is locked (429) after a few runs.
+    const unknown = await request(server)
+      .post('/api/v1/auth/forgot-password')
+      .send({ email: `nobody-${Date.now()}@reset-e2e.test` });
+
+    expect(unknown.status).toBe(404);
+    expect((unknown.body as { message: string }).message).toMatch(
+      /No organizer account uses that email address/,
+    );
   });
 
   it('sets the new password; the old one stops working', async () => {

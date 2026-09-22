@@ -11,6 +11,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const WORKSPACE = { slug: 'att-signin-e2e', name: 'Attendee Signin E2E' };
@@ -53,7 +54,7 @@ describe('Attendee sign-in (e2e — US-DISC-08)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
   }, 30000);
 
@@ -91,9 +92,11 @@ describe('Attendee sign-in (e2e — US-DISC-08)', () => {
     expect((res.body as { message: string }).message).toMatch(/workspace/i);
   });
 
-  it('still requires the workspace slug for an organizer login', async () => {
+  it('signs an organizer in without the workspace slug', async () => {
+    // The slug was never shown to anybody; the password tells their accounts
+    // apart instead (cf03cd3). It is still the ORGANIZER door: no persona.
     const res = await login({ email: ORGANIZER, password: PASSWORD });
-    expect(res.status).toBe(422);
+    expect(res.status).toBe(200);
   });
 
   it('an organizer account cannot sign in through the attendee door', async () => {

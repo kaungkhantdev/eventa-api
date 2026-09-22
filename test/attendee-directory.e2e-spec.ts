@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'dir-e2e', name: 'Directory E2E' };
@@ -56,7 +57,7 @@ describe('Attendee directory (e2e — US-REG-05)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
     jwt = await token(ADMIN, ORG.slug);
   }, 30000);
@@ -80,7 +81,9 @@ describe('Attendee directory (e2e — US-REG-05)', () => {
       .set('Authorization', `Bearer ${jwt}`);
 
   const body = (res: { body: unknown }) =>
-    res.body as Success<Attendee[]> & { meta: { counts: Counts } };
+    res.body as Success<Attendee[]> & {
+      meta: { counts: Counts; total: number };
+    };
 
   it('lists attendees with their event, ticket and check-in counts', async () => {
     const res = await list();

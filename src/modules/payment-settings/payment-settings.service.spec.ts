@@ -52,7 +52,15 @@ describe('PaymentSettingsService', () => {
       get: jest.fn().mockResolvedValue({ currency: 'THB' }),
     } as unknown as jest.Mocked<OrganizationService>;
     const clock: Clock = { now: () => NOW };
-    service = new PaymentSettingsService(repo, organization, clock);
+    // Preferences only: neither the webhook address nor the environment is
+    // read on this path.
+    service = new PaymentSettingsService(
+      repo,
+      organization,
+      clock,
+      'https://api.test',
+      'test',
+    );
   });
 
   describe('updatePreferences (US-SET-10)', () => {

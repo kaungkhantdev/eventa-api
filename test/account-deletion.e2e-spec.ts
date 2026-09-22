@@ -12,6 +12,7 @@ import { AppModule } from '../src/app.module';
 import { generateTotp } from '../src/common/crypto/totp';
 import { buildValidationPipe } from '../src/common/http/validation';
 import { OutboxPort } from '../src/modules/platform/outbox.port';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 /** Unique per run — deliberate failures leave throttle strikes in Redis. */
@@ -51,7 +52,7 @@ describe('Delete my account (e2e — US-DISC-14)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
   }, 30000);
 

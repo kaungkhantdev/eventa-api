@@ -13,6 +13,7 @@ import { AppModule } from '../src/app.module';
 import { PaymentProviderPort } from '../src/modules/payments/ports/payment-provider.port';
 import { StubPaymentProvider } from './support/stub-payment.provider';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'mypay-e2e', name: 'MyPay E2E' };
@@ -22,6 +23,8 @@ const BAHT = 100;
 /** ฿1,000 ×2 + 5% fee. */
 const ORDER_TOTAL = 2_100 * BAHT;
 const WEBHOOK_SECRET = 'whsec_fake';
+/** This workspace's own webhook path segment — webhooks are per workspace. */
+const WEBHOOK_TOKEN = 'tok-mypay';
 
 interface Success<T> {
   data: T;
@@ -67,7 +70,7 @@ describe('Payment history (e2e — US-DISC-10)', () => {
     app = moduleRef.createNestApplication({ rawBody: true });
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
 
     // ANAN's paid transaction goes through the REAL money path:
@@ -254,7 +257,7 @@ async function payThroughTheFrontDoor(
     .update(body)
     .digest('hex');
   const hook = await request(server)
-    .post('/api/v1/public/payments/webhook')
+    .post(`/api/v1/public/payments/webhook/${WEBHOOK_TOKEN}`)
     .set('stripe-signature', signature)
     .set('content-type', 'application/json')
     .send(body);
@@ -276,6 +279,12 @@ async function seed(pool: Pool): Promise<Seeded> {
     [ORG.name, ORG.slug],
   );
   const orgId = Number(org.rows[0].id);
+  // Money is taken only through the workspace's own connected account.
+  await pool.query(
+    `INSERT INTO payment_settings (organization_id, provider, status, account_id, webhook_token)
+     VALUES ($1, 'stripe', 'connected', 'acct_mypay', $2)`,
+    [orgId, WEBHOOK_TOKEN],
+  );
   const passwordHash = await hash(PASSWORD);
   for (const email of [ANAN, MALEE]) {
     await pool.query(

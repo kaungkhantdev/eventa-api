@@ -66,6 +66,7 @@ describe('DashboardAnalyticsService (US-DASH-08/09/12)', () => {
       reach: jest
         .fn()
         .mockResolvedValue({ upcoming: 3, capacityFilledPercent: 62.5 }),
+      setupMilestones: jest.fn(),
     };
     checkIns = {
       rateForPeriod: jest
@@ -74,6 +75,7 @@ describe('DashboardAnalyticsService (US-DASH-08/09/12)', () => {
     };
     inventory = {
       countSellingOut: jest.fn(),
+      hasTicketType: jest.fn(),
       sellingFast: jest.fn().mockResolvedValue([
         {
           ticketTypeId: 't-1',

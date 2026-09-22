@@ -12,14 +12,20 @@ import { AppModule } from '../src/app.module';
 import { PaymentProviderPort } from '../src/modules/payments/ports/payment-provider.port';
 import { StubPaymentProvider } from './support/stub-payment.provider';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const ORG = { slug: 'pay-e2e', name: 'Pay E2E' };
 const SUMMIT = 'pay-summit';
 const BAHT = 100;
 /** ฿1,000 ×2 + 5% fee — what the seeded order comes to. */
 const ORDER_TOTAL = 2_100 * BAHT;
-/** The fake adapter's default secret when STRIPE_WEBHOOK_SECRET is unset. */
+/** The stub provider's signing secret (see test/support/stub-payment.provider). */
 const WEBHOOK_SECRET = 'whsec_fake';
+/**
+ * The workspace's own webhook path segment. Webhooks are per workspace (85f6f71):
+ * a signature cannot be checked until the URL has said whose secret applies.
+ */
+const WEBHOOK_TOKEN = 'tok-paye2e';
 
 interface Success<T> {
   data: T;
@@ -70,7 +76,7 @@ describe('Paying for an order (e2e — US-DISC-05)', () => {
     app = moduleRef.createNestApplication({ rawBody: true });
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
   }, 30000);
 
@@ -150,7 +156,7 @@ describe('Paying for an order (e2e — US-DISC-05)', () => {
     const raw = JSON.stringify(body);
     const signature = createHmac('sha256', secret).update(raw).digest('hex');
     return request(server)
-      .post('/api/v1/public/payments/webhook')
+      .post(`/api/v1/public/payments/webhook/${WEBHOOK_TOKEN}`)
       .set('stripe-signature', signature)
       .set('content-type', 'application/json')
       .send(raw);
@@ -445,6 +451,13 @@ async function seed(
                                status, total, sold, min_per_order, max_per_order)
      VALUES ($1,$2,'General',$3,'onsale',100,0,1,8) RETURNING id`,
     [orgId, event.rows[0].id, 1_000 * BAHT],
+  );
+  // A workspace takes money only once its own payment account is connected
+  // (85f6f71) — there is no platform account to fall back on.
+  await pool.query(
+    `INSERT INTO payment_settings (organization_id, provider, status, account_id, webhook_token)
+     VALUES ($1, 'stripe', 'connected', 'acct_paye2e', $2)`,
+    [orgId, WEBHOOK_TOKEN],
   );
   return { orgId, eventId: event.rows[0].id, tierId: tier.rows[0].id };
 }

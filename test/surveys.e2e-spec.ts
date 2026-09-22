@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 /**
  * Authoring feedback surveys (US-MSG-09) against a real database.
@@ -81,7 +82,7 @@ describe('Surveys (e2e — US-MSG-09)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
 
     adminJwt = await token(ADMIN, ORG.slug);
@@ -108,13 +109,13 @@ describe('Surveys (e2e — US-MSG-09)', () => {
     return (res.body as Success<{ accessToken: string }>).data.accessToken;
   }
 
-  const post = (jwt: string, body: unknown) =>
+  const post = (jwt: string, body: object) =>
     request(server)
       .post('/api/v1/surveys')
       .set('Authorization', `Bearer ${jwt}`)
       .send(body);
 
-  const patch = (jwt: string, path: string, body: unknown) =>
+  const patch = (jwt: string, path: string, body: object) =>
     request(server)
       .patch(`/api/v1/surveys/${path}`)
       .set('Authorization', `Bearer ${jwt}`)

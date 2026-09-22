@@ -10,6 +10,7 @@ import type { PasswordService } from './auth-password.service';
 import type { TokenService } from '../auth/token.service';
 import type { LoginThrottleService } from '../auth/login-throttle.service';
 import { IDENTITY_PASSWORD_RESET_REQUESTED } from './events/password-reset-requested.event';
+import { outboxDouble } from '../../../test/support/outbox-double';
 
 /**
  * The message a refusal carried. Typed, unlike `expect.stringMatching` inside
@@ -59,9 +60,7 @@ describe('PasswordResetService', () => {
         .fn()
         .mockResolvedValue({ sub: 'u1', org: 7, pv: FINGERPRINT }),
     } as unknown as jest.Mocked<TokenService>;
-    outbox = {
-      enqueue: jest.fn().mockResolvedValue(undefined),
-    };
+    outbox = outboxDouble();
     const clock: Clock = { now: () => new Date('2026-07-31T00:00:00.000Z') };
     const config = {
       getOrThrow: jest.fn().mockReturnValue('https://web.test'),

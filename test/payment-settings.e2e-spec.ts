@@ -10,6 +10,11 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import {
+  PaymentProviderPort as KeyVerifierPort,
+  type VerifyResult,
+} from '../src/modules/payment-settings/ports/payment-provider.port';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'pay-e2e', name: 'Pay E2E' };
@@ -21,6 +26,25 @@ const PERM_GROUP: Record<string, string> = {
   setIntegrations: 'Settings',
   regView: 'Registrations',
 };
+
+/** The one secret key the stand-in below treats as working. */
+const GOOD_SECRET = 'sk_test_51GoodKey';
+const STRIPE_ACCOUNT = 'acct_1A2b3C';
+
+/**
+ * Stripe's side of "does this key work?", without the network. Saving keys
+ * proves them against the provider BEFORE storing anything (85f6f71), so an
+ * e2e run must not reach the real one.
+ */
+class FakeKeyVerifier extends KeyVerifierPort {
+  verifyKey(secretKey: string): Promise<VerifyResult> {
+    return Promise.resolve(
+      secretKey === GOOD_SECRET
+        ? { ok: true, accountId: STRIPE_ACCOUNT }
+        : { ok: false, reason: 'Invalid API Key provided.' },
+    );
+  }
+}
 
 interface Success<T> {
   data: T;
@@ -63,11 +87,14 @@ describe('Payment settings (e2e — US-SET-08/09/10)', () => {
 
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(KeyVerifierPort)
+      .useClass(FakeKeyVerifier)
+      .compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
 
     adminJwt = await login(ADMIN);
@@ -112,28 +139,38 @@ describe('Payment settings (e2e — US-SET-08/09/10)', () => {
     });
   });
 
-  it('SET-08: refuses an account the provider cannot verify (422)', async () => {
-    const res = await post('connect', {
-      accountId: 'acct_bad!',
-      publishableKey: 'pk_test_x',
+  // Connecting is saving the workspace's OWN Stripe keys (85f6f71): there is
+  // no platform account to connect to any more.
+  it('SET-08: refuses a key Stripe will not accept, and stores nothing (422)', async () => {
+    const res = await post('keys', {
       mode: 'test',
+      publishableKey: 'pk_test_51A2b3C',
+      secretKey: 'sk_test_51Revoked',
     });
-    expect([400, 422]).toContain(res.status);
+    expect(res.status).toBe(422);
     expect((await get()).body).toMatchObject({
       data: { status: 'disconnected' },
     });
   });
 
-  it('SET-08: connects a valid account and stores no secret', async () => {
-    const res = await post('connect', {
-      accountId: 'acct_1A2b3C',
-      publishableKey: 'pk_test_51A2b3C',
+  it('SET-08: connects with the workspace’s own key, and never gives it back', async () => {
+    const res = await post('keys', {
       mode: 'test',
+      publishableKey: 'pk_test_51A2b3C',
+      secretKey: GOOD_SECRET,
     });
     expect(res.status).toBe(200);
-    const s = (res.body as Success<Settings>).data;
-    expect(s).toMatchObject({ status: 'connected', accountId: 'acct_1A2b3C' });
-    expect(JSON.stringify(res.body)).not.toMatch(/sk_live|sk_test|secretKey/);
+    expect(JSON.stringify(res.body)).not.toContain(GOOD_SECRET);
+    expect((await get()).body).toMatchObject({
+      data: { status: 'connected', accountId: STRIPE_ACCOUNT },
+    });
+    // Stored, but not as itself.
+    const { rows } = await pool.query<{ cipher: string }>(
+      `SELECT secret_key_cipher AS cipher FROM payment_credentials WHERE organization_id = $1`,
+      [orgId],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].cipher).not.toContain(GOOD_SECRET);
   });
 
   it('SET-08: tests the connection without moving money', async () => {
