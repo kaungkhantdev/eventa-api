@@ -97,7 +97,11 @@ export class EventMonitoringController {
 
   @Post(':id/attendees/email')
   @RequirePermissions(Permission.regView)
-  @ResponseMessage('Broadcast queued.')
+  // A scheduled broadcast queues nothing until its time comes, so saying it was
+  // queued would contradict `queued: false` in the same body (US-MSG-04).
+  @ResponseMessage((result: BroadcastResultDto) =>
+    result.queued ? 'Broadcast queued.' : 'Broadcast scheduled.',
+  )
   @ApiData(BroadcastResultDto)
   emailAttendees(
     @CurrentAuth() auth: AuthContext,

@@ -32,6 +32,8 @@ const ORG = { slug: 'sched-ann-e2e', name: 'Scheduled Announcements E2E' };
 const ORG2 = { slug: 'sched-ann-e2e-2', name: 'Scheduled Announcements E2E 2' };
 const ADMIN = 'admin@sched-ann-e2e.test';
 const OUTSIDER = 'nobody@sched-ann-e2e.test';
+/** Holds `regView` and nothing else — the default Staff grant, minus check-in. */
+const STAFF = 'staff@sched-ann-e2e.test';
 const ADMIN2 = 'admin@sched-ann-e2e-2.test';
 
 const MINUTE = 60_000;
@@ -40,6 +42,7 @@ const ATTENDEES_EMAIL = 'events.attendees_email_requested';
 
 const PERM_GROUP: Record<string, string> = {
   regView: 'Registrations',
+  regManage: 'Registrations',
   evCreate: 'Events',
 };
 
@@ -87,17 +90,27 @@ describe('Scheduled announcements (e2e — US-MSG-04/05)', () => {
   let adminId: string;
   let adminJwt: string;
   let outsiderJwt: string;
+  let staffJwt: string;
   let otherJwt: string;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: process.env.DATABASE_URL });
     await cleanup(pool);
     orgId = await seedOrg(pool, ORG, [
-      { email: ADMIN, roleName: 'Admin', grants: ['regView', 'evCreate'] },
+      {
+        email: ADMIN,
+        roleName: 'Admin',
+        grants: ['regView', 'regManage', 'evCreate'],
+      },
       { email: OUTSIDER, roleName: 'Marketing', grants: ['evCreate'] },
+      { email: STAFF, roleName: 'Staff', grants: ['regView'] },
     ]);
     otherOrgId = await seedOrg(pool, ORG2, [
-      { email: ADMIN2, roleName: 'Admin', grants: ['regView', 'evCreate'] },
+      {
+        email: ADMIN2,
+        roleName: 'Admin',
+        grants: ['regView', 'regManage', 'evCreate'],
+      },
     ]);
     summitId = await seedEvent(pool, orgId, 'sched-summit', 'Tech Summit 2026');
     const admin = await pool.query<{ id: string }>(
@@ -117,6 +130,7 @@ describe('Scheduled announcements (e2e — US-MSG-04/05)', () => {
 
     adminJwt = await token(ADMIN, ORG.slug);
     outsiderJwt = await token(OUTSIDER, ORG.slug);
+    staffJwt = await token(STAFF, ORG.slug);
     otherJwt = await token(ADMIN2, ORG2.slug);
   }, 30000);
 
@@ -222,6 +236,10 @@ describe('Scheduled announcements (e2e — US-MSG-04/05)', () => {
         queued: false,
         scheduledFor: sendAt,
       });
+      // Nothing was queued, so the envelope must not say a send is on its way.
+      expect((res.body as Success<Broadcast>).message).toBe(
+        'Broadcast scheduled.',
+      );
       const [only] = (
         await pool.query<Row>(
           `SELECT status, scheduled_for, sent_at, recipient_count
@@ -269,7 +287,10 @@ describe('Scheduled announcements (e2e — US-MSG-04/05)', () => {
     });
 
     it('still sends straight away without a time — one row, one send', async () => {
-      await send(adminJwt, broadcast).expect(201);
+      const res = await send(adminJwt, broadcast).expect(201);
+      expect((res.body as Success<Broadcast>).message).toBe(
+        'Broadcast queued.',
+      );
 
       const [listed] = items((await list(adminJwt).expect(200)).body);
       expect(listed).toMatchObject({
@@ -441,6 +462,21 @@ describe('Scheduled announcements (e2e — US-MSG-04/05)', () => {
 
       await cancel(outsiderJwt, id).expect(403);
       await reschedule(outsiderJwt, id, ahead(2 * DAY)).expect(403);
+      expect((await row(id)).status).toBe('scheduled');
+    });
+
+    /**
+     * Staff hold `regView` by default, so `regView` alone cannot be the gate on
+     * calling off or moving someone else's queued broadcast — that is deciding,
+     * not reading, and the queue's own rule (US-REG-02) puts deciding behind
+     * `regManage`. Reading the history stays on `regView`.
+     */
+    it('lets a regView-only member read the history but not change it', async () => {
+      const id = await scheduled();
+
+      await list(staffJwt).expect(200);
+      await cancel(staffJwt, id).expect(403);
+      await reschedule(staffJwt, id, ahead(2 * DAY)).expect(403);
       expect((await row(id)).status).toBe('scheduled');
     });
   });

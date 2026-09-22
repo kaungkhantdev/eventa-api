@@ -44,8 +44,11 @@ import { RescheduleAnnouncementDto } from './dto/reschedule-announcement.dto';
  * leave two places that can start the same thing. What lives here is the
  * history, and changing your mind about one that has not gone yet.
  *
- * Gated on `regView`, the same permission as the send — both are about who you
- * are allowed to write to.
+ * Reading the history is gated on `regView`, the same permission as the send —
+ * both are about who you are allowed to see and write to. Calling one off or
+ * moving it is `regManage`: it revokes somebody else's decision, and Staff hold
+ * `regView` by default, so `regView` there would let the door team silence an
+ * organizer's broadcast. Same line the registrations queue draws (US-REG-02).
  */
 @ApiTags('announcements')
 @ApiBearerAuth()
@@ -53,7 +56,8 @@ import { RescheduleAnnouncementDto } from './dto/reschedule-announcement.dto';
 @RequirePermissions(Permission.regView)
 @ApiForbiddenResponse({
   type: ApiErrorDto,
-  description: 'Seeing who was written to is an attendee-data permission.',
+  description:
+    'Attendee-data permissions: `regView` to see who was written to, `regManage` to call one off or move it.',
 })
 @Controller('announcements')
 export class AnnouncementsController {
@@ -70,6 +74,7 @@ export class AnnouncementsController {
   }
 
   @Post(':id/cancel')
+  @RequirePermissions(Permission.regManage)
   @HttpCode(HttpStatus.OK)
   @ResponseMessage('Announcement cancelled.')
   @ApiData(AnnouncementDto)
@@ -86,6 +91,7 @@ export class AnnouncementsController {
   }
 
   @Patch(':id')
+  @RequirePermissions(Permission.regManage)
   @ResponseMessage('Announcement rescheduled.')
   @ApiData(AnnouncementDto)
   @ApiConflictResponse({
