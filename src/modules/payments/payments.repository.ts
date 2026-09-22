@@ -146,6 +146,11 @@ export class PaymentsRepository {
    * MOVED in, not the month of the sale. A June ticket refunded in July belongs
    * to July's return, because June's has already gone to the Revenue
    * Department.
+   *
+   * The same holds for the refund itself: a PromptPay refund issued in June
+   * and settled in July (once the buyer gave a bank account) is July's. June
+   * was filed without it while it was pending, and a filed month is frozen.
+   * Refunds from before `settled_at` existed settled when issued.
    */
   async takingsByMonth(
     organizationId: number,
@@ -162,12 +167,12 @@ export class PaymentsRepository {
              AND paid_at IS NOT NULL
              AND date_part('year', paid_at AT TIME ZONE ${BANGKOK})::int = ${year}
           UNION ALL
-          SELECT date_part('month', issued_at AT TIME ZONE ${BANGKOK})::int AS month,
+          SELECT date_part('month', coalesce(settled_at, issued_at) AT TIME ZONE ${BANGKOK})::int AS month,
                  -amount_satang AS gross
             FROM refunds
            WHERE organization_id = ${organizationId}
              AND status = 'succeeded'
-             AND date_part('year', issued_at AT TIME ZONE ${BANGKOK})::int = ${year}
+             AND date_part('year', coalesce(settled_at, issued_at) AT TIME ZONE ${BANGKOK})::int = ${year}
         ) movements
         GROUP BY month
       `);
@@ -489,6 +494,7 @@ export class PaymentsRepository {
       .set({
         status: 'succeeded',
         gatewayRef: input.gatewayRef,
+        settledAt: input.now,
         updatedAt: input.now,
       })
       .where(and(eq(refunds.id, input.refundId), eq(refunds.status, 'pending')))

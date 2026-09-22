@@ -34,12 +34,19 @@ const WEBHOOK_SECRET = 'whsec_fake';
 const WEBHOOK_TOKEN = 'tok-pendrf-e2e';
 const OTHER_WEBHOOK_TOKEN = 'tok-pendrf-e2e-other';
 const EVENT_PREFIX = 'evt-pendrf-';
+/** Bangkok keeps no daylight saving, so its offset is a constant. */
+const BANGKOK_OFFSET_MS = 7 * 60 * 60 * 1000;
 /** The seeded tier: sold out, across a 2-ticket order and a 1-ticket order. */
 const TIER_TOTAL = 3;
 const REFUNDED_SEATS = 2;
 
 interface Success<T> {
   data: T;
+}
+
+interface Month {
+  year: number;
+  month: number;
 }
 
 interface Seeded {
@@ -342,6 +349,20 @@ describe('A refund the provider settles later (e2e — US-FIN-02)', () => {
       )
     ).rows[0];
 
+  /** A month's VAT return, VAT-inclusive: its taxable sales plus their VAT. */
+  const grossReported = async ({ year, month }: Month): Promise<number> => {
+    const res = await request(server)
+      .get(`/api/v1/tax-periods?year=${year}`)
+      .set('Authorization', `Bearer ${adminJwt}`)
+      .expect(200);
+    const period = (
+      res.body as Success<{
+        periods: { salesSatang: number; vatSatang: number }[];
+      }>
+    ).data.periods[month - 1];
+    return period.salesSatang + period.vatSatang;
+  };
+
   const holdOne = (eventId: string, tierId: string) =>
     request(server)
       .post('/api/v1/public/checkout/hold')
@@ -422,6 +443,38 @@ describe('A refund the provider settles later (e2e — US-FIN-02)', () => {
       expect(await snapshot(s)).toEqual(settled);
       expect(settled.sold).toBe(TIER_TOTAL - REFUNDED_SEATS);
       expect((await webhookRow(second.eventId)).status).toBe('processed');
+    });
+  });
+
+  /**
+   * US-FIN-02: once the refund succeeds, the VAT on that sale is backed out
+   * of the CURRENT tax period. A refund issued one month and settled the next
+   * belongs to the month the money went back — its issue month may already be
+   * filed, and a frozen return never takes it.
+   */
+  describe('when it settles in a later month than it was issued', () => {
+    it('backs the refund out of the month it settled, not the month it was issued', async () => {
+      const s = await seed();
+      await refund(s.paymentId).expect(200);
+      const settledIn = bangkokMonthOf(new Date());
+      const issuedIn = monthBefore(settledIn);
+      // The sale and the refund both happened last month; only the bank
+      // details arrive this month. The bystander's sale stays this month's.
+      await pool.query(`UPDATE payments SET paid_at = $2 WHERE id = $1`, [
+        s.paymentId,
+        midMonth(issuedIn),
+      ]);
+      await pool.query(
+        `UPDATE refunds SET issued_at = $2 WHERE payment_id = $1`,
+        [s.paymentId, midMonth(issuedIn)],
+      );
+
+      await webhook(refundEvent(await refundRefOf(s.paymentId))).expect(200);
+
+      expect(await grossReported(issuedIn)).toBe(PRICE * REFUNDED_SEATS);
+      expect(await grossReported(settledIn)).toBe(
+        PRICE * (TIER_TOTAL - REFUNDED_SEATS) - PRICE * REFUNDED_SEATS,
+      );
     });
   });
 
@@ -617,6 +670,22 @@ describe('A refund the provider settles later (e2e — US-FIN-02)', () => {
     });
   });
 });
+
+function bangkokMonthOf(at: Date): Month {
+  const local = new Date(at.getTime() + BANGKOK_OFFSET_MS);
+  return { year: local.getUTCFullYear(), month: local.getUTCMonth() + 1 };
+}
+
+function monthBefore({ year, month }: Month): Month {
+  return month === 1
+    ? { year: year - 1, month: 12 }
+    : { year, month: month - 1 };
+}
+
+/** The 15th at noon in Bangkok — inside the month in every time zone that matters. */
+function midMonth({ year, month }: Month): string {
+  return new Date(Date.UTC(year, month - 1, 15, 5)).toISOString();
+}
 
 async function seedOrg(pool: Pool): Promise<number> {
   const res = await pool.query<{ id: string }>(

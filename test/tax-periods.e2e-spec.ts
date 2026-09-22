@@ -151,6 +151,41 @@ describe('The VAT ledger (e2e — US-FIN-11/12)', () => {
     );
   }
 
+  /** A refund issued but not yet settled — PromptPay, awaiting bank details. */
+  async function seedPendingRefund(
+    paymentId: string,
+    issuedAt: string,
+    amount: number,
+  ): Promise<string> {
+    seq += 1;
+    const admin = await pool.query<{ id: string }>(
+      `SELECT id FROM users WHERE email = $1`,
+      [ADMIN],
+    );
+    const res = await pool.query<{ id: string }>(
+      `INSERT INTO refunds (organization_id, payment_id, order_id, amount_satang,
+                            status, issued_by, issued_at, idempotency_key)
+       VALUES ($1,$2,$3,$4,'pending',$5,$6,$7) RETURNING id`,
+      [
+        orgId,
+        paymentId,
+        orderId,
+        amount,
+        admin.rows[0].id,
+        issuedAt,
+        `ridem-${seq}`,
+      ],
+    );
+    return res.rows[0].id;
+  }
+
+  /** The provider's webhook settling it, as far as the ledger is concerned. */
+  const settleRefund = (refundId: string, settledAt: string) =>
+    pool.query(
+      `UPDATE refunds SET status = 'succeeded', settled_at = $2 WHERE id = $1`,
+      [refundId, settledAt],
+    );
+
   const ledger = (jwt: string, query: string) =>
     request(server)
       .get(`/api/v1/tax-periods?${query}`)
@@ -259,6 +294,29 @@ describe('The VAT ledger (e2e — US-FIN-11/12)', () => {
       expect(after.periods[5].vatSatang).toBe(JUNE_VAT);
       expect(after.periods[5].remittedSatang).toBe(JUNE_VAT);
       // …and the adjustment carries into July, the next open period.
+      expect(after.periods[6].vatSatang).toBe(-JUNE_VAT);
+    });
+
+    /**
+     * The PromptPay case: issued in June, still pending when June was filed,
+     * settled in July once the buyer gave Stripe a bank account. June's return
+     * rightly left it out, and is frozen now — so the reversal belongs to the
+     * month the money actually went back, or it is backed out of no return.
+     */
+    it('backs a refund settled after its month was filed out of the month it SETTLED', async () => {
+      const paymentId = await seedPayment(`${YEAR}-06-15T03:00:00Z`);
+      const refundId = await seedPendingRefund(
+        paymentId,
+        `${YEAR}-06-28T03:00:00Z`,
+        JUNE_GROSS,
+      );
+      await file(adminJwt, 6);
+      await settleRefund(refundId, `${YEAR}-07-02T03:00:00Z`);
+
+      const after = (
+        (await ledger(adminJwt, `year=${YEAR}`)).body as Success<Ledger>
+      ).data;
+      expect(after.periods[5].vatSatang).toBe(JUNE_VAT);
       expect(after.periods[6].vatSatang).toBe(-JUNE_VAT);
     });
 
