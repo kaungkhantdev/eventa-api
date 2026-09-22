@@ -59,6 +59,14 @@ export interface MessageTemplateDefinition {
 }
 
 /**
+ * The thank-you that carries the survey link. Named because feedback reads the
+ * delivery log by it to know who was asked (US-MSG-08): it must equal
+ * eventa-worker's `POST_EVENT_THANKYOU_SLUG`, the kind the worker logs, and a
+ * rename on either side alone would quietly report that nobody was asked.
+ */
+export const POST_EVENT_THANKYOU_SLUG = 'post-event-thankyou';
+
+/**
  * Every automated message Eventa knows about (US-MSG-01/02).
  *
  * This is a CATALOG, not a table. A template is a trigger the platform owns,
@@ -77,14 +85,6 @@ export interface MessageTemplateDefinition {
  * Email only, throughout. There is no SMS provider in the product yet, so an
  * SMS badge would promise a channel nothing can deliver on.
  */
-/**
- * The thank-you that carries the survey link. Named because feedback reads the
- * delivery log by it to know who was asked (US-MSG-08): it must equal
- * eventa-worker's `POST_EVENT_THANKYOU_SLUG`, the kind the worker logs, and a
- * rename on either side alone would quietly report that nobody was asked.
- */
-export const POST_EVENT_THANKYOU_SLUG = 'post-event-thankyou';
-
 export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
   {
     slug: 'registration-confirmation',

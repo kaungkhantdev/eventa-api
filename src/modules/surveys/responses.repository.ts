@@ -189,8 +189,16 @@ export class SurveyResponsesRepository {
    * was asked and nobody answered is exactly what completion measures, and
    * weighting by responses would drop it and flatter the rate.
    *
-   * - DISTINCT, because a send that failed is retried on the next run, leaving a
-   *   'failed' row and then a 'sent' one for the same person.
+   * - DISTINCT in `asked`, because one person can hold several 'sent'
+   *   thank-yous for an event: a run eventa-worker never completed (one address
+   *   failing for good) is resumed hourly through the feedback window, and once
+   *   its per-event recipient ledger lapses it mails everybody again. Nothing
+   *   in message_deliveries forbids the repeat. (A failed row needs no DISTINCT:
+   *   the status filter already drops it.)
+   * - DISTINCT in `answered`, because one person can answer more than one
+   *   survey of an event — an event may have several, a closed one can reopen,
+   *   and "once each" is per survey. Without it the LEFT JOIN repeats that
+   *   person's asked row, swelling `asked` and skewing the rate.
    * - lower() on both sides, because `recipient_email` is plain text holding
    *   the BUYER's spelling of the address while `users.email` is citext. Without
    *   it "Anan@…" asked and "anan@…" answering would never meet.

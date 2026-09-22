@@ -23,6 +23,8 @@ import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'rsp-e2e', name: 'Responses E2E' };
+/** A workspace next door, whose sends and answers must never reach ORG's figures. */
+const OTHER_ORG = { slug: 'rsp-e2e-other', name: 'Responses E2E Other' };
 const ADMIN = 'admin@rsp-e2e.test';
 const WENT = 'went@rsp-e2e.test';
 const STAYED_HOME = 'absent@rsp-e2e.test';
@@ -54,6 +56,8 @@ describe('Survey responses (e2e — US-MSG-08/10)', () => {
   let orgId: number;
   let eventId: string;
   let meetupId: string;
+  let otherOrgId: number;
+  let otherEventId: string;
   let adminJwt: string;
   let wentJwt: string;
   let absentJwt: string;
@@ -68,6 +72,8 @@ describe('Survey responses (e2e — US-MSG-08/10)', () => {
     ]);
     eventId = await seedEvent(pool, orgId, 'rsp-summit', 'Tech Summit 2026');
     meetupId = await seedEvent(pool, orgId, 'rsp-meetup', 'Meetup');
+    otherOrgId = await seedOrg(pool, OTHER_ORG, []);
+    otherEventId = await seedEvent(pool, otherOrgId, 'rsp-gala', 'Gala');
     // Attendees belong to the PLATFORM org, not the organizer's workspace.
     await seedAttendee(pool, WENT);
     await seedAttendee(pool, STAYED_HOME);
@@ -88,6 +94,22 @@ describe('Survey responses (e2e — US-MSG-08/10)', () => {
   }, 30000);
 
   beforeEach(async () => {
+    surveyId = await createSurvey();
+  });
+
+  afterEach(async () => {
+    await pool.query(`DELETE FROM surveys WHERE organization_id = ANY($1)`, [
+      [orgId, otherOrgId],
+    ]);
+  });
+
+  afterAll(async () => {
+    await cleanup(pool);
+    await pool.end();
+    await app.close();
+  });
+
+  async function createSurvey(): Promise<string> {
     const res = await request(server)
       .post('/api/v1/surveys')
       .set('Authorization', `Bearer ${adminJwt}`)
@@ -105,18 +127,8 @@ describe('Survey responses (e2e — US-MSG-08/10)', () => {
         ],
       })
       .expect(201);
-    surveyId = (res.body as Success<{ id: string }>).data.id;
-  });
-
-  afterEach(async () => {
-    await pool.query(`DELETE FROM surveys WHERE organization_id = $1`, [orgId]);
-  });
-
-  afterAll(async () => {
-    await cleanup(pool);
-    await pool.end();
-    await app.close();
-  });
+    return (res.body as Success<{ id: string }>).data.id;
+  }
 
   /**
    * An organizer signs into a WORKSPACE; an attendee signs in globally. That
@@ -135,12 +147,14 @@ describe('Survey responses (e2e — US-MSG-08/10)', () => {
     return (res.body as Success<{ accessToken: string }>).data.accessToken;
   }
 
-  const makeLive = () =>
+  const setStatus = (id: string, status: 'live' | 'closed') =>
     request(server)
-      .patch(`/api/v1/surveys/${surveyId}/status`)
+      .patch(`/api/v1/surveys/${id}/status`)
       .set('Authorization', `Bearer ${adminJwt}`)
-      .send({ status: 'live' })
+      .send({ status })
       .expect(200);
+
+  const makeLive = () => setStatus(surveyId, 'live');
 
   const mine = (jwt: string) =>
     request(server)
@@ -322,8 +336,8 @@ describe('Survey responses (e2e — US-MSG-08/10)', () => {
   describe('completion — of those asked, who answered', () => {
     afterEach(async () => {
       await pool.query(
-        `DELETE FROM message_deliveries WHERE organization_id = $1`,
-        [orgId],
+        `DELETE FROM message_deliveries WHERE organization_id = ANY($1)`,
+        [[orgId, otherOrgId]],
       );
     });
 
@@ -398,6 +412,34 @@ describe('Survey responses (e2e — US-MSG-08/10)', () => {
       });
     });
 
+    it('asks a person once, however many thank-yous reached them', async () => {
+      // A run the worker never completed is resumed every hour, and once its
+      // recipient ledger lapses it mails everybody on it again: two 'sent'
+      // rows, one person — here spelled two ways.
+      await seedAsked(pool, orgId, eventId, WENT);
+      await seedAsked(pool, orgId, eventId, 'Went@RSP-E2E.test');
+      await answer();
+      expect(await summaryOf(eventId)).toMatchObject({
+        asked: 1,
+        completionRate: 100,
+      });
+    });
+
+    it('counts a person once when they answered two surveys of the event', async () => {
+      // One response each is per SURVEY. Close the first, open a second, and
+      // the same person answers again: still one of the two asked, not 2 of 3.
+      await seedAsked(pool, orgId, eventId, WENT);
+      await seedAsked(pool, orgId, eventId, GUEST);
+      await answer();
+      await setStatus(surveyId, 'closed');
+      await setStatus(await createSurvey(), 'live');
+      await submit(wentJwt, await good(wentJwt)).expect(200);
+
+      const expected = { asked: 2, completionRate: 50 };
+      expect(await summaryOf(eventId)).toMatchObject(expected);
+      expect(await summaryOf()).toMatchObject(expected);
+    });
+
     it('is asked only by the thank-you', async () => {
       // A reminder carries no survey link, so it asked nobody anything.
       await seedAsked(pool, orgId, eventId, GUEST, { kind: 'event-reminder' });
@@ -429,6 +471,26 @@ describe('Survey responses (e2e — US-MSG-08/10)', () => {
       expect(await summaryOf(meetupId)).toMatchObject({
         asked: 2,
         completionRate: 0,
+      });
+    });
+
+    it("never counts another workspace's thank-yous or answers", async () => {
+      // The same person, asked and answering in the workspace next door. The
+      // test connects as the owning role, so RLS is not what keeps them out.
+      await seedAsked(pool, otherOrgId, otherEventId, WENT);
+      await seedAsked(pool, otherOrgId, otherEventId, 'stranger@rsp-e2e.test');
+      await seedAnswered(pool, otherOrgId, otherEventId, WENT);
+      await seedAsked(pool, orgId, eventId, WENT);
+      await seedAsked(pool, orgId, eventId, GUEST);
+      await answer();
+
+      const own = { asked: 2, completionRate: 50 };
+      expect(await summaryOf()).toMatchObject(own);
+      expect(await summaryOf(eventId)).toMatchObject(own);
+      // Naming the other workspace's event does not reach into it either.
+      expect(await summaryOf(otherEventId)).toMatchObject({
+        asked: 0,
+        completionRate: null,
       });
     });
   });
@@ -466,6 +528,25 @@ async function seedAsked(
                                      recipient_name, status, sent_at)
      VALUES ($1, $2, $3, $4, 'Anong Pattana', $5, now())`,
     [org, event, kind, email, status],
+  );
+}
+
+/** A response from a signed-in attendee, to a survey seeded under `org`. */
+async function seedAnswered(
+  pool: Pool,
+  org: number,
+  event: string,
+  email: string,
+): Promise<void> {
+  const survey = await pool.query<{ id: string }>(
+    `INSERT INTO surveys (organization_id, event_id, title, status)
+     VALUES ($1, $2, 'Gala feedback', 'closed') RETURNING id`,
+    [org, event],
+  );
+  await pool.query(
+    `INSERT INTO survey_responses (organization_id, survey_id, event_id, user_id, submitted_at)
+     SELECT $1, $2, $3, u.id, now() FROM users u WHERE u.email = $4`,
+    [org, survey.rows[0].id, event, email],
   );
 }
 
@@ -542,7 +623,7 @@ async function seedEvent(
 }
 
 async function cleanup(pool: Pool): Promise<void> {
-  const slugs = [ORG.slug];
+  const slugs = [ORG.slug, OTHER_ORG.slug];
   for (const table of [
     'audit_events',
     'outbox_events',
