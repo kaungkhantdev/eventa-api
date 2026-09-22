@@ -1,5 +1,18 @@
-import { Controller, Get, Header, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiForbiddenResponse, ApiTags } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Param,
+  Query,
+  StreamableFile,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiForbiddenResponse,
+  ApiParam,
+  ApiProduces,
+  ApiTags,
+} from '@nestjs/swagger';
 import { CurrentAuth } from '../../common/decorators/current-auth.decorator';
 import {
   Permission,
@@ -11,7 +24,12 @@ import { AdminGuard } from '../../common/guards/admin.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { ApiData } from '../../common/http/api-data.decorator';
 import { SkipResponseEnvelope } from '../../common/decorators/skip-envelope.decorator';
-import { CSV_MIME, toCsv } from '../../common/csv/csv';
+import {
+  EXPORT_FORMATS,
+  EXPORT_MIME,
+  type ExportFormat,
+  type TabularDocument,
+} from '../../common/export/tabular';
 import type { AuthContext } from '../auth/auth.types';
 import { AttendanceReportDto } from './dto/attendance-report.dto';
 import { DiscountsReportDto } from './dto/discounts-report.dto';
@@ -29,15 +47,11 @@ import { EventsReportService } from './events-report.service';
 import { IncomeReportService } from './income-report.service';
 import { OverviewReportService } from './overview-report.service';
 import { RegistrationsReportService } from './registrations-report.service';
+import { ExportFormatPipe } from './export-format.pipe';
 import {
-  attendanceCsv,
-  discountsCsv,
-  eventsCsv,
-  incomeCsv,
-  registrationsCsv,
-  transactionsCsv,
-  type CsvTable,
-} from './reports-csv';
+  ReportExportService,
+  type ExportableReport,
+} from './report-export.service';
 import {
   toAttendanceReport,
   toDiscountsReport,
@@ -47,6 +61,14 @@ import {
   toOverviewReport,
   toRegistrationsReport,
 } from './reports.mapper';
+
+/**
+ * Every MIME an export route can answer with, for the OpenAPI document.
+ *
+ * Declared before the controller: `@ApiProduces` runs when the class is
+ * defined, which is before a `const` below it has been initialised.
+ */
+const PRODUCES = Object.values(EXPORT_MIME);
 
 /**
  * The reporting surface (US-RPT-01…12). Read-only throughout: no endpoint here
@@ -73,6 +95,7 @@ export class ReportsController {
     private readonly registrations: RegistrationsReportService,
     private readonly income: IncomeReportService,
     private readonly attendance: AttendanceReportService,
+    private readonly exports: ReportExportService,
   ) {}
 
   /**
@@ -182,105 +205,118 @@ export class ReportsController {
    *
    * Paging is deliberately dropped: an export is the whole filtered set, not
    * the twenty rows that happened to be visible.
+   *
+   * The format is the extension on the path — `registrations.xlsx` — so all
+   * three render from one table and cannot disagree, and an unknown one is a
+   * route that does not exist rather than a bad parameter. The permission gate
+   * is the report's own, whichever file is asked for (US-RPT-12).
    */
-  @Get('registrations.csv')
+  @Get('registrations.:format')
   @RequirePermissions(Permission.regView)
   @SkipResponseEnvelope()
-  @Header('Content-Type', CSV_MIME)
-  @Header('Content-Disposition', 'attachment; filename="registrations.csv"')
-  async registrationsCsv(
+  @ApiParam({ name: 'format', enum: EXPORT_FORMATS })
+  @ApiProduces(...PRODUCES)
+  async registrationsExport(
     @CurrentAuth() auth: AuthContext,
+    @Param('format', ExportFormatPipe) format: ExportFormat,
     @Query() query: ReportFilterQueryDto,
-  ): Promise<string> {
-    const view = await this.registrations.load(
-      auth.organizationId,
-      whole(query),
-    );
-    return file(registrationsCsv(view));
+  ): Promise<StreamableFile> {
+    const doc = await this.exports.registrationsFile(auth, query);
+    return this.download('registrations', format, doc);
   }
 
-  @Get('attendance.csv')
+  @Get('attendance.:format')
   @RequirePermissions(Permission.regView)
   @SkipResponseEnvelope()
-  @Header('Content-Type', CSV_MIME)
-  @Header('Content-Disposition', 'attachment; filename="attendance.csv"')
-  async attendanceCsv(
+  @ApiParam({ name: 'format', enum: EXPORT_FORMATS })
+  @ApiProduces(...PRODUCES)
+  async attendanceExport(
     @CurrentAuth() auth: AuthContext,
+    @Param('format', ExportFormatPipe) format: ExportFormat,
     @Query() query: ReportFilterQueryDto,
-  ): Promise<string> {
-    const view = await this.attendance.load(auth.organizationId, whole(query));
-    return file(attendanceCsv(view));
+  ): Promise<StreamableFile> {
+    const doc = await this.exports.attendanceFile(auth, query);
+    return this.download('attendance', format, doc);
   }
 
-  @Get('events.csv')
+  @Get('events.:format')
   @RequirePermissions(Permission.regView)
   @SkipResponseEnvelope()
-  @Header('Content-Type', CSV_MIME)
-  @Header('Content-Disposition', 'attachment; filename="events.csv"')
-  async eventsCsv(
+  @ApiParam({ name: 'format', enum: EXPORT_FORMATS })
+  @ApiProduces(...PRODUCES)
+  async eventsExport(
     @CurrentAuth() auth: AuthContext,
+    @Param('format', ExportFormatPipe) format: ExportFormat,
     @Query() query: EventsReportQueryDto,
-  ): Promise<string> {
-    const view = await this.events.load(auth, whole(query));
-    return file(eventsCsv(view));
+  ): Promise<StreamableFile> {
+    const doc = await this.exports.eventsFile(auth, query);
+    return this.download('events', format, doc);
   }
 
-  @Get('income.csv')
+  @Get('income.:format')
   @RequirePermissions(Permission.finView)
   @SkipResponseEnvelope()
-  @Header('Content-Type', CSV_MIME)
-  @Header('Content-Disposition', 'attachment; filename="income.csv"')
-  async incomeCsv(
+  @ApiParam({ name: 'format', enum: EXPORT_FORMATS })
+  @ApiProduces(...PRODUCES)
+  async incomeExport(
     @CurrentAuth() auth: AuthContext,
+    @Param('format', ExportFormatPipe) format: ExportFormat,
     @Query() query: ReportFilterQueryDto,
-  ): Promise<string> {
-    const view = await this.income.load(auth.organizationId, whole(query));
-    return file(incomeCsv(view));
+  ): Promise<StreamableFile> {
+    const doc = await this.exports.incomeFile(auth, query);
+    return this.download('income', format, doc);
   }
 
-  @Get('discounts.csv')
+  @Get('discounts.:format')
   @RequirePermissions(Permission.finView)
   @SkipResponseEnvelope()
-  @Header('Content-Type', CSV_MIME)
-  @Header('Content-Disposition', 'attachment; filename="discounts.csv"')
-  async discountsCsv(
+  @ApiParam({ name: 'format', enum: EXPORT_FORMATS })
+  @ApiProduces(...PRODUCES)
+  async discountsExport(
     @CurrentAuth() auth: AuthContext,
+    @Param('format', ExportFormatPipe) format: ExportFormat,
     @Query() query: ReportFilterQueryDto,
-  ): Promise<string> {
-    const view = await this.discounts.load(auth.organizationId, whole(query));
-    return file(discountsCsv(view));
+  ): Promise<StreamableFile> {
+    const doc = await this.exports.discountsFile(auth, query);
+    return this.download('discounts', format, doc);
   }
 
-  @Get('transactions.csv')
+  @Get('transactions.:format')
   @RequirePermissions(Permission.finView)
   @SkipResponseEnvelope()
-  @Header('Content-Type', CSV_MIME)
-  @Header('Content-Disposition', 'attachment; filename="transactions.csv"')
-  async transactionsCsv(
+  @ApiParam({ name: 'format', enum: EXPORT_FORMATS })
+  @ApiProduces(...PRODUCES)
+  async transactionsExport(
     @CurrentAuth() auth: AuthContext,
+    @Param('format', ExportFormatPipe) format: ExportFormat,
     @Query() query: ReportFilterQueryDto,
-  ): Promise<string> {
-    const view = await this.transactions.load(
-      auth.organizationId,
-      whole(query),
+  ): Promise<StreamableFile> {
+    const doc = await this.exports.transactionsFile(auth, query);
+    return this.download('transactions', format, doc);
+  }
+
+  /**
+   * A `StreamableFile` rather than the buffer itself: a Buffer returned from a
+   * handler is JSON-serialised by the express adapter, which would hand the
+   * reader a page of byte numbers instead of a workbook.
+   *
+   * No `@Header` decorators — those would label an ERROR response as a
+   * spreadsheet too. `AllExceptionsFilter` already forces `application/json`
+   * on a refusal, and the headers set here only reach a file that exists.
+   */
+  private async download(
+    report: ExportableReport,
+    format: ExportFormat,
+    doc: TabularDocument,
+  ): Promise<StreamableFile> {
+    const { body, type, filename } = await this.exports.file(
+      report,
+      format,
+      doc,
     );
-    return file(transactionsCsv(view));
+    return new StreamableFile(body, {
+      type,
+      disposition: `attachment; filename="${filename}"`,
+    });
   }
 }
-
-/** The whole filtered set, not the page that happened to be on screen. */
-function whole<T extends { page?: number; limit?: number }>(query: T): T {
-  return { ...query, page: 1, limit: EXPORT_LIMIT };
-}
-
-/**
- * How many rows an export will carry.
- *
- * A ceiling rather than no limit at all: the story's "very large export"
- * criterion asks for a prepared file and a notification, which is a separate
- * slice — until then a report that would run to tens of thousands of rows is
- * truncated rather than allowed to time out mid-download.
- */
-const EXPORT_LIMIT = 5000;
-
-const file = (table: CsvTable) => toCsv(table.headers, table.rows);

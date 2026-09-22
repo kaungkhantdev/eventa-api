@@ -10,6 +10,7 @@ import { EventsReportService } from './events-report.service';
 import { IncomeReportService } from './income-report.service';
 import { OverviewReportService } from './overview-report.service';
 import { RegistrationsReportService } from './registrations-report.service';
+import { ReportExportService } from './report-export.service';
 import { ReportsController } from './reports.controller';
 
 /**
@@ -42,6 +43,8 @@ import { ReportsController } from './reports.controller';
     OverviewReportService,
     RegistrationsReportService,
     TransactionsReportService,
+    // The same six reports as CSV, Excel or PDF (US-RPT-11).
+    ReportExportService,
   ],
 })
 export class ReportsModule {}
