@@ -1,4 +1,5 @@
 import type {
+  Cell,
   Column,
   ReportBody,
   SummaryFigure,
@@ -26,8 +27,6 @@ import type { TransactionsReportView } from './transactions-report.service';
  * separately useful: a CSV is a table and nothing else, while a workbook and a
  * PDF carry the key figures above it.
  */
-
-const SATANG_PER_BAHT = 100;
 
 function columns(...pairs: [string, Column['kind']][]): Column[] {
   return pairs.map(([header, kind]) => ({ header, kind }));
@@ -210,10 +209,21 @@ export function eventsBody(view: EventsReportView): ReportBody {
 
 /* ── discount payback (US-RPT-10) ──────────────────────────────────────── */
 
-/** The API finishes a percentage code's wording and leaves a fixed one in satang. */
-function terms(row: { terms: string | null; fixedValueSatang: number | null }) {
-  const off = ((row.fixedValueSatang ?? 0) / SATANG_PER_BAHT).toFixed(2);
-  return row.terms ?? `${off} off`;
+/** What follows a fixed code's amount, in the phrase the screen uses. */
+const OFF = 'off';
+
+/**
+ * The API finishes a percentage code's wording and leaves a fixed one in
+ * satang — so a fixed one stays satang here too, as a phrase each format
+ * spells for itself. Composing it here would print the CSV's `200.00 off` in
+ * the PDF, beside money columns written `฿1,880`.
+ */
+function terms(row: {
+  terms: string | null;
+  fixedValueSatang: number | null;
+}): Cell {
+  if (row.terms !== null) return row.terms;
+  return { satang: row.fixedValueSatang ?? 0, suffix: OFF };
 }
 
 export function discountsTable(view: DiscountsReportView): Table {
@@ -263,7 +273,9 @@ export function transactionsTable(view: TransactionsReportView): Table {
     columns: columns(
       ['Reference', 'text'],
       ['When', 'instant'],
-      ['Type', 'text'],
+      // A domain token ('payment'/'refund'), so a human-facing file
+      // capitalises it and a machine-read one keeps it raw.
+      ['Type', 'status'],
       ['Payer', 'text'],
       ['Event', 'text'],
       ['Method', 'text'],

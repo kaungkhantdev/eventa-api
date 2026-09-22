@@ -83,3 +83,20 @@ describe('text', () => {
     expect(displayCell('text', null)).toBe('—');
   });
 });
+
+describe('money inside a phrase', () => {
+  it('spells the amount the way the rest of the file spells money', () => {
+    // A fixed-amount discount code's terms. `฿200 off` is what the screen
+    // says and what the money columns beside it say — never the spreadsheet's
+    // bare `200.00`, which is this file's one chance to contradict itself.
+    expect(displayCell('text', { satang: 20_000, suffix: 'off' })).toBe(
+      '฿200 off',
+    );
+  });
+
+  it('keeps the satang when the amount has them', () => {
+    expect(displayCell('text', { satang: 20_050, suffix: 'off' })).toBe(
+      '฿200.50 off',
+    );
+  });
+});

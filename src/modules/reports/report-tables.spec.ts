@@ -1,3 +1,4 @@
+import { displayCell } from '../../common/export/display';
 import type { AttendanceReportView } from './attendance-report.service';
 import type { DiscountsReportView } from './discounts-report.service';
 import type { EventsReportView } from './events-report.service';
@@ -11,6 +12,7 @@ import {
   incomeBody,
   registrationsBody,
   transactionsBody,
+  transactionsTable,
 } from './report-tables';
 
 /**
@@ -336,7 +338,7 @@ describe('how many rows the filter matched', () => {
 });
 
 describe('the wording a discount code carries', () => {
-  it('finishes a fixed code’s terms when the API left it in satang', () => {
+  it('leaves a fixed code’s amount for each format to spell', () => {
     const view = {
       period: PERIOD,
       rows: [
@@ -363,6 +365,39 @@ describe('the wording a discount code carries', () => {
       },
     } as unknown as DiscountsReportView;
 
-    expect(discountsBody(view).table.rows[0][1]).toBe('200.00 off');
+    // A person reads the same price the money columns beside it are written
+    // in; the CSV's machine-friendly `200.00 off` is asserted in reports-csv.
+    expect(displayCell('text', discountsBody(view).table.rows[0][1])).toBe(
+      '฿200 off',
+    );
+  });
+});
+
+describe('a transaction’s type', () => {
+  it('reads as a word in a human-facing file, not as a domain token', () => {
+    // `refund` beside a capitalised `Refunded` in the same row is the raw
+    // token leaking into a document written for a stakeholder.
+    const view = {
+      period: PERIOD,
+      rows: [
+        {
+          id: 'refund:r-1',
+          kind: 'refund',
+          reference: 'RFD-1190',
+          at: new Date('2026-07-18T09:30:00.000Z'),
+          personName: 'Ploy Srisai',
+          eventId: 'e-1',
+          eventName: 'Tech Summit 2026',
+          method: 'Card',
+          amountSatang: 125_000,
+          outcome: 'refunded',
+          paymentId: 'p-1',
+        },
+      ],
+    } as unknown as TransactionsReportView;
+
+    const { columns, rows } = transactionsTable(view);
+    const type = columns.findIndex((column) => column.header === 'Type');
+    expect(displayCell(columns[type].kind, rows[0][type])).toBe('Refund');
   });
 });

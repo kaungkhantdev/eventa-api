@@ -1,11 +1,12 @@
 import { Workbook, type Cell as SheetCell, type Worksheet } from 'exceljs';
 import { BANGKOK_OFFSET_MS } from '../time/bangkok';
 import { displayCell, generatedLine, REPORT_TIME_ZONE } from './display';
-import type {
-  Cell,
-  ColumnKind,
-  SummaryFigure,
-  TabularDocument,
+import {
+  isMoneyPhrase,
+  type Cell,
+  type ColumnKind,
+  type SummaryFigure,
+  type TabularDocument,
 } from './tabular';
 
 /**
@@ -83,6 +84,12 @@ function asBangkokDay(at: Date): Date {
  */
 function write(cell: SheetCell, kind: ColumnKind, value: Cell): void {
   if (value === null) return;
+  // Text, because a phrase cannot be summed — but written in the workbook's
+  // own ฿ so it reads like the money columns beside it.
+  if (isMoneyPhrase(value)) {
+    cell.value = displayCell(kind, value);
+    return;
+  }
   if (value instanceof Date) {
     cell.value = kind === 'day' ? asBangkokDay(value) : asBangkokClock(value);
     cell.numFmt = kind === 'day' ? DAY_FORMAT : INSTANT_FORMAT;

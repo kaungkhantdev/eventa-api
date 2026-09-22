@@ -1,4 +1,9 @@
-import type { Cell, ColumnKind, Table } from '../../common/export/tabular';
+import {
+  isMoneyPhrase,
+  type Cell,
+  type ColumnKind,
+  type Table,
+} from '../../common/export/tabular';
 import { BANGKOK_OFFSET_MS } from '../../common/time/bangkok';
 import type { AttendanceReportView } from './attendance-report.service';
 import type { DiscountsReportView } from './discounts-report.service';
@@ -58,6 +63,9 @@ function day(instant: Date): string {
 function text(kind: ColumnKind, value: Cell): string {
   // Absent is absent, whatever the column holds.
   if (value === null) return '';
+  // A phrase built around an amount ("200.00 off") — plain Baht here too, so
+  // one column of a machine-read file does not arrive in ฿.
+  if (isMoneyPhrase(value)) return `${baht(value.satang)} ${value.suffix}`;
   if (kind === 'money') return baht(value as number);
   if (kind === 'day') return day(value as Date);
   // The full instant, for a ledger where the time of day is the point.

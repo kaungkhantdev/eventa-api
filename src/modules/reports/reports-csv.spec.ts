@@ -202,3 +202,54 @@ describe('dates', () => {
     expect(transactionsCsv(view).rows[0][1]).toBe('2026-07-18T09:30:00.000Z');
   });
 });
+
+describe('wording a spreadsheet reads', () => {
+  it('writes a fixed code’s terms in plain Baht, not in ฿', () => {
+    // The PDF and the workbook say "฿200 off" to a person; the CSV keeps the
+    // machine-friendly Baht it writes every other amount in.
+    const view = {
+      period: PERIOD,
+      rows: [
+        {
+          discountId: 'd-1',
+          code: 'FLAT200',
+          standing: 'active',
+          terms: null,
+          fixedValueSatang: 20_000,
+          scope: 'All events',
+          redemptions: 3,
+          discountSatang: 60_000,
+          influencedSatang: 300_000,
+          returnRatio: 5,
+        },
+      ],
+    } as unknown as DiscountsReportView;
+
+    expect(discountsCsv(view).rows[0][1]).toBe('200.00 off');
+  });
+
+  it('keeps a transaction’s type as the raw token, for a machine to match on', () => {
+    // Capitalising it is a human-facing format's job; a spreadsheet filtering
+    // on `refund` should not have to know which files title-case it.
+    const view = {
+      period: PERIOD,
+      rows: [
+        {
+          id: 'refund:r-1',
+          kind: 'refund',
+          reference: 'RFD-1190',
+          at: new Date('2026-07-18T09:30:00.000Z'),
+          personName: 'Ploy Srisai',
+          eventId: 'e-1',
+          eventName: 'Tech Summit 2026',
+          method: 'Card',
+          amountSatang: 125_000,
+          outcome: 'refunded',
+          paymentId: 'p-1',
+        },
+      ],
+    } as unknown as TransactionsReportView;
+
+    expect(transactionsCsv(view).rows[0][2]).toBe('refund');
+  });
+});

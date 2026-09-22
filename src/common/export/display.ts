@@ -1,5 +1,5 @@
 import { formatBaht } from '../money/baht';
-import type { Cell, ColumnKind } from './tabular';
+import { isMoneyPhrase, type Cell, type ColumnKind } from './tabular';
 
 /**
  * A typed cell as a PERSON reads it (US-RPT-11).
@@ -68,6 +68,10 @@ const isNumeric = (kind: ColumnKind): kind is NumericKind => kind in NUMERIC;
 
 export function displayCell(kind: ColumnKind, value: Cell): string {
   if (value === null) return MASKED;
+  // The amount in the product's own ฿, and only then the phrase around it.
+  if (isMoneyPhrase(value)) {
+    return `${NUMERIC.money(value.satang)} ${value.suffix}`;
+  }
   if (value instanceof Date) {
     return kind === 'day'
       ? DAY_FORMAT.format(value)

@@ -220,6 +220,23 @@ describe('text', () => {
     );
   });
 
+  it('finishes a phrase that carries money in the workbook’s own ฿', async () => {
+    // A fixed discount code's terms. The cell is text — "฿200 off" cannot be
+    // summed — but it must read like the money columns beside it, not like
+    // the CSV's bare 200.00.
+    const workbook = await open(
+      doc({
+        table: {
+          columns: [{ header: 'Terms', kind: 'text' }],
+          rows: [[{ satang: 20_000, suffix: 'off' }]],
+        },
+      }),
+    );
+    expect(workbook.getWorksheet('Income by event')?.getCell('A2').value).toBe(
+      '฿200 off',
+    );
+  });
+
   it('never lets stored text become a formula', async () => {
     // A buyer who names themselves `=HYPERLINK(...)` would otherwise have it
     // run the moment an accountant opens the file.

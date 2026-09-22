@@ -46,10 +46,28 @@ export interface Column {
 }
 
 /**
+ * An amount that a sentence is built around: "฿200 off" for a reader,
+ * "200.00 off" for a spreadsheet.
+ *
+ * The money stays satang here for the same reason it does in a money column —
+ * a phrase composed upstream would carry ONE format's spelling into all three,
+ * which is how a PDF ends up saying `200.00 off` beside `฿1,880`.
+ */
+export interface MoneyPhrase {
+  readonly satang: number;
+  /** What follows the amount, once the format has spelled it. */
+  readonly suffix: string;
+}
+
+/**
  * Money is integer satang and may be negative (a refund). `null` means the
  * figure was masked from this reader, or does not exist — never zero.
  */
-export type Cell = string | number | Date | null;
+export type Cell = string | number | Date | MoneyPhrase | null;
+
+export function isMoneyPhrase(value: Cell): value is MoneyPhrase {
+  return typeof value === 'object' && value !== null && 'satang' in value;
+}
 
 export interface Table {
   columns: Column[];
