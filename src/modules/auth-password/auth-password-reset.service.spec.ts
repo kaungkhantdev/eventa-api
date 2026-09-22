@@ -8,12 +8,14 @@ import { passwordFingerprint } from './auth-password-fingerprint';
 import type {
   PasswordRepository,
   ResetAccount,
+  ResetLinkAccount,
 } from './auth-password.repository';
 import type { PasswordService } from './auth-password.service';
 import type { TokenService } from '../auth/token.service';
 import type { LoginThrottleService } from '../auth/login-throttle.service';
 import { IDENTITY_PASSWORD_RESET_REQUESTED } from './events/password-reset-requested.event';
 import { outboxDouble } from '../../../test/support/outbox-double';
+import { refusalOf } from '../../../test/support/refusal';
 
 /**
  * The message a refusal carried. Typed, unlike `expect.stringMatching` inside
@@ -41,6 +43,19 @@ const user: ResetAccount = {
   providers: [],
 };
 
+/** The account a link signed for u1 in workspace 7 opens, as it is now. */
+const organizerLink: ResetLinkAccount = {
+  id: 'u1',
+  organizationId: 7,
+  persona: Persona.Admin,
+  workspaceName: 'Acme Events',
+  passwordHash: CURRENT_HASH,
+};
+
+/** The words a dead link is refused with, on the page and on the form alike. */
+const INVALID_LINK =
+  'This reset link is invalid or has expired. Request a new one.';
+
 /** The same person's account in a second workspace (US-ACC-02). */
 const inWorkspaceB = (overrides: Partial<ResetAccount>): ResetAccount => ({
   ...user,
@@ -62,7 +77,7 @@ describe('PasswordResetService', () => {
   beforeEach(() => {
     repo = {
       findResetAccounts: jest.fn().mockResolvedValue([user]),
-      currentHash: jest.fn().mockResolvedValue(CURRENT_HASH),
+      findResetLinkAccount: jest.fn().mockResolvedValue(organizerLink),
       setPassword: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<PasswordRepository>;
     passwords = {
@@ -483,7 +498,18 @@ describe('PasswordResetService', () => {
     });
 
     it('rejects a stale/used link whose fingerprint no longer matches (422)', async () => {
-      repo.currentHash.mockResolvedValue('a-different-hash');
+      repo.findResetLinkAccount.mockResolvedValue({
+        ...organizerLink,
+        passwordHash: 'a-different-hash',
+      });
+      await expect(
+        service.reset('RTOKEN', 'brandnew1pass'),
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      expect(repo.setPassword).not.toHaveBeenCalled();
+    });
+
+    it('rejects a link whose account is gone (422)', async () => {
+      repo.findResetLinkAccount.mockResolvedValue(null);
       await expect(
         service.reset('RTOKEN', 'brandnew1pass'),
       ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
@@ -496,6 +522,150 @@ describe('PasswordResetService', () => {
         service.reset('RTOKEN', 'brandnew1pass'),
       ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
       expect(repo.setPassword).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * The reset page asks this the moment it opens, so a dead link is refused
+   * before anybody types a new password into it (US-ACC-04 criterion 7,
+   * TC-ACC-10 step 6) — and a good one says which sign-in, and which
+   * workspace, it opens.
+   */
+  describe('check', () => {
+    it('says an organizer link opens the admin sign-in, naming its workspace', async () => {
+      await expect(service.check('RTOKEN')).resolves.toEqual({
+        persona: Persona.Admin,
+        workspaceName: 'Acme Events',
+      });
+    });
+
+    it('reads the account the link was signed for, in its own workspace', async () => {
+      await service.check('RTOKEN');
+      expect(tokens.verifyPasswordReset).toHaveBeenCalledWith('RTOKEN');
+      expect(repo.findResetLinkAccount).toHaveBeenCalledWith(7, 'u1');
+    });
+
+    /**
+     * An attendee's one realm is the platform organization, not a workspace
+     * they chose — naming it would only puzzle them, as it would in the email.
+     */
+    it('names no workspace for an attendee link', async () => {
+      repo.findResetLinkAccount.mockResolvedValue({
+        ...organizerLink,
+        persona: Persona.Attendee,
+        workspaceName: 'Eventa Platform',
+      });
+      await expect(service.check('RTOKEN')).resolves.toEqual({
+        persona: Persona.Attendee,
+        workspaceName: null,
+      });
+    });
+
+    it.each<[string, () => void]>([
+      [
+        'a used link — the password changed since it was sent',
+        () =>
+          repo.findResetLinkAccount.mockResolvedValue({
+            ...organizerLink,
+            passwordHash: 'a-different-hash',
+          }),
+      ],
+      [
+        'an expired or forged token',
+        () =>
+          tokens.verifyPasswordReset.mockRejectedValue(
+            new Error('jwt expired'),
+          ),
+      ],
+      [
+        'a link whose account is gone',
+        () => repo.findResetLinkAccount.mockResolvedValue(null),
+      ],
+      [
+        'a link to an account left with no password',
+        () =>
+          repo.findResetLinkAccount.mockResolvedValue({
+            ...organizerLink,
+            passwordHash: null,
+          }),
+      ],
+    ])(
+      'refuses %s, with the invalid-link words and nothing else',
+      async (_case, arrange) => {
+        arrange();
+        const refusal = await refusalOf(service.check('RTOKEN'));
+        expect(refusal.getStatus()).toBe(422);
+        expect(refusal).toMatchObject({
+          code: 'VALIDATION_ERROR',
+          message: INVALID_LINK,
+        });
+        expect(refusal.details).toBeUndefined();
+      },
+    );
+
+    /**
+     * Opening the page must not use the link up: somebody who opens it, wanders
+     * off and comes back still has to be able to finish.
+     */
+    it('spends nothing — the same link still resets the password afterwards', async () => {
+      await service.check('RTOKEN');
+      await service.check('RTOKEN');
+      expect(passwords.hash).not.toHaveBeenCalled();
+      expect(repo.setPassword).not.toHaveBeenCalled();
+
+      const done = await service.reset('RTOKEN', 'brandnew1pass');
+      expect(done.message).toMatch(/reset/i);
+      expect(repo.setPassword).toHaveBeenCalledWith(7, 'u1', 'NEWHASH');
+    });
+
+    /**
+     * The throttle guards the form that confirms whether an address has an
+     * account. Checking a link reveals nothing about an address, so a locked
+     * address must not stop its owner finishing a reset, and a dead link is
+     * not a guess at anybody's address.
+     */
+    it('neither waits on nor counts against the forgot-password throttle', async () => {
+      throttle.assertNotLocked.mockRejectedValue(
+        Object.assign(new Error('locked'), { code: 'TOO_MANY_REQUESTS' }),
+      );
+      await expect(service.check('RTOKEN')).resolves.toBeDefined();
+      repo.findResetLinkAccount.mockResolvedValue(null);
+      await refusalOf(service.check('RTOKEN'));
+
+      expect(throttle.assertNotLocked).not.toHaveBeenCalled();
+      expect(throttle.recordFailure).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The page promises what the form will do. If the two judged a link by
+     * different rules, a link the page called good could be refused on submit,
+     * after the person had typed their new password twice.
+     */
+    it.each<[string, () => void]>([
+      [
+        'a used link',
+        () =>
+          repo.findResetLinkAccount.mockResolvedValue({
+            ...organizerLink,
+            passwordHash: 'a-different-hash',
+          }),
+      ],
+      [
+        'an expired token',
+        () => tokens.verifyPasswordReset.mockRejectedValue(new Error('exp')),
+      ],
+      [
+        'a vanished account',
+        () => repo.findResetLinkAccount.mockResolvedValue(null),
+      ],
+    ])('refuses %s exactly as the reset does', async (_case, arrange) => {
+      arrange();
+      const onOpen = await refusalOf(service.check('RTOKEN'));
+      const onSubmit = await refusalOf(
+        service.reset('RTOKEN', 'brandnew1pass'),
+      );
+      expect(onOpen.message).toBe(onSubmit.message);
+      expect(onOpen.code).toBe(onSubmit.code);
     });
   });
 });

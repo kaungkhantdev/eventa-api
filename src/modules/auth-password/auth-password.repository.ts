@@ -28,6 +28,18 @@ export interface ResetAccount {
   providers: LinkedProvider[];
 }
 
+/** The account a reset link was signed for, as it stands now (US-ACC-04). */
+export interface ResetLinkAccount {
+  id: string;
+  organizationId: number;
+  /** Which sign-in the account belongs to, so the page can send them there. */
+  persona: Persona;
+  /** Its organization's name — the workspace, for an organizer. */
+  workspaceName: string;
+  /** Whose fingerprint the link must still carry to be good. */
+  passwordHash: string | null;
+}
+
 /** Data access for password reset (US-ACC-04) and change (US-ACC-05). */
 @Injectable()
 export class PasswordRepository {
@@ -90,6 +102,36 @@ export class PasswordRepository {
       byUser.set(userId, [...(byUser.get(userId) ?? []), provider]);
     }
     return byUser;
+  }
+
+  /**
+   * The account a reset link names, in the workspace the link names (pre-auth;
+   * used by reset and by checking a link). Scoped by both ids, as
+   * `currentHash` is, so a link signed for one workspace never reads another.
+   */
+  async findResetLinkAccount(
+    organizationId: number,
+    userId: string,
+  ): Promise<ResetLinkAccount | null> {
+    const [row] = await this.db
+      .select({
+        id: users.id,
+        organizationId: users.organizationId,
+        persona: users.persona,
+        workspaceName: organizations.name,
+        passwordHash: users.passwordHash,
+      })
+      .from(users)
+      .innerJoin(organizations, eq(organizations.id, users.organizationId))
+      .where(
+        and(
+          eq(users.id, userId),
+          eq(users.organizationId, organizationId),
+          isNull(users.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
   }
 
   /** The current password hash for a signed-in user (used by change-password). */

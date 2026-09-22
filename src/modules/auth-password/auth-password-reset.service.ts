@@ -12,7 +12,11 @@ import {
   decideReset,
   type ResettableAccount,
 } from './auth-password-reset.eligibility';
-import { PasswordRepository } from './auth-password.repository';
+import {
+  PasswordRepository,
+  type ResetLinkAccount,
+} from './auth-password.repository';
+import type { ResetLinkResponseDto } from './dto/reset-link-response.dto';
 import { PasswordService } from './auth-password.service';
 import { TokenService } from '../auth/token.service';
 import { LoginThrottleService } from '../auth/login-throttle.service';
@@ -49,17 +53,20 @@ const REUSED_PASSWORD =
   'Please choose a password different from your current one.';
 
 /**
- * Which workspace an email should say it opens. An organizer can hold accounts
- * in several and gets a link for each, so each says which. An attendee's only
- * realm is the platform organization, not a workspace they chose — naming it
- * would only puzzle them.
+ * Which workspace a link should say it opens — in its email, and on the page
+ * it lands on. An organizer can hold accounts in several and gets a link for
+ * each, so each says which. An attendee's only realm is the platform
+ * organization, not a workspace they chose — naming it would only puzzle them.
  */
 function workspaceNamed(
-  account: ResettableAccount,
+  workspaceName: string,
   audience: Persona,
 ): string | undefined {
-  return audience === Persona.Admin ? account.workspaceName : undefined;
+  return audience === Persona.Admin ? workspaceName : undefined;
 }
+
+/** An account whose link still carries its current password's fingerprint. */
+type LinkedAccount = ResetLinkAccount & { passwordHash: string };
 
 /** Forgotten-password reset by email link (US-ACC-04). */
 @Injectable()
@@ -133,17 +140,61 @@ export class PasswordResetService {
    * Rejects a stale/used link and a password equal to the current one.
    */
   async reset(token: string, newPassword: string): Promise<MessageResponseDto> {
-    const claims = await this.decode(token);
-    const currentHash = await this.repo.currentHash(claims.org, claims.sub);
-    if (!currentHash || passwordFingerprint(currentHash) !== claims.pv) {
-      throw DomainException.validation(INVALID_LINK);
-    }
-    if (await this.passwords.verify(currentHash, newPassword)) {
+    const account = await this.accountOfGoodLink(token);
+    if (await this.passwords.verify(account.passwordHash, newPassword)) {
       throw DomainException.validation(REUSED_PASSWORD);
     }
     const passwordHash = await this.passwords.hash(newPassword);
-    await this.repo.setPassword(claims.org, claims.sub, passwordHash);
+    await this.repo.setPassword(
+      account.organizationId,
+      account.id,
+      passwordHash,
+    );
     return { message: RESET_DONE };
+  }
+
+  /**
+   * Whether a reset link is still good, WITHOUT spending it — what the reset
+   * page asks the moment it opens, so a dead link is refused before anybody
+   * types a password into it (US-ACC-04 criterion 7).
+   *
+   * A good link says which sign-in it opens, and for an organizer which
+   * workspace. A dead one gets exactly the words the reset gives and nothing
+   * more. Deliberately not behind the forgot-password throttle: that guards a
+   * form that confirms whether an address has an account, and checking a link
+   * reveals nothing about any address.
+   */
+  async check(token: string): Promise<ResetLinkResponseDto> {
+    const account = await this.accountOfGoodLink(token);
+    return {
+      persona: account.persona,
+      workspaceName:
+        workspaceNamed(account.workspaceName, account.persona) ?? null,
+    };
+  }
+
+  /**
+   * The one answer to "is this link still good", shared by `reset` and `check`
+   * so the page can never call a link good that the form then refuses.
+   *
+   * Good means signed by us and unexpired, for an account that still exists,
+   * still carrying the fingerprint of that account's current password. The
+   * last is what makes a link single-use: setting any password changes the
+   * hash, and every link sent before it stops matching.
+   */
+  private async accountOfGoodLink(token: string): Promise<LinkedAccount> {
+    const claims = await this.decode(token);
+    const account = await this.repo.findResetLinkAccount(
+      claims.org,
+      claims.sub,
+    );
+    if (
+      !account?.passwordHash ||
+      passwordFingerprint(account.passwordHash) !== claims.pv
+    ) {
+      throw DomainException.validation(INVALID_LINK);
+    }
+    return { ...account, passwordHash: account.passwordHash };
   }
 
   private async sendResetLink(
@@ -162,7 +213,7 @@ export class PasswordResetService {
         userId: account.id,
         name: account.name,
         email,
-        workspaceName: workspaceNamed(account, audience),
+        workspaceName: workspaceNamed(account.workspaceName, audience),
         resetUrl: `${this.publicWebUrl}/reset-password?token=${token}`,
         occurredAt: this.clock.now().toISOString(),
       }),
