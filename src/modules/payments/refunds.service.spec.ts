@@ -59,8 +59,10 @@ describe('RefundsService (US-FIN-02)', () => {
       claimRefund: jest
         .fn()
         .mockResolvedValue({ refund: refundRow(), fresh: true }),
-      markRefundFailed: jest.fn().mockResolvedValue(undefined),
-      markRefundedIn: jest.fn().mockResolvedValue(undefined),
+      // A guarded write reports whether the refund actually moved.
+      markRefundFailed: jest.fn().mockResolvedValue(true),
+      markRefundedIn: jest.fn().mockResolvedValue(true),
+      settleDuplicateRefund: jest.fn().mockResolvedValue('sole_payment'),
       markRefundPending: jest.fn().mockResolvedValue(undefined),
       findRefundByGatewayRef: jest
         .fn()
@@ -119,6 +121,31 @@ describe('RefundsService (US-FIN-02)', () => {
     );
     expect(repo.markRefundedIn).toHaveBeenCalled();
     expect(result.status).toBe('succeeded');
+  });
+
+  /**
+   * The documented duplicate: the old PromptPay QR scanned after the card had
+   * paid. The buyer paid once — refunding the extra payment must not take
+   * away the tickets the other one bought.
+   */
+  it('refunds a duplicate payment without voiding the order another payment still covers', async () => {
+    repo.settleDuplicateRefund.mockResolvedValue('settled');
+    const result = await refund();
+    expect(repo.settleDuplicateRefund).toHaveBeenCalledWith({
+      organizationId: ORG,
+      orderId: 'o-1',
+      refundId: 'r-1',
+      paymentId: PAYMENT_ID,
+      gatewayRef: 're_123',
+      now: NOW,
+    });
+    expect(orders.refundOrder).not.toHaveBeenCalled();
+    expect(result.status).toBe('succeeded');
+  });
+
+  it('refuses to report success when something else finished the refund first', async () => {
+    repo.markRefundedIn.mockResolvedValue(false);
+    await expect(refund()).rejects.toMatchObject({ code: 'CONFLICT' });
   });
 
   it('claims the ledger row BEFORE calling the provider', async () => {
@@ -262,6 +289,20 @@ describe('RefundsService (US-FIN-02)', () => {
       });
     });
 
+    it('settles a duplicate payment’s refund without voiding the order another payment covers', async () => {
+      repo.settleDuplicateRefund.mockResolvedValue('settled');
+      expect(await report()).toBe('settled');
+      expect(repo.settleDuplicateRefund).toHaveBeenCalledWith({
+        organizationId: ORG,
+        orderId: 'o-1',
+        refundId: 'r-1',
+        paymentId: PAYMENT_ID,
+        gatewayRef: 're_pending',
+        now: NOW,
+      });
+      expect(orders.refundOrder).not.toHaveBeenCalled();
+    });
+
     it('does nothing for a refund it has no record of', async () => {
       repo.findRefundByGatewayRef.mockResolvedValue(null);
       expect(await report()).toBe('unknown');
@@ -317,6 +358,54 @@ describe('RefundsService (US-FIN-02)', () => {
       expect(await report({ outcome: 'failed' })).toBe('failed_after_settled');
       expect(repo.markRefundFailed).not.toHaveBeenCalled();
       expect(orders.refundOrder).not.toHaveBeenCalled();
+    });
+
+    /**
+     * A success and a failure about the same refund, processed at the same
+     * time: both read `pending`, and only one write may land. The loser learns
+     * so from the write itself, and reports what the row says NOW — exactly
+     * what the same events one after the other would have reported.
+     */
+    describe('when another event finished the refund between the read and the write', () => {
+      it('rolls the ticket void back when a failure landed first', async () => {
+        repo.findRefundByGatewayRef
+          .mockResolvedValueOnce(refundRow({ gatewayRef: 're_pending' }))
+          .mockResolvedValueOnce(refundRow({ status: 'failed' }));
+        repo.markRefundedIn.mockResolvedValue(false);
+        const transactions: Promise<void>[] = [];
+        orders.refundOrder.mockImplementation((_o, _r, record) => {
+          const work = record({} as never);
+          transactions.push(work);
+          return work.then(() => ({ ticketsVoided: 2, seatsReleased: 0 }));
+        });
+
+        expect(await report()).toBe('already_final');
+        // A throw inside the callback is what rolls back the void and the
+        // returned stock, which ran earlier in the same transaction.
+        expect(transactions).toHaveLength(1);
+        await expect(transactions[0]).rejects.toThrow();
+      });
+
+      it('flags a failure that lost to the settlement, as it would arriving second', async () => {
+        repo.findRefundByGatewayRef
+          .mockResolvedValueOnce(refundRow({ gatewayRef: 're_pending' }))
+          .mockResolvedValueOnce(refundRow({ status: 'succeeded' }));
+        repo.markRefundFailed.mockResolvedValue(false);
+
+        expect(await report({ outcome: 'failed' })).toBe(
+          'failed_after_settled',
+        );
+      });
+
+      it('reports a duplicate’s settlement that lost the race as already final', async () => {
+        repo.findRefundByGatewayRef
+          .mockResolvedValueOnce(refundRow({ gatewayRef: 're_pending' }))
+          .mockResolvedValueOnce(refundRow({ status: 'failed' }));
+        repo.settleDuplicateRefund.mockResolvedValue('not_pending');
+
+        expect(await report()).toBe('already_final');
+        expect(orders.refundOrder).not.toHaveBeenCalled();
+      });
     });
   });
 });

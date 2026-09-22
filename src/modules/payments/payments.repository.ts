@@ -67,6 +67,21 @@ export interface MarkRefundedInput {
   now: Date;
 }
 
+/** A refund to settle on its own ledger lines, if the order does not need it. */
+export interface SettleDuplicateRefundInput extends MarkRefundedInput {
+  organizationId: number;
+  orderId: string;
+}
+
+/**
+ * `settled` — another payment still covers the order, so only the ledger
+ * flipped. `sole_payment` — this is the order's only paid payment; nothing was
+ * written, and the caller voids the order. `not_pending` — another event
+ * finished this refund first; nothing was written.
+ */
+export type DuplicateRefundSettlement =
+  'settled' | 'sole_payment' | 'not_pending';
+
 /** Everything one payment attempt writes. Money is the order's, never the caller's. */
 export interface RecordAttemptInput {
   organizationId: number;
@@ -443,34 +458,79 @@ export class PaymentsRepository {
     });
   }
 
-  /** The money did not move — record why, and leave the ticket valid. */
+  /**
+   * The money did not move — record why, and leave the ticket valid. False
+   * when the refund was no longer pending: only a pending refund can fail, so
+   * a failure racing a settlement cannot overwrite it.
+   */
   async markRefundFailed(
     refundId: string,
     reason: string | null,
-  ): Promise<void> {
-    await this.db
+  ): Promise<boolean> {
+    const moved = await this.db
       .update(refunds)
       .set({ status: 'failed', reason, updatedAt: new Date() })
-      .where(eq(refunds.id, refundId));
+      .where(and(eq(refunds.id, refundId), eq(refunds.status, 'pending')))
+      .returning({ id: refunds.id });
+    return moved.length > 0;
   }
 
   /**
    * Flip refund AND payment inside the transaction that voids the tickets, so
    * a refunded payment and a freed seat commit together or not at all.
+   *
+   * Only a pending refund moves, and the answer says whether it did — the
+   * status read before the transaction may be stale by now. On false nothing
+   * is written here, and the caller must roll back whatever it did before.
    */
-  async markRefundedIn(tx: Tx, input: MarkRefundedInput): Promise<void> {
-    await tx
+  async markRefundedIn(tx: Tx, input: MarkRefundedInput): Promise<boolean> {
+    const moved = await tx
       .update(refunds)
       .set({
         status: 'succeeded',
         gatewayRef: input.gatewayRef,
         updatedAt: input.now,
       })
-      .where(eq(refunds.id, input.refundId));
+      .where(and(eq(refunds.id, input.refundId), eq(refunds.status, 'pending')))
+      .returning({ id: refunds.id });
+    if (moved.length === 0) return false;
     await tx
       .update(payments)
       .set({ status: 'refunded', updatedAt: input.now })
       .where(eq(payments.id, input.paymentId));
+    return true;
+  }
+
+  /**
+   * Settle the refund of a payment the order does not depend on (US-FIN-02) —
+   * a duplicate, such as the old PromptPay QR scanned after the card had paid.
+   * When another payment still covers the order, only this payment and its
+   * refund flip: the buyer paid once and keeps what that payment bought.
+   *
+   * The order's payments are locked first, so two of its payments refunded at
+   * the same moment cannot each see the other as the one still covering it —
+   * the second waits, then finds the first refunded and voids the order.
+   */
+  async settleDuplicateRefund(
+    input: SettleDuplicateRefundInput,
+  ): Promise<DuplicateRefundSettlement> {
+    return withTenant(this.db, input.organizationId, async (tx) => {
+      const orderPayments = await tx
+        .select({ id: payments.id, status: payments.status })
+        .from(payments)
+        .where(
+          and(
+            eq(payments.organizationId, input.organizationId),
+            eq(payments.orderId, input.orderId),
+          ),
+        )
+        .for('update');
+      const coveredElsewhere = orderPayments.some(
+        (p) => p.id !== input.paymentId && p.status === 'paid',
+      );
+      if (!coveredElsewhere) return 'sole_payment';
+      return (await this.markRefundedIn(tx, input)) ? 'settled' : 'not_pending';
+    });
   }
 
   /** One page of the ledger, newest first (US-FIN-01). */

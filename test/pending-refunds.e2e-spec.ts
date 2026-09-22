@@ -12,6 +12,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
 import { PaymentProviderPort } from '../src/modules/payments/ports/payment-provider.port';
+import { PaymentsRepository } from '../src/modules/payments/payments.repository';
 import { listenOnLoopback } from './support/loopback';
 import {
   PENDING_REFUND_PREFIX,
@@ -96,6 +97,7 @@ describe('A refund the provider settles later (e2e — US-FIN-02)', () => {
   }, 30000);
 
   afterEach(async () => {
+    jest.restoreAllMocks();
     for (const table of [
       'refunds',
       'payments',
@@ -218,6 +220,35 @@ describe('A refund the provider settles later (e2e — US-FIN-02)', () => {
       ],
     );
     return { orderId, paymentId: payment.rows[0].id };
+  }
+
+  /**
+   * A second payment that settled the same order — the documented duplicate:
+   * the old PromptPay QR scanned after the card had already paid.
+   */
+  async function duplicatePayment(
+    s: Seeded,
+    method: 'Card' | 'PromptPay',
+    gatewayRef: string,
+  ): Promise<string> {
+    seq += 1;
+    const payment = await pool.query<{ id: string }>(
+      `INSERT INTO payments (organization_id, txn, order_id, event_id, payer_name, method,
+                             amount_satang, status, paid_at, gateway_ref, idempotency_key)
+       VALUES ($1, $2, $3, $4, 'Malee', $5, $6, 'paid', now(), $7, $8)
+       RETURNING id`,
+      [
+        orgId,
+        `PRF-TXN-${seq}`,
+        s.orderId,
+        s.eventId,
+        method,
+        PRICE * REFUNDED_SEATS,
+        gatewayRef,
+        `prf-pay-${seq}`,
+      ],
+    );
+    return payment.rows[0].id;
   }
 
   const refund = (paymentId: string) => {
@@ -408,6 +439,141 @@ describe('A refund the provider settles later (e2e — US-FIN-02)', () => {
       expect(await snapshot(s)).toEqual({ ...UNTOUCHED, refund: 'failed' });
       expect((await refundOf(s.paymentId)).reason).toBe('insufficient_funds');
       expect((await webhookRow(event.eventId)).status).toBe('processed');
+    });
+  });
+
+  /**
+   * An order two payments settled. The buyer paid twice and bought once, so
+   * refunding the extra payment gives back money, never the tickets the other
+   * payment still pays for.
+   */
+  describe('a duplicate payment, while another payment still covers the order', () => {
+    /** Everything the covering payment bought — a duplicate's refund leaves it all. */
+    const covered = async (s: Seeded) => ({
+      sold: await soldOf(s.tierId),
+      tickets: await ticketStatuses(s.orderId),
+      bystander: await ticketStatuses(s.bystanderOrderId),
+      covering: await paymentStatus(s.paymentId),
+      order: await orderState(s.orderId),
+    });
+
+    const STILL_COVERED = {
+      sold: TIER_TOTAL,
+      tickets: ['issued', 'issued'],
+      bystander: ['issued'],
+      covering: 'paid',
+      order: { status: 'confirmed', payment_status: 'paid' },
+    };
+
+    it('refunded at once, gives the money back and leaves the tickets issued', async () => {
+      const s = await seed();
+      const duplicate = await duplicatePayment(
+        s,
+        'Card',
+        `fake_pi_pendrf_duplicate_${seq}`,
+      );
+
+      const res = await refund(duplicate).expect(200);
+
+      expect((res.body as Success<{ status: string }>).data.status).toBe(
+        'succeeded',
+      );
+      expect(await covered(s)).toEqual(STILL_COVERED);
+      expect(await paymentStatus(duplicate)).toBe('refunded');
+      expect((await refundOf(duplicate)).status).toBe('succeeded');
+    });
+
+    it('settled later by the webhook, gives the money back and leaves the tickets issued', async () => {
+      const s = await seed();
+      const duplicate = await duplicatePayment(
+        s,
+        'PromptPay',
+        `${PENDING_REFUND_PREFIX}duplicate_${seq}`,
+      );
+      await refund(duplicate).expect(200);
+
+      await webhook(refundEvent(await refundRefOf(duplicate))).expect(200);
+
+      expect(await covered(s)).toEqual(STILL_COVERED);
+      expect(await paymentStatus(duplicate)).toBe('refunded');
+      expect((await refundOf(duplicate)).status).toBe('succeeded');
+    });
+
+    it('once the duplicate is back, refunding the payment that bought the tickets voids them', async () => {
+      const s = await seed();
+      const duplicate = await duplicatePayment(
+        s,
+        'Card',
+        `fake_pi_pendrf_duplicate_${seq}`,
+      );
+      await refund(duplicate).expect(200);
+      await refund(s.paymentId).expect(200);
+
+      await webhook(refundEvent(await refundRefOf(s.paymentId))).expect(200);
+
+      expect(await covered(s)).toEqual({
+        sold: TIER_TOTAL - REFUNDED_SEATS,
+        tickets: ['refunded', 'refunded'],
+        bystander: ['issued'],
+        covering: 'refunded',
+        order: { status: 'cancelled', payment_status: 'refunded' },
+      });
+    });
+  });
+
+  /**
+   * A success and a failure about the same refund, processed at the same
+   * moment. Both read the row while it was still pending; only the first
+   * write may land. The stale read is replayed through the real repository so
+   * the guarded writes — and the rolled-back ticket void — run against the
+   * real schema.
+   */
+  describe('two outcomes for one refund, processed at the same time', () => {
+    const readBeforeTheOtherLanded = async (ref: string) => {
+      const repo = app.get(PaymentsRepository);
+      const stale = await repo.findRefundByGatewayRef(orgId, ref);
+      return () =>
+        jest.spyOn(repo, 'findRefundByGatewayRef').mockResolvedValueOnce(stale);
+    };
+
+    it('a success that lost to a failure voids nothing and returns no stock', async () => {
+      const s = await seed();
+      await refund(s.paymentId).expect(200);
+      const ref = await refundRefOf(s.paymentId);
+      const replayStaleRead = await readBeforeTheOtherLanded(ref);
+      await webhook(
+        refundEvent(ref, {
+          type: 'refund_failed',
+          declineReason: 'insufficient_funds',
+        }),
+      ).expect(200);
+      replayStaleRead();
+
+      const late = refundEvent(ref);
+      await webhook(late).expect(200);
+
+      expect(await snapshot(s)).toEqual({ ...UNTOUCHED, refund: 'failed' });
+      expect((await webhookRow(late.eventId)).status).toBe('processed');
+    });
+
+    it('a failure that lost to the settlement leaves it standing, flagged for a person', async () => {
+      const s = await seed();
+      await refund(s.paymentId).expect(200);
+      const ref = await refundRefOf(s.paymentId);
+      const replayStaleRead = await readBeforeTheOtherLanded(ref);
+      await webhook(refundEvent(ref)).expect(200);
+      const settled = await snapshot(s);
+      replayStaleRead();
+
+      const late = refundEvent(ref, {
+        type: 'refund_failed',
+        declineReason: 'insufficient_funds',
+      });
+      await webhook(late).expect(200);
+
+      expect(await snapshot(s)).toEqual(settled);
+      expect(settled.refund).toBe('succeeded');
+      expect((await webhookRow(late.eventId)).status).toBe('failed');
     });
   });
 

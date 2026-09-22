@@ -5,7 +5,11 @@ import { Clock } from '../../common/time/clock';
 import type { AuthContext } from '../auth/auth.types';
 import { OrderPaymentPort } from './ports/order-payment.port';
 import { PaymentProviderPort } from './ports/payment-provider.port';
-import type { PaymentRow, RefundRow } from './payments.repository';
+import type {
+  MarkRefundedInput,
+  PaymentRow,
+  RefundRow,
+} from './payments.repository';
 import { PaymentsRepository } from './payments.repository';
 
 export interface RefundPaymentRequest {
@@ -45,6 +49,14 @@ const NOT_PAID =
 const ALREADY_REFUNDED = 'This payment has already been refunded.';
 const NO_GATEWAY_REF =
   'This payment has no provider reference, so it cannot be refunded automatically.';
+const FINISHED_ELSEWHERE =
+  'This refund was finished by another request — reload to see where it stands.';
+
+/**
+ * Thrown inside the refund transaction when its guarded write matched nothing,
+ * so the ticket void and returned stock that ran before it roll back.
+ */
+class RefundNoLongerPending extends Error {}
 
 /**
  * Issue a refund (US-FIN-02). Full refunds only this release, admin-only, and
@@ -60,7 +72,14 @@ const NO_GATEWAY_REF =
  *    call inside one holds locks for as long as Stripe takes to answer.
  * 3. **Then free the inventory in ONE transaction** with the ledger write: the
  *    payment flips to refunded, the tickets are voided and their seats go back,
- *    and the refund row is marked succeeded — together or not at all.
+ *    and the refund row is marked succeeded — together or not at all. The
+ *    exception is a duplicate payment, while another paid payment still
+ *    covers the order: only its own ledger lines flip, because the buyer paid
+ *    once and keeps what they bought.
+ *
+ * Only a `pending` refund moves, and that is enforced by the writes
+ * themselves, not by the read before them — so two outcomes for one refund
+ * processed at the same moment cannot leave the ledger contradicting itself.
  *
  * A `pending` refund (PromptPay, where Stripe must still collect the buyer's
  * bank details) deliberately frees nothing yet. The money has not landed back,
@@ -148,7 +167,9 @@ export class RefundsService {
       );
       return { ...this.toResult(refund), status: 'pending' };
     }
-    await this.completeRefund(refund, outcome.refundRef);
+    if (!(await this.completeRefund(refund, outcome.refundRef))) {
+      throw DomainException.conflict(FINISHED_ELSEWHERE);
+    }
     return { ...this.toResult(refund), status: 'succeeded' };
   }
 
@@ -198,8 +219,10 @@ export class RefundsService {
     refund: RefundRow,
     report: ProviderRefundReport,
   ): Promise<RefundCompletion> {
-    await this.repo.markRefundFailed(refund.id, report.failureReason);
-    return 'failed';
+    if (await this.repo.markRefundFailed(refund.id, report.failureReason)) {
+      return 'failed';
+    }
+    return this.afterLostRace(report);
   }
 
   /**
@@ -222,26 +245,72 @@ export class RefundsService {
       );
       return 'amount_mismatch';
     }
-    await this.completeRefund(refund, report.refundRef);
-    return 'settled';
+    if (await this.completeRefund(refund, report.refundRef)) return 'settled';
+    return this.afterLostRace(report);
   }
 
   /**
-   * Step 3 of the class note, shared by both paths: void the tickets, return
-   * their stock and flip payment and refund — in ONE transaction.
+   * Another event about this refund was processed between our read and our
+   * write, and its write landed first. Report what the row says now — the
+   * same answer those two events one after the other would have produced.
+   */
+  private async afterLostRace(
+    report: ProviderRefundReport,
+  ): Promise<RefundCompletion> {
+    const current = await this.repo.findRefundByGatewayRef(
+      report.organizationId,
+      report.refundRef,
+    );
+    return current ? this.onFinished(current, report) : 'unknown';
+  }
+
+  /**
+   * Step 3 of the class note, shared by both paths. False when another event
+   * finished the refund first; nothing is written then.
+   *
+   * A duplicate payment — another payment still covers the order — flips only
+   * its own ledger lines: the buyer paid once and keeps what they bought. Only
+   * the refund of the order's last paid payment voids its tickets and returns
+   * their stock, in ONE transaction with the ledger.
    */
   private async completeRefund(
     refund: RefundRow,
     gatewayRef: string,
-  ): Promise<void> {
-    await this.orders.refundOrder(refund.organizationId, refund.orderId, (tx) =>
-      this.repo.markRefundedIn(tx, {
-        refundId: refund.id,
-        paymentId: refund.paymentId,
-        gatewayRef,
-        now: this.clock.now(),
-      }),
-    );
+  ): Promise<boolean> {
+    const ledger: MarkRefundedInput = {
+      refundId: refund.id,
+      paymentId: refund.paymentId,
+      gatewayRef,
+      now: this.clock.now(),
+    };
+    const duplicate = await this.repo.settleDuplicateRefund({
+      ...ledger,
+      organizationId: refund.organizationId,
+      orderId: refund.orderId,
+    });
+    if (duplicate === 'sole_payment') return this.voidOrder(refund, ledger);
+    return duplicate === 'settled';
+  }
+
+  private async voidOrder(
+    refund: RefundRow,
+    ledger: MarkRefundedInput,
+  ): Promise<boolean> {
+    try {
+      await this.orders.refundOrder(
+        refund.organizationId,
+        refund.orderId,
+        async (tx) => {
+          if (!(await this.repo.markRefundedIn(tx, ledger))) {
+            throw new RefundNoLongerPending();
+          }
+        },
+      );
+      return true;
+    } catch (error) {
+      if (error instanceof RefundNoLongerPending) return false;
+      throw error;
+    }
   }
 
   private toResult(refund: RefundRow): RefundResult {
