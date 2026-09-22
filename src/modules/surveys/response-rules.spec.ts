@@ -108,6 +108,46 @@ describe('answering a recommendation question (US-MSG-08)', () => {
   });
 });
 
+describe('the same question answered twice (US-MSG-08)', () => {
+  const withNps = [
+    ...questions,
+    {
+      id: 4,
+      type: 'nps' as const,
+      prompt: 'How likely are you to recommend us?',
+      options: [],
+    },
+  ];
+
+  it('refuses a second recommendation score from the same person', () => {
+    // Thirty 10s in one response would outvote three honest detractors.
+    const stuffed = Array.from({ length: 30 }, () => ({
+      questionId: 4,
+      score: 10,
+    }));
+    expect(() => assertAnswers(withNps, [...answers, ...stuffed])).toThrow(
+      '“How likely are you to recommend us?” was answered twice.',
+    );
+  });
+
+  it('refuses a second star rating from the same person', () => {
+    expect(() =>
+      assertAnswers(questions, [...answers, { questionId: 1, rating: 5 }]),
+    ).toThrow(/How was it.*answered twice/);
+  });
+
+  it('refuses a second free-text answer too', () => {
+    // Nothing is averaged from text, but one person is still one answer.
+    expect(() =>
+      assertAnswers(questions, [
+        ...answers,
+        { questionId: 2, answerText: 'Great' },
+        { questionId: 2, answerText: 'Really great' },
+      ]),
+    ).toThrow(DomainException);
+  });
+});
+
 describe('a value meant for a different kind of question (US-MSG-08)', () => {
   it('refuses a score sent with a star rating', () => {
     // Stored, it would count in the NPS through a question that never asked

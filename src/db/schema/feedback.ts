@@ -145,6 +145,9 @@ export const surveyAnswers = pgTable(
   },
   (t) => [
     index('ix_survey_answers_response').on(t.responseId),
+    // Each question once per response: the figures count answers, so a repeat
+    // would count one person many times (0064).
+    unique('uq_survey_answers_question').on(t.responseId, t.questionId),
     check('ck_survey_answers_score', sql`${t.score} BETWEEN 0 AND 10`),
   ],
 );

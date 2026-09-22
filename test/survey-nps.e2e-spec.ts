@@ -36,6 +36,8 @@ const ATTENDEES = [
 /** Emailed the meetup's thank-you, but has no account and never answers. */
 const GUEST = 'guest@nps-e2e.test';
 const THANK_YOU = 'post-event-thankyou';
+/** Postgres's SQLSTATE for a broken UNIQUE constraint. */
+const UNIQUE_VIOLATION = '23505';
 
 const PERM_GROUP: Record<string, string> = { evCreate: 'Events' };
 
@@ -247,6 +249,42 @@ describe('NPS (e2e — US-MSG-08/09)', () => {
         { questionId: ids.nps, score: 9 },
         { questionId: ids.rating, rating: 4, score: 10 },
       ]).expect(422);
+    });
+
+    it('refuses the same recommendation answered twice, and counts none of it', async () => {
+      // Thirty 10s in one response would be thirty promoters from one person.
+      const stuffed = Array.from({ length: 29 }, () => ({
+        questionId: ids.nps,
+        score: 10,
+      }));
+      const res = await submit(jwt(), summitId, [
+        { questionId: ids.rating, rating: 4 },
+        ...stuffed,
+      ]).expect(422);
+      expect(JSON.stringify(res.body)).toContain('was answered twice');
+      expect((await summary({ eventId: summitId })).nps.answers).toBe(0);
+    });
+
+    it('holds one answer per question per response in the table itself', async () => {
+      // The rule above is the first line; this is the one a future write path
+      // that skips it still runs into.
+      await submit(jwt(), summitId, [
+        { questionId: ids.nps, score: 3 },
+        { questionId: ids.rating, rating: 4 },
+      ]).expect(200);
+
+      await expect(
+        pool.query(
+          `INSERT INTO survey_answers (organization_id, response_id, question_id, score)
+           SELECT organization_id, response_id, question_id, 10
+           FROM survey_answers WHERE organization_id = $1 AND question_id = $2`,
+          [orgId, ids.nps],
+        ),
+      ).rejects.toMatchObject({ code: UNIQUE_VIOLATION });
+      expect((await summary({ eventId: summitId })).nps).toMatchObject({
+        answers: 1,
+        detractors: 1,
+      });
     });
   });
 

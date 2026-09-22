@@ -48,12 +48,17 @@ const ANSWER_FIELDS = Object.values(ANSWER_FIELD);
  * figures read a column without asking which question filled it, so a `score`
  * riding along on a rating question would be counted in the NPS, and a
  * `rating` on a recommendation question in the average.
+ *
+ * Each question is answered ONCE. The figures count answers, not people, so
+ * thirty scores of 10 in one response would be thirty promoters — and "one
+ * response per person" guards nothing if one response can hold them all.
  */
 export function assertAnswers(
   questions: AnsweredQuestion[],
   answers: SubmittedAnswer[],
 ): void {
   const byId = new Map(questions.map((question) => [question.id, question]));
+  const answered = new Set<number>();
 
   for (const answer of answers) {
     const question = byId.get(answer.questionId);
@@ -62,10 +67,15 @@ export function assertAnswers(
         'That answer is for a question this survey does not ask.',
       );
     }
+    if (answered.has(question.id)) {
+      throw DomainException.validation(
+        `“${question.prompt}” was answered twice.`,
+      );
+    }
+    answered.add(question.id);
     assertShape(question, answer);
   }
 
-  const answered = new Set(answers.map((answer) => answer.questionId));
   for (const question of questions) {
     if (question.type === 'text') continue;
     if (!answered.has(question.id)) {
