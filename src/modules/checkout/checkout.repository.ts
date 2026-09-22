@@ -737,6 +737,9 @@ export class CheckoutRepository {
    * Give the inventory back after a refund (US-FIN-02): void the order's live
    * tickets, release their seat assignments, and hand the tier's stock back.
    * `recordRefund` runs inside the same transaction as all of it.
+   *
+   * Stock goes back by the tickets THIS call voided, so a repeated refund —
+   * which finds nothing left to void — gives nothing back twice.
    */
   async refundOrder(
     organizationId: number,
@@ -755,7 +758,8 @@ export class CheckoutRepository {
             inArray(tickets.status, LIVE_TICKET_STATUSES),
           ),
         )
-        .returning({ id: tickets.id });
+        .returning({ id: tickets.id, ticketTypeId: tickets.ticketTypeId });
+      await this.returnStock(tx, organizationId, voided, now);
       const released = await tx
         .update(seatAssignments)
         .set({ releasedAt: now })
@@ -777,6 +781,53 @@ export class CheckoutRepository {
       await recordRefund(tx);
       return { ticketsVoided: voided.length, seatsReleased: released.length };
     });
+  }
+
+  /**
+   * Lower each ticket type's `sold` by the tickets voided from it.
+   *
+   * `sold` is what every "is anything left?" check reads — checkout's live
+   * status, the seat-hold engine, a waitlist offer — and it counts every
+   * issued ticket, reserved seats included: both places that mint tickets
+   * raise it, whatever the seating. So it comes down for every voided ticket.
+   * Releasing a reserved seat alone left a free seat on a ticket type still
+   * reading "sold out", which refused it.
+   *
+   * One UPDATE per type takes that row's lock, as the increments do, and in
+   * id order so two refunds touching the same types cannot deadlock.
+   * `GREATEST(…, 0)`: a count already lower than the tickets it should cover is
+   * wrong, and a refund must not compound it into a negative that sells places
+   * which do not exist.
+   */
+  private async returnStock(
+    tx: Tx,
+    organizationId: number,
+    voided: { ticketTypeId: string | null }[],
+    now: Date,
+  ): Promise<void> {
+    const byType = new Map<string, number>();
+    for (const { ticketTypeId } of voided) {
+      // A ticket type since deleted has no stock left to give back to.
+      if (ticketTypeId) {
+        byType.set(ticketTypeId, (byType.get(ticketTypeId) ?? 0) + 1);
+      }
+    }
+    for (const [ticketTypeId, count] of [...byType].sort(([a], [b]) =>
+      a.localeCompare(b),
+    )) {
+      await tx
+        .update(ticketTypes)
+        .set({
+          sold: sql`GREATEST(${ticketTypes.sold} - ${count}, 0)`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(ticketTypes.id, ticketTypeId),
+            eq(ticketTypes.organizationId, organizationId),
+          ),
+        );
+    }
   }
 
   /** Queue a refund for money that arrived on an order already paid for. */
