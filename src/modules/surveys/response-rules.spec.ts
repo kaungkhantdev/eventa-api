@@ -173,7 +173,6 @@ describe('a value meant for a different kind of question (US-MSG-08)', () => {
 describe('what a pile of responses adds up to (US-MSG-08)', () => {
   it('averages the ratings and counts each star', () => {
     const summary = summarise([5, 4, 5, 3]);
-    expect(summary.responses).toBe(4);
     expect(summary.average).toBe(4.3);
     expect(summary.distribution).toEqual({ 5: 2, 4: 1, 3: 1, 2: 0, 1: 0 });
   });
@@ -181,8 +180,8 @@ describe('what a pile of responses adds up to (US-MSG-08)', () => {
   it('has no average when nobody has rated anything', () => {
     // Not 0. Nought out of five is a verdict; this is the absence of one.
     const summary = summarise([]);
-    expect(summary.responses).toBe(0);
     expect(summary.average).toBeNull();
+    expect(summary.distribution).toEqual({ 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 });
   });
 });
 

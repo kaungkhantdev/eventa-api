@@ -112,7 +112,11 @@ export class NpsSummaryDto {
 
 /** What a workspace's feedback adds up to (US-MSG-08). */
 export class FeedbackSummaryDto {
-  @ApiProperty({ example: 42 })
+  @ApiProperty({
+    example: 42,
+    description:
+      'People who answered in scope, one per response — not the star ratings given. A survey asking only the recommendation question still counts here; `distribution` sums to the ratings.',
+  })
   responses!: number;
 
   @ApiProperty({

@@ -288,6 +288,81 @@ describe('NPS (e2e — US-MSG-08/09)', () => {
     });
   });
 
+  describe('counting who answered', () => {
+    afterEach(deleteSurveys);
+
+    /** Every attendee given answers the survey, question type by type. */
+    async function answerAll(
+      eventId: string,
+      people: string[],
+      answerOf: (ids: Record<string, string>) => unknown[],
+    ): Promise<void> {
+      for (const jwt of people) {
+        const ids = await questionIds(jwt, eventId);
+        await submit(jwt, eventId, answerOf(ids)).expect(200);
+      }
+    }
+
+    it('counts the people who answered a survey that asks for no stars', async () => {
+      // Recommendation only: three answers are three responses, not nobody.
+      const survey = await liveSurvey(summitId, [NPS]);
+      await answerAll(summitId, attendeeJwts.slice(0, 3), (ids) => [
+        { questionId: ids.nps, score: 9 },
+      ]);
+
+      const figures = await summary({ surveyId: survey });
+      expect(figures.responses).toBe(3);
+      expect(figures.average).toBeNull();
+      expect(figures.nps.answers).toBe(3);
+    });
+
+    it('counts a person once however many star questions they answered', async () => {
+      const survey = await liveSurvey(summitId, [
+        RATING,
+        { ...RATING, prompt: 'And the venue?' },
+      ]);
+      for (const jwt of attendeeJwts.slice(0, 2)) {
+        const res = await request(server)
+          .get(`/api/v1/me/surveys/${summitId}`)
+          .set('Authorization', `Bearer ${jwt}`)
+          .expect(200);
+        const questions = (res.body as Success<{ questions: Question[] }>).data
+          .questions;
+        await submit(
+          jwt,
+          summitId,
+          questions.map((q) => ({ questionId: q.id, rating: 4 })),
+        ).expect(200);
+      }
+
+      const figures = await summary({ surveyId: survey });
+      expect(figures.responses).toBe(2);
+      // The stars are still every rating given: two each.
+      expect(figures.distribution['4']).toBe(4);
+    });
+
+    it("counts only the scoped survey's people", async () => {
+      const first = await liveSurvey(summitId, [NPS]);
+      await answerAll(summitId, attendeeJwts.slice(0, 2), (ids) => [
+        { questionId: ids.nps, score: 9 },
+      ]);
+      await request(server)
+        .patch(`/api/v1/surveys/${first}/status`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({ status: 'closed' })
+        .expect(200);
+      const second = await liveSurvey(summitId, [RATING]);
+      await answerAll(summitId, attendeeJwts.slice(0, 1), (ids) => [
+        { questionId: ids.rating, rating: 5 },
+      ]);
+
+      expect((await summary({ surveyId: first })).responses).toBe(2);
+      expect((await summary({ surveyId: second })).responses).toBe(1);
+      expect((await summary({ eventId: summitId })).responses).toBe(3);
+      expect((await summary({ eventId: meetupId })).responses).toBe(0);
+    });
+  });
+
   describe('what the organizer sees', () => {
     let summitSurvey: string;
     let meetupSurvey: string;

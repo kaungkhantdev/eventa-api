@@ -164,6 +164,34 @@ export class SurveyResponsesRepository {
     });
   }
 
+  /**
+   * How many people answered in scope — one response each, whatever it held
+   * (US-MSG-08). Not the ratings: a recommendation-only survey has none, and a
+   * survey with two star questions has two per person.
+   */
+  respondentsFor(
+    organizationId: number,
+    scope: FeedbackScope,
+  ): Promise<number> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({ count: sql<string>`count(*)` })
+        .from(surveyResponses)
+        .where(
+          and(
+            eq(surveyResponses.organizationId, organizationId),
+            scope.eventId
+              ? eq(surveyResponses.eventId, scope.eventId)
+              : undefined,
+            scope.surveyId
+              ? eq(surveyResponses.surveyId, scope.surveyId)
+              : undefined,
+          ),
+        );
+      return Number(row?.count ?? 0);
+    });
+  }
+
   /** Every rating given in scope, for the averages and the breakdown. */
   ratingsFor(organizationId: number, scope: FeedbackScope): Promise<number[]> {
     return withTenant(this.db, organizationId, async (tx) => {

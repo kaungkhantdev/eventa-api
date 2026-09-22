@@ -145,8 +145,12 @@ function isOnScale(
   );
 }
 
+/**
+ * The star ratings alone. How many PEOPLE answered is not among them: a survey
+ * asking only the recommendation question collects none, and one asking two
+ * star questions collects two per person — neither is a count of responses.
+ */
 export interface RatingSummary {
-  responses: number;
   /** Null when nobody has rated anything — never 0, which is a verdict. */
   average: number | null;
   distribution: Record<number, number>;
@@ -161,7 +165,6 @@ export function summarise(ratings: number[]): RatingSummary {
 
   const total = ratings.reduce((sum, rating) => sum + rating, 0);
   return {
-    responses: ratings.length,
     average:
       ratings.length === 0
         ? null
@@ -184,7 +187,9 @@ export interface Completion {
   completionRate: number | null;
 }
 
-export type FeedbackSummary = RatingSummary & Completion;
+/** `responses` is how many people answered in scope, star ratings or not. */
+export type FeedbackSummary = { responses: number } & RatingSummary &
+  Completion;
 
 /**
  * How many of the people asked answered (US-MSG-08).

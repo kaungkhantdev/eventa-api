@@ -13,6 +13,7 @@ describe('SurveyResponsesService — the feedback summary (US-MSG-08)', () => {
 
   beforeEach(() => {
     repo = {
+      respondentsFor: jest.fn().mockResolvedValue(3),
       ratingsFor: jest.fn().mockResolvedValue([5, 4]),
       npsScoresFor: jest.fn().mockResolvedValue([10, 9, 7, 3]),
       reachFor: jest.fn().mockResolvedValue({ asked: 4, answered: 1 }),
@@ -24,7 +25,7 @@ describe('SurveyResponsesService — the feedback summary (US-MSG-08)', () => {
 
   it('adds who was asked, how many of them answered, and the NPS to the rating summary', async () => {
     await expect(service.summary(auth, { eventId: 'e1' })).resolves.toEqual({
-      responses: 2,
+      responses: 3,
       average: 4.5,
       distribution: { 1: 0, 2: 0, 3: 0, 4: 1, 5: 1 },
       asked: 4,
@@ -38,9 +39,20 @@ describe('SurveyResponsesService — the feedback summary (US-MSG-08)', () => {
     // figures on one screen that describe different things.
     const scope = { eventId: 'e1', surveyId: 7 };
     await service.summary(auth, scope);
+    expect(repo.respondentsFor).toHaveBeenCalledWith(1, scope);
     expect(repo.ratingsFor).toHaveBeenCalledWith(1, scope);
     expect(repo.npsScoresFor).toHaveBeenCalledWith(1, scope);
     expect(repo.reachFor).toHaveBeenCalledWith(1, scope);
+  });
+
+  it('counts the people who answered, not the star ratings they gave', async () => {
+    // A survey asking only the recommendation question collects no stars; its
+    // ten answers are still ten responses, not "nobody has answered".
+    repo.respondentsFor.mockResolvedValue(10);
+    repo.ratingsFor.mockResolvedValue([]);
+    const summary = await service.summary(auth, { surveyId: 7 });
+    expect(summary.responses).toBe(10);
+    expect(summary.average).toBeNull();
   });
 
   it('reports no NPS, not 0, when nobody answered a recommendation question', async () => {

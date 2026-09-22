@@ -91,12 +91,14 @@ export class SurveyResponsesService {
     auth: AuthContext,
     scope: FeedbackScope,
   ): Promise<FeedbackFigures> {
-    const [ratings, scores, reach] = await Promise.all([
+    const [responses, ratings, scores, reach] = await Promise.all([
+      this.repo.respondentsFor(auth.organizationId, scope),
       this.repo.ratingsFor(auth.organizationId, scope),
       this.repo.npsScoresFor(auth.organizationId, scope),
       this.repo.reachFor(auth.organizationId, scope),
     ]);
     return {
+      responses,
       ...summarise(ratings),
       ...completionOf(reach),
       nps: summariseNps(scores),
