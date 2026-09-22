@@ -132,7 +132,8 @@ export interface WaitlistEntry {
 export interface MarkOfferedInput {
   organizationId: number;
   orderId: string;
-  offeredBy: string;
+  /** Null when the line offered it rather than an organizer. */
+  offeredBy: string | null;
   offerExpiresAt: Date;
   now: Date;
   buildEvent: (order: OrderRow) => OutboxEventInput;
@@ -150,6 +151,14 @@ interface OrderState {
 const WAITLISTED: OrderState = {
   status: 'waitlisted',
   paymentStatus: 'pending',
+};
+
+/** How a waitlist entry is read, wherever it is read from. */
+const WAITLIST_ENTRY_COLUMNS = {
+  order: orders,
+  ticketTypeId: orderItems.ticketTypeId,
+  ticketTypeName: ticketTypes.name,
+  quantity: orderItems.quantity,
 };
 
 /** What was placed — `replayed` when an identical request already did this. */
@@ -180,8 +189,11 @@ export interface SettleOrderInput {
   orderId: string;
   /** Defaults to `payment` — the path that existed before approvals. */
   mode?: SettlementMode;
-  /** The organizer, on the approval path only. Stamped onto the order. */
-  decidedBy?: string;
+  /**
+   * The organizer, on the approval path only. Stamped onto the order; null
+   * when the waitlist confirmed a free place by itself (US-REG-04).
+   */
+  decidedBy?: string | null;
   /** One fresh QR token per admission, minted as tickets are written. */
   mintQrToken: () => string;
   buildConfirmedEvent: (
@@ -430,12 +442,7 @@ export class CheckoutRepository {
   ): Promise<WaitlistEntry | null> {
     return withTenant(this.db, organizationId, async (tx) => {
       const [row] = await tx
-        .select({
-          order: orders,
-          ticketTypeId: orderItems.ticketTypeId,
-          ticketTypeName: ticketTypes.name,
-          quantity: orderItems.quantity,
-        })
+        .select(WAITLIST_ENTRY_COLUMNS)
         .from(orders)
         .innerJoin(orderItems, eq(orderItems.orderId, orders.id))
         .innerJoin(ticketTypes, eq(ticketTypes.id, orderItems.ticketTypeId))
@@ -445,6 +452,38 @@ export class CheckoutRepository {
             eq(orders.organizationId, organizationId),
           ),
         )
+        .limit(1);
+      return row ?? null;
+    });
+  }
+
+  /**
+   * The front of a ticket's line (US-REG-04): its earliest `waitlisted`
+   * registration, in the order everyone else reads the line — when they
+   * joined, the id breaking a tie (`waitlistAhead`, the worker's pass-on).
+   *
+   * No lock. Whoever acts on the answer re-checks under their own — the seat
+   * hold under the tier's lock, the offer under the order's — so an answer
+   * gone stale is refused there rather than trusted here.
+   */
+  async frontOfLine(
+    organizationId: number,
+    ticketTypeId: string,
+  ): Promise<WaitlistEntry | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select(WAITLIST_ENTRY_COLUMNS)
+        .from(orders)
+        .innerJoin(orderItems, eq(orderItems.orderId, orders.id))
+        .innerJoin(ticketTypes, eq(ticketTypes.id, orderItems.ticketTypeId))
+        .where(
+          and(
+            eq(orders.organizationId, organizationId),
+            eq(orders.status, WAITLISTED.status),
+            eq(orderItems.ticketTypeId, ticketTypeId),
+          ),
+        )
+        .orderBy(asc(orders.registeredAt), asc(orders.id))
         .limit(1);
       return row ?? null;
     });

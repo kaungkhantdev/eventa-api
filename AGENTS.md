@@ -236,10 +236,13 @@ its own `ports/` folder; the **owner** implements it as an adapter and binds it
 (`{ provide: EventStatsPort, useClass: RegistrationStatsAdapter }`). So Events reads registration numbers
 without importing Registration's tables. Use `forwardRef` **only** for a genuine bidirectional dependency
 (auth↔access, auth↔auth-signup, auth↔auth-password, auth↔auth-social, auth↔users, events↔ticketing,
-ticketing↔registration) — not to paper over a bad boundary. Ports in play: `TicketAvailabilityPort` ·
+ticketing↔registration, ticketing↔checkout — which pulls discounts→ticketing into the cycle too) — not to
+paper over a bad boundary. Ports in play: `TicketAvailabilityPort` ·
 `EventStatsPort` · `TicketSalesPort` ·
 `TicketEligibilityPort` (Registration asks Ticketing "may this tier be sold right now?") ·
-`CheckoutActivityPort` (Ticketing asks Registration "is anyone mid-checkout?") · `EventLookupPort` ·
+`CheckoutActivityPort` (Ticketing asks Registration "is anyone mid-checkout?") ·
+`WaitlistOffersPort` (Ticketing asks Checkout to offer a raised allocation's new places to the waitlist) ·
+`EventLookupPort` ·
 `EventOrgLookupPort` (Discounts resolves an anonymous checkout's tenant from the event, never the caller) ·
 `EventAttendancePort` (Discover asks RegistrationStats how full an event is) · `CheckoutEventPort` ·
 `TicketCatalogPort` · `SeatMapPort` (Checkout reads the event, its tiers and its seats through their

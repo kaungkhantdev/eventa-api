@@ -3,6 +3,8 @@ import {
   WAITLIST_RESERVED_SEATING,
   WAITLIST_TICKETS_LEFT,
   canJoinWaitlist,
+  confirmsOnOffer,
+  hasOpenWaitlist,
   waitlistRefusal,
 } from './waitlist-rules';
 
@@ -42,5 +44,26 @@ describe('waitlist rules (US-REG-04)', () => {
     // who is not at the map to choose it.
     const event = { ...OPEN, seatingMode: 'reserved' as const };
     expect(waitlistRefusal(event, SOLD_OUT)).toBe(WAITLIST_RESERVED_SEATING);
+  });
+});
+
+describe('offering new places to the line (US-REG-04)', () => {
+  it('offers them on a general-admission event with the waitlist on', () => {
+    expect(hasOpenWaitlist(OPEN)).toBe(true);
+  });
+
+  it('offers nobody once the organizer has switched the waitlist off', () => {
+    expect(hasOpenWaitlist({ ...OPEN, waitlistEnabled: false })).toBe(false);
+  });
+
+  it('offers nobody on a reserved-seating event', () => {
+    // A place there is one particular seat, and nobody in line is at the map.
+    expect(hasOpenWaitlist({ ...OPEN, seatingMode: 'reserved' })).toBe(false);
+  });
+
+  it('confirms a free registration outright, and offers a paid one to pay for', () => {
+    // "Free tickets confirm immediately."
+    expect(confirmsOnOffer({ totalSatang: 0 })).toBe(true);
+    expect(confirmsOnOffer({ totalSatang: 210_000 })).toBe(false);
   });
 });

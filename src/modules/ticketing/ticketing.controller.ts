@@ -29,6 +29,7 @@ import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { TicketResponseDto } from './dto/ticket-response.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
+import { UpdatedTicketResponseDto } from './dto/updated-ticket-response.dto';
 import { TicketingService } from './ticketing.service';
 import type {
   CreateTicketInput,
@@ -75,13 +76,13 @@ export class TicketingController {
   @Patch(':ticketId')
   @RequirePermissions(Permission.evCreate)
   @ResponseMessage('Ticket type updated.')
-  @ApiData(TicketResponseDto)
+  @ApiData(UpdatedTicketResponseDto)
   update(
     @CurrentAuth() auth: AuthContext,
     @Param('eventId') eventId: string,
     @Param('ticketId') ticketId: string,
     @Body() dto: UpdateTicketDto,
-  ): Promise<TicketResponseDto> {
+  ): Promise<UpdatedTicketResponseDto> {
     return this.tickets.updateTicket(
       actorOf(auth),
       eventId,

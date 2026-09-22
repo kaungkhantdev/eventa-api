@@ -66,11 +66,14 @@ export class RegistrationApprovalAdapter extends RegistrationApprovalPort {
    * recorded, under the order's own lock. If that second step fails —
    * somebody decided first, or the write failed — the hold is given straight
    * back: left alone it would keep a seat off sale for the whole offer window.
+   *
+   * `offeredBy` is null when nobody chose them: the line did, in order, when
+   * a capacity raise freed places (`WaitlistOffersAdapter`).
    */
   async offer(
     organizationId: number,
     orderId: string,
-    offeredBy: string,
+    offeredBy: string | null,
   ): Promise<OfferResult> {
     const entry = await this.repo.waitlistEntry(organizationId, orderId);
     if (!entry) throw DomainException.notFound(GONE);
@@ -146,10 +149,14 @@ export class RegistrationApprovalAdapter extends RegistrationApprovalPort {
     };
   }
 
+  /**
+   * `decidedBy` is null when nobody decided: a free place confirmed off the
+   * waitlist by a capacity raise (`WaitlistOffersAdapter`).
+   */
   async approve(
     organizationId: number,
     orderId: string,
-    decidedBy: string,
+    decidedBy: string | null,
   ): Promise<ApprovalResult> {
     const order = await this.repo.orderById(organizationId, orderId);
     if (!order) return this.gone(orderId);

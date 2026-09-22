@@ -98,4 +98,19 @@ describe('OpenAPI (e2e)', () => {
       }
     });
   });
+
+  describe('the ticket edit (US-REG-04)', () => {
+    it('says how many in the waitlist a raised allocation gave a place', () => {
+      const schema = document.components?.schemas?.UpdatedTicketResponseDto as
+        | {
+            properties?: Record<string, { type?: string }>;
+            required?: string[];
+          }
+        | undefined;
+      expect(schema?.properties?.waitlistOffered?.type).toBe('number');
+      expect(schema?.required).toContain('waitlistOffered');
+      // Still the whole ticket, so the edit form can re-render from it.
+      expect(schema?.properties).toHaveProperty('sold');
+    });
+  });
 });

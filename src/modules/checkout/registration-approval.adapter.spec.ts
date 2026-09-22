@@ -141,6 +141,14 @@ describe('RegistrationApprovalAdapter.offer (US-REG-04)', () => {
     expect(holds.holdForOffer).not.toHaveBeenCalled();
   });
 
+  it('records an offer the line made, with nobody as the offerer', async () => {
+    // A capacity raise offers the new places in line order: nobody chose them.
+    await adapter.offer(ORG, 'o-1', null);
+    expect(repo.markOffered).toHaveBeenCalledWith(
+      expect.objectContaining({ orderId: 'o-1', offeredBy: null }),
+    );
+  });
+
   it('404s a registration that is not this workspace’s', async () => {
     repo.waitlistEntry.mockResolvedValue(null);
     const error = await adapter
@@ -177,6 +185,38 @@ describe('RegistrationApprovalAdapter — deciding (US-REG-02)', () => {
       { now: () => NOW },
       config,
       {} as SeatHoldService,
+    );
+  });
+
+  it('records a system approval with nobody as the approver', async () => {
+    // A free place confirmed off the waitlist by a capacity raise.
+    repo.settleOrder = jest.fn().mockResolvedValue({
+      outcome: 'settled',
+      reference: 'ORD-AAAA1111',
+      ticketCount: 2,
+    });
+    const system = new RegistrationApprovalAdapter(
+      repo,
+      {
+        findPublishedById: jest.fn().mockResolvedValue({ isOnline: false }),
+      } as unknown as CheckoutEventPort,
+      { now: () => NOW },
+      {
+        getOrThrow: (key: string) =>
+          key === 'WAITLIST_OFFER_HOURS' ? OFFER_HOURS : 'https://web.test',
+      } as unknown as ConfigService<Env, true>,
+      {} as SeatHoldService,
+    );
+    await expect(system.approve(ORG, 'o-1', null)).resolves.toMatchObject({
+      outcome: 'approved',
+      ticketCount: 2,
+    });
+    expect(repo.settleOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderId: 'o-1',
+        mode: 'approval',
+        decidedBy: null,
+      }),
     );
   });
 

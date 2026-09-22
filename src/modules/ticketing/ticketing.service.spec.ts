@@ -1,7 +1,9 @@
+import { Logger } from '@nestjs/common';
 import { Clock } from '../../common/time/clock';
 import { DomainException } from '../../common/errors/domain.exception';
 import { EventsService } from '../events/events.service';
 import { CheckoutActivityPort } from './ports/checkout-activity.port';
+import { WaitlistOffersPort } from './ports/waitlist-offers.port';
 import { TicketingPolicy } from './ticketing.policy';
 import { TicketingRepository } from './ticketing.repository';
 import { TicketingService } from './ticketing.service';
@@ -46,6 +48,7 @@ describe('TicketingService', () => {
   let repo: jest.Mocked<TicketingRepository>;
   let events: jest.Mocked<EventsService>;
   let checkout: jest.Mocked<CheckoutActivityPort>;
+  let waitlist: jest.Mocked<WaitlistOffersPort>;
   let service: TicketingService;
 
   beforeEach(() => {
@@ -74,6 +77,7 @@ describe('TicketingService', () => {
     events = {
       getEvent: jest.fn().mockResolvedValue({ id: eventId }),
     } as unknown as jest.Mocked<EventsService>;
+    waitlist = { offerNewPlaces: jest.fn().mockResolvedValue(0) };
     const clock: Clock = { now: () => NOW };
     service = new TicketingService(
       repo,
@@ -81,6 +85,7 @@ describe('TicketingService', () => {
       new TicketingPolicy(),
       clock,
       checkout,
+      waitlist,
     );
   });
 
@@ -272,6 +277,88 @@ describe('TicketingService', () => {
       );
       await service.updateTicket(actor, eventId, 't1', { name: 'VVIP' });
       expect(repo.update.mock.calls[0][2].status).toBe('paused');
+    });
+  });
+
+  describe('updateTicket — new places go to the waitlist (US-REG-04)', () => {
+    beforeEach(() => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      repo.findTicket.mockResolvedValue(
+        ticketRow({ status: 'soldout', sold: 100, total: 100, version: 1 }),
+      );
+    });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it('offers the new places to the waitlist and says how many', async () => {
+      waitlist.offerNewPlaces.mockResolvedValue(2);
+      const res = await service.updateTicket(actor, eventId, 't1', {
+        total: 120,
+      });
+      expect(waitlist.offerNewPlaces).toHaveBeenCalledWith(1, 'e1', 't1');
+      expect(res.waitlistOffered).toBe(2);
+    });
+
+    it('offers only after the new allocation is saved', async () => {
+      await service.updateTicket(actor, eventId, 't1', { total: 120 });
+      expect(repo.update.mock.invocationCallOrder[0]).toBeLessThan(
+        waitlist.offerNewPlaces.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('asks nobody when the edit does not raise the allocation', async () => {
+      const renamed = await service.updateTicket(actor, eventId, 't1', {
+        name: 'VVIP',
+      });
+      repo.findTicket.mockResolvedValue(
+        ticketRow({ sold: 10, total: 100, version: 1 }),
+      );
+      const cut = await service.updateTicket(actor, eventId, 't1', {
+        total: 90,
+      });
+      expect(waitlist.offerNewPlaces).not.toHaveBeenCalled();
+      expect(renamed.waitlistOffered).toBe(0);
+      expect(cut.waitlistOffered).toBe(0);
+    });
+
+    it('does not treat a tier leaving unlimited as new places', async () => {
+      repo.findTicket.mockResolvedValue(
+        ticketRow({ sold: 10, total: 0, version: 1 }),
+      );
+      await service.updateTicket(actor, eventId, 't1', { total: 50 });
+      expect(waitlist.offerNewPlaces).not.toHaveBeenCalled();
+    });
+
+    it('keeps the capacity change when the waitlist offer fails', async () => {
+      waitlist.offerNewPlaces.mockRejectedValue(new Error('broker down'));
+      const res = await service.updateTicket(actor, eventId, 't1', {
+        total: 120,
+      });
+      expect(repo.update).toHaveBeenCalled();
+      expect(res).toMatchObject({ total: 120, waitlistOffered: 0 });
+      expect(Logger.prototype.error).toHaveBeenCalled();
+    });
+
+    it('answers with the ticket as it stands after the offers', async () => {
+      // A free place confirmed off the waitlist counts as sold.
+      waitlist.offerNewPlaces.mockResolvedValue(1);
+      repo.findTicket
+        .mockResolvedValueOnce(
+          ticketRow({ status: 'soldout', sold: 100, total: 100, version: 1 }),
+        )
+        .mockResolvedValueOnce(
+          ticketRow({ status: 'onsale', sold: 101, total: 120, version: 2 }),
+        );
+      const res = await service.updateTicket(actor, eventId, 't1', {
+        total: 120,
+      });
+      expect(repo.findTicket).toHaveBeenCalledTimes(2);
+      expect(res).toMatchObject({ sold: 101, total: 120, waitlistOffered: 1 });
+    });
+
+    it('does not read the ticket again when nobody was offered a place', async () => {
+      await service.updateTicket(actor, eventId, 't1', { total: 120 });
+      expect(repo.findTicket).toHaveBeenCalledTimes(1);
     });
   });
 
