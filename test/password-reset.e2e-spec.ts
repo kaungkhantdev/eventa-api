@@ -5,6 +5,7 @@ process.env.JWT_SECRET ??= 'test-secret-at-least-16-characters-long';
 import type { Server } from 'node:http';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import Redis from 'ioredis';
 import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
@@ -15,6 +16,17 @@ const OLD_PASSWORD = 'oldpass1word';
 const NEW_PASSWORD = 'newpass2word';
 const OWNER = 'reset-owner@reset-e2e.test';
 const ORG_SLUG = 'reset-co';
+/**
+ * A workspace slug that matches the prefix the reset form once put on its own
+ * throttle identity. Sign-in accepts any slug-shaped string and counts a miss
+ * against it whether or not the workspace exists.
+ */
+const COLLIDING_SLUG = 'forgot';
+const SIGN_IN_MAX_ATTEMPTS = 5; // LOGIN_MAX_ATTEMPTS' default
+const collidingSignInKeys = [
+  `login:fail:${COLLIDING_SLUG}|admin|${OWNER}`,
+  `login:lock:${COLLIDING_SLUG}|admin|${OWNER}`,
+];
 
 interface Body<T> {
   data: T;
@@ -24,10 +36,13 @@ describe('Forgotten-password reset (US-ACC-04, e2e)', () => {
   let app: INestApplication;
   let server: Server;
   let pool: Pool;
+  let redis: Redis;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    redis = new Redis();
     await cleanup(pool);
+    await redis.del(...collidingSignInKeys);
 
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
@@ -43,6 +58,8 @@ describe('Forgotten-password reset (US-ACC-04, e2e)', () => {
 
   afterAll(async () => {
     await cleanup(pool);
+    await redis.del(...collidingSignInKeys);
+    await redis.quit();
     await pool.end();
     await app.close();
   });
@@ -130,6 +147,29 @@ describe('Forgotten-password reset (US-ACC-04, e2e)', () => {
       .post('/api/v1/auth/reset-password')
       .send({ token, newPassword: NEW_PASSWORD }); // == current
     expect(res.status).toBe(422);
+  });
+
+  /**
+   * Failed sign-ins must never lock the reset form. They once did whenever the
+   * sign-in identity spelled the same string as the reset one — which anybody
+   * could arrange by naming the workspace "forgot", without an account of their
+   * own, for any address, every cool-off.
+   */
+  it('is not locked by failed sign-ins, whatever workspace they named', async () => {
+    for (let i = 0; i < SIGN_IN_MAX_ATTEMPTS; i += 1) {
+      await request(server).post('/api/v1/auth/login').send({
+        email: OWNER,
+        password: 'wrong-password1',
+        orgSlug: COLLIDING_SLUG,
+        persona: 'admin',
+      });
+    }
+
+    const res = await request(server)
+      .post('/api/v1/auth/forgot-password')
+      .send({ email: OWNER });
+
+    expect(res.status).toBe(200);
   });
 });
 

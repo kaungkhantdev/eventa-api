@@ -93,7 +93,7 @@ export class PasswordResetService {
 
     const user = await this.repo.findByEmailPersona(email, audience);
     if (!user) {
-      await this.throttle.recordFailure(identity);
+      await this.throttle.recordFailure(identity, 'reset');
       throw DomainException.notFound(noSuchAccount(audience));
     }
     // Neither of these counts as a miss against the lock: both are the
@@ -114,9 +114,12 @@ export class PasswordResetService {
     return { message: LINK_ON_ITS_WAY };
   }
 
-  /** Matches the sign-in throttle's shape: one count per audience per address. */
+  /**
+   * One count per audience per address. It needs no marker of its own: the
+   * throttle keeps reset counts under a prefix no sign-in identity can spell.
+   */
   private identityOf(email: string, persona: Persona): string {
-    return `forgot|${persona}|${email.toLowerCase()}`;
+    return `${persona}|${email.toLowerCase()}`;
   }
 
   /**

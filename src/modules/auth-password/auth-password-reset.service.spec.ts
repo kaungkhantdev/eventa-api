@@ -239,7 +239,21 @@ describe('PasswordResetService', () => {
       await expect(service.forgot('ghost@acme.co.th')).rejects.toBeDefined();
       expect(throttle.recordFailure).toHaveBeenCalledWith(
         expect.stringContaining('ghost@acme.co.th'),
+        'reset',
       );
+    });
+
+    /**
+     * On the reset form's own count, never sign-in's: otherwise failed sign-ins
+     * could lock somebody out of the one form that exists to let them back in.
+     */
+    it('checks and counts on the reset count, not the sign-in one', async () => {
+      repo.findByEmailPersona.mockResolvedValue(null);
+      await expect(service.forgot('ghost@acme.co.th')).rejects.toBeDefined();
+      const [checked, scope] = throttle.assertNotLocked.mock.calls[0];
+      const [counted, countScope] = throttle.recordFailure.mock.calls[0];
+      expect([scope, countScope]).toEqual(['reset', 'reset']);
+      expect(counted).toBe(checked);
     });
 
     it('keys the count per audience — two realms are two identities', async () => {

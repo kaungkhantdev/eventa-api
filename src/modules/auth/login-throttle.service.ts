@@ -7,11 +7,29 @@ import type { Env } from '../../config/env.validation';
 import { lockedMessage, type LockedAttempt } from './lock-message';
 
 /**
+ * Where each kind of attempt keeps its count.
+ *
+ * The forgotten-password form shares sign-in's limit and cool-off but never its
+ * keys (US-ACC-04). Identities are plain strings, and sign-in builds its own
+ * from a workspace slug the caller types, so any identity shape the reset form
+ * picked could be spelled by some slug — a workspace named "forgot" once made
+ * failed sign-ins lock the reset form. A prefix the service owns cannot be
+ * spelled from outside. Sign-in keeps `login`, so live locks survive a deploy.
+ */
+const KEY_PREFIX: Record<LockedAttempt, string> = {
+  'sign-in': 'login',
+  reset: 'reset',
+};
+
+/**
  * Brute-force protection for sign-in (US-ACC-12). Counts consecutive failures per
  * attempted identity (org + audience + email) in Redis and locks the identity for a
  * cool-off once the limit is hit — applied to non-existent accounts too, so the
  * response never reveals whether an account exists. Fail-open: if Redis is
  * unavailable, sign-in still works (availability over lockout).
+ *
+ * The forgotten-password form (US-ACC-04) counts its misses here too, on the
+ * same limit but in its own keys (see `KEY_PREFIX`).
  */
 @Injectable()
 export class LoginThrottleService {
@@ -43,7 +61,7 @@ export class LoginThrottleService {
   ): Promise<void> {
     let secondsLeft = -2;
     try {
-      secondsLeft = await this.redis.ttl(this.lockKey(identity));
+      secondsLeft = await this.redis.ttl(this.lockKey(identity, attempt));
     } catch (err) {
       this.logger.warn(
         { err },
@@ -57,15 +75,19 @@ export class LoginThrottleService {
   }
 
   /** Count a failed attempt; lock the identity once the limit is reached. */
-  async recordFailure(identity: string): Promise<void> {
+  async recordFailure(
+    identity: string,
+    attempt: LockedAttempt = 'sign-in',
+  ): Promise<void> {
+    const failKey = this.failKey(identity, attempt);
     try {
-      const fails = await this.redis.incr(this.failKey(identity));
+      const fails = await this.redis.incr(failKey);
       if (fails === 1) {
-        await this.redis.expire(this.failKey(identity), this.lockSeconds);
+        await this.redis.expire(failKey, this.lockSeconds);
       }
       if (fails >= this.maxAttempts) {
         await this.redis.set(
-          this.lockKey(identity),
+          this.lockKey(identity, attempt),
           '1',
           'EX',
           this.lockSeconds,
@@ -79,17 +101,20 @@ export class LoginThrottleService {
   /** Clear the counter + lock after a successful sign-in. */
   async recordSuccess(identity: string): Promise<void> {
     try {
-      await this.redis.del(this.failKey(identity), this.lockKey(identity));
+      await this.redis.del(
+        this.failKey(identity, 'sign-in'),
+        this.lockKey(identity, 'sign-in'),
+      );
     } catch (err) {
       this.logger.warn({ err }, 'login throttle could not clear counters');
     }
   }
 
-  private failKey(identity: string): string {
-    return `login:fail:${identity}`;
+  private failKey(identity: string, attempt: LockedAttempt): string {
+    return `${KEY_PREFIX[attempt]}:fail:${identity}`;
   }
 
-  private lockKey(identity: string): string {
-    return `login:lock:${identity}`;
+  private lockKey(identity: string, attempt: LockedAttempt): string {
+    return `${KEY_PREFIX[attempt]}:lock:${identity}`;
   }
 }
