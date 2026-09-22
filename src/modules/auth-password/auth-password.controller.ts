@@ -7,7 +7,9 @@ import { ApiData } from '../../common/http/api-data.decorator';
 import { MessageResponseDto } from '../../common/http/message-response.dto';
 import type { AuthContext } from '../auth/auth.types';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { CheckResetLinkDto } from './dto/check-reset-link.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetLinkResponseDto } from './dto/reset-link-response.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { PasswordChangeService } from './auth-password-change.service';
 import { PasswordResetService } from './auth-password-reset.service';
@@ -37,6 +39,21 @@ export class AuthPasswordController {
   @ApiData(MessageResponseDto)
   resetPassword(@Body() dto: ResetPasswordDto): Promise<MessageResponseDto> {
     return this.passwordReset.reset(dto.token, dto.newPassword);
+  }
+
+  /**
+   * Whether a reset link is still good, without spending it — the reset page
+   * asks on open (US-ACC-04). A dead link is a 422 with the reset's own words.
+   */
+  @Public()
+  @Post('auth/reset-password/check')
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('This reset link is good.')
+  @ApiData(ResetLinkResponseDto)
+  checkResetLink(
+    @Body() dto: CheckResetLinkDto,
+  ): Promise<ResetLinkResponseDto> {
+    return this.passwordReset.check(dto.token);
   }
 
   @Post('auth/change-password')
