@@ -39,7 +39,7 @@ export class MessageTemplateDto {
     enum: messageChannelEnum.enumValues,
     isArray: true,
     description:
-      'The channels this message actually goes out on. A channel is listed only once eventa-worker sends on it: today the registration confirmation is email and SMS, and every other message is email only. The organizer’s own wording applies to the email — a text is always in Eventa’s words.',
+      'The channels this message actually goes out on. A channel is listed only once eventa-worker sends on it: today the registration confirmation is email and SMS, and every other message is email only. The organizer’s own wording applies to the email — a text goes in Eventa’s own words today.',
   })
   channels!: MessageChannel[];
 

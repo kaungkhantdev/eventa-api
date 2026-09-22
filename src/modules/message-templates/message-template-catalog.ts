@@ -90,11 +90,15 @@ export const POST_EVENT_THANKYOU_SLUG = 'post-event-thankyou';
  *
  * Two things follow that are easy to get wrong:
  *
- * - **The organizer's wording is email-only.** `message_templates` stores
- *   `email_subject_*`/`email_body_*` and nothing else, so a text always goes
- *   in Eventa's own words. The confirmation's description says so, because an
- *   organizer who rewrites it and then reads their attendee's text deserves to
- *   have been told.
+ * - **The organizer's wording reaches the email only, for now.** The table has
+ *   `sms_body_en`/`sms_body_th` beside `email_subject_*`/`email_body_*` — they
+ *   have existed since migration 0028 — but no endpoint writes them and
+ *   eventa-worker does not read them, so a text goes in Eventa's own words
+ *   today. US-MSG-02 asks for an SMS editor with a segment counter; that is a
+ *   wiring job on columns already there, NOT a migration. The confirmation's
+ *   description states today's behaviour, because an organizer who rewrites
+ *   the message and then reads their attendee's text deserves to have been
+ *   told.
  * - **eventa-worker reads `message_templates.channels`, not this list**, and
  *   that column is a COPY of these channels taken when a workspace first
  *   touched the message. Rows written before the confirmation gained SMS hold
@@ -109,7 +113,8 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     slug: 'registration-confirmation',
     title: 'Registration confirmation',
     // The only message that is texted. The SMS carries the reference and the
-    // ticket link in Eventa's own wording — the tags below reword the EMAIL.
+    // ticket link in Eventa's own wording for now — the tags below reword the
+    // EMAIL.
     description:
       'Sent the moment a registration is confirmed — paid for, or approved on an event that requires approval — carrying the attendee’s ticket and order summary. Attendees who gave a Thai mobile number also get a short text with their reference and ticket link, in Eventa’s wording.',
     channels: ['email', 'sms'],
