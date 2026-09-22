@@ -1,6 +1,8 @@
+import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
+  check,
   index,
   pgTable,
   text,
@@ -10,6 +12,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { createdAt, idPk, updatedAt } from './_columns';
 import {
+  announcementStatusEnum,
   apiKeyStatusEnum,
   deliveryStatusEnum,
   messageChannelEnum,
@@ -161,9 +164,16 @@ export const messageTemplates = pgTable(
  * told they were writing to, not a delivery receipt. Proving delivery is
  * US-MSG-06 and needs a per-recipient table this one deliberately is not.
  *
- * There is no schedule column and no audience column. Nothing in the product
- * can send later, and the broadcast path takes one event's confirmed attendees
- * — a column for either would be a promise the send path cannot keep.
+ * A SCHEDULED one (US-MSG-04/05) is the exception to "row and send together":
+ * it is written with no outbox event, no `sentAt` and no count, and waits.
+ * eventa-worker's sweep claims it when `scheduledFor` arrives and, in one
+ * transaction, marks it `sent`, counts the audience as it is THEN, and writes
+ * the same outbox event a send-now writes. Until then the organizer can cancel
+ * it or move it; afterwards neither. The `ck_announcements_state` CHECK keeps
+ * each status and its columns in agreement, whichever repo writes the row.
+ *
+ * There is no audience column: the broadcast path takes one event's confirmed
+ * attendees, and a column offering more would be a promise it cannot keep.
  */
 export const announcements = pgTable(
   'announcements',
@@ -176,17 +186,39 @@ export const announcements = pgTable(
     eventId: uuid().notNull(),
     subject: text().notNull(),
     body: text().notNull(),
-    /** How many attendees it was queued for — see the note above. */
-    recipientCount: bigint({ mode: 'number' }).notNull(),
-    /** Who sent it. Kept when they leave: the send still happened. */
+    /**
+     * How many attendees it was queued for — see the note above. Null until it
+     * is sent: nobody has counted a scheduled one's audience yet, and 0 would
+     * claim they had and found nobody.
+     */
+    recipientCount: bigint({ mode: 'number' }),
+    /** Who sent (or scheduled) it. Kept when they leave: the send still happened. */
     sentByUserId: uuid().references(() => users.id, { onDelete: 'set null' }),
-    sentAt: timestamp({ withTimezone: true }).notNull(),
+    status: announcementStatusEnum().notNull().default('sent'),
+    /** When a scheduled one is to go, UTC. Kept once it has, or was cancelled. */
+    scheduledFor: timestamp({ withTimezone: true }),
+    /** When it actually went. Null while scheduled, and forever if cancelled. */
+    sentAt: timestamp({ withTimezone: true }),
+    cancelledAt: timestamp({ withTimezone: true }),
+    /** Null on a cancelled row means the system dropped it (its event was deleted). */
+    cancelledByUserId: uuid().references(() => users.id, {
+      onDelete: 'set null',
+    }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     index('ix_announcements_org_sent').on(t.organizationId, t.sentAt),
     index('ix_announcements_event').on(t.organizationId, t.eventId),
+    index('ix_announcements_due')
+      .on(t.scheduledFor)
+      .where(sql`status = 'scheduled'`),
+    check(
+      'ck_announcements_state',
+      sql`(${t.status} = 'sent' AND ${t.sentAt} IS NOT NULL AND ${t.recipientCount} IS NOT NULL)
+        OR (${t.status} = 'scheduled' AND ${t.scheduledFor} IS NOT NULL AND ${t.sentAt} IS NULL)
+        OR (${t.status} = 'cancelled' AND ${t.cancelledAt} IS NOT NULL AND ${t.sentAt} IS NULL)`,
+    ),
   ],
 );
 

@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { AnnouncementsService } from '../announcements/announcements.service';
+import {
+  AnnouncementsService,
+  type ScheduleAnnouncement,
+} from '../announcements/announcements.service';
 import { EventsService } from '../events/events.service';
 import type { EventActor } from '../events/events.types';
 import { EventStatsPort } from '../events/ports/event-stats.port';
@@ -16,6 +19,10 @@ import type { EmailAttendeesDto } from './dto/email-attendees.dto';
  * The record is what makes this answerable afterwards (US-MSG-04). Before it
  * existed a broadcast reached hundreds of people and left nothing behind but an
  * outbox row that the relay would consume.
+ *
+ * With a `sendAt` the same broadcast is scheduled instead (US-MSG-04/05): the
+ * announcements module records it and queues nothing, and eventa-worker sends
+ * it when its time comes.
  */
 @Injectable()
 export class AttendeeBroadcastService {
@@ -35,13 +42,41 @@ export class AttendeeBroadcastService {
       actor.organizationId,
       eventId,
     );
-    await this.announcements.send(actor.organizationId, {
+    const announcement = {
       eventId,
       subject: input.subject,
       body: input.message,
-      recipientCount: recipients,
       sentByUserId: actor.userId,
+    };
+    if (input.sendAt) {
+      return this.scheduleFor(
+        actor.organizationId,
+        { ...announcement, sendAt: new Date(input.sendAt) },
+        recipients,
+      );
+    }
+    await this.announcements.send(actor.organizationId, {
+      ...announcement,
+      recipientCount: recipients,
     });
-    return { eventId, recipients, queued: true };
+    return { eventId, recipients, queued: true, scheduledFor: null };
+  }
+
+  /**
+   * The same broadcast, to go later (US-MSG-04). Nothing is queued now; the
+   * count answered is today's, and the worker counts again when it sends.
+   */
+  private async scheduleFor(
+    organizationId: number,
+    announcement: ScheduleAnnouncement,
+    recipients: number,
+  ): Promise<BroadcastResultDto> {
+    await this.announcements.schedule(organizationId, announcement);
+    return {
+      eventId: announcement.eventId,
+      recipients,
+      queued: false,
+      scheduledFor: announcement.sendAt.toISOString(),
+    };
   }
 }

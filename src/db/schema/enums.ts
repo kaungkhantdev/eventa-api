@@ -86,6 +86,20 @@ export const messageChannelEnum = pgEnum('message_channel', ['email', 'sms']);
 export const deliveryStatusEnum = pgEnum('delivery_status', ['sent', 'failed']);
 
 /**
+ * Where a broadcast is in its life (US-MSG-04/05).
+ *
+ * `scheduled` waits for its time and is the only state an organizer can still
+ * change; eventa-worker moves it to `sent` in the same transaction as the
+ * outbox row that delivers it. `cancelled` never goes, and stays listed: the
+ * organizer changing their mind is part of the history too.
+ */
+export const announcementStatusEnum = pgEnum('announcement_status', [
+  'scheduled',
+  'sent',
+  'cancelled',
+]);
+
+/**
  * Where a survey is in its life (US-MSG-09).
  *
  * `draft` collects nothing — it exists so a survey can be written before it is
