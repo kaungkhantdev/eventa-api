@@ -52,6 +52,7 @@ pnpm start:dev         # watch dev server (nest start --watch); listens on $PORT
 pnpm build             # nest build → dist/  (nest-cli deleteOutDir wipes dist/ first)
 pnpm start:prod        # node dist/main
 pnpm lint              # eslint --fix (type-aware; also applies prettier)
+pnpm typecheck         # tsc --noEmit over src + test (+ drizzle.config.ts) — the only type check the specs get
 pnpm format            # prettier --write
 pnpm test              # jest unit tests
 pnpm test:e2e          # jest e2e tests (separate config)
@@ -89,7 +90,10 @@ test in the same change.
 
 - **Two separate jest configs.** Unit config is inline in `package.json` (`rootDir: src`, matches
   `*.spec.ts`) — put fast tests beside the code. E2e is `test/jest-e2e.json` (`rootDir: .`, matches
-  `*.e2e-spec.ts`) — put full-stack flows in `test/`.
+  `*.e2e-spec.ts`) — put full-stack flows in `test/`. **Neither one type-checks:** `tsconfig.json` sets
+  `isolatedModules: true`, which puts ts-jest in transpile-only mode, and `tsconfig.build.json` excludes
+  the specs — so a spec can go green while it no longer compiles. `pnpm typecheck` must be green before
+  a commit.
 - **TypeScript is full `strict`** (`tsconfig.json` → `"strict": true`). eslint's `no-explicit-any` is still
   **off** (so an explicit `any` won't error), but the type-aware `no-unsafe-*` rules do — prefer explicit
   types and avoid `any`/`@ts-ignore`/nested ternaries per the engineering standard.

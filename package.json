@@ -18,6 +18,7 @@
     "db:studio": "drizzle-kit studio",
     "seed": "tsx --env-file=.env src/db/seed.ts",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
