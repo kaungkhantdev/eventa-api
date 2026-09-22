@@ -10,9 +10,19 @@ import {
   users,
 } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
-import type { AnsweredQuestion, SubmittedAnswer } from './response-rules';
+import { POST_EVENT_THANKYOU_SLUG } from '../message-templates/message-template-catalog';
+import type {
+  AnsweredQuestion,
+  Reach,
+  SubmittedAnswer,
+} from './response-rules';
 
 const CONFIRMED = 'confirmed';
+/** A delivery the transport accepted. A 'failed' one asked nobody anything. */
+const SENT = 'sent';
+
+/** A type alias, not an interface: `execute<T>` wants a Record. */
+type ReachRow = { asked: number; answered: number };
 
 export interface LiveSurvey {
   id: number;
@@ -162,6 +172,63 @@ export class SurveyResponsesRepository {
           ),
         );
       return rows.map((row) => Number(row.rating));
+    });
+  }
+
+  /**
+   * Who the post-event thank-you reached, and how many of THEM answered
+   * (US-MSG-08) — for one event, or pooled across the workspace.
+   *
+   * The unit is one person per event, matched on (event, address): an answer
+   * about one event never completes another, and somebody who answered without
+   * being emailed is not in `answered` at all, so it can never exceed `asked`.
+   *
+   * Across the workspace the pairs are simply pooled, so each event weighs by
+   * how many it asked. US-MSG-08's note weights portfolio figures by
+   * responses; that suits an average rating, not this: an event where everyone
+   * was asked and nobody answered is exactly what completion measures, and
+   * weighting by responses would drop it and flatter the rate.
+   *
+   * - DISTINCT, because a send that failed is retried on the next run, leaving a
+   *   'failed' row and then a 'sent' one for the same person.
+   * - lower() on both sides, because `recipient_email` is plain text holding
+   *   the BUYER's spelling of the address while `users.email` is citext. Without
+   *   it "Anan@…" asked and "anan@…" answering would never meet.
+   *
+   * Literal SQL with explicit aliases: Drizzle drops table qualifiers from
+   * interpolated columns inside a CTE, so only values are interpolated here.
+   */
+  reachFor(organizationId: number, eventId?: string): Promise<Reach> {
+    const deliveryEvent = eventId ? sql`AND d.event_id = ${eventId}` : sql``;
+    const responseEvent = eventId ? sql`AND r.event_id = ${eventId}` : sql``;
+    return withTenant(this.db, organizationId, async (tx) => {
+      const result = await tx.execute<ReachRow>(sql`
+        WITH asked AS (
+          SELECT DISTINCT d.event_id, lower(d.recipient_email) AS email
+          FROM message_deliveries d
+          WHERE d.organization_id = ${organizationId}
+            AND d.kind = ${POST_EVENT_THANKYOU_SLUG}
+            AND d.status = ${SENT}
+            AND d.event_id IS NOT NULL
+            ${deliveryEvent}
+        ),
+        answered AS (
+          SELECT DISTINCT r.event_id, lower(u.email) AS email
+          FROM survey_responses r
+          JOIN users u ON u.id = r.user_id
+          WHERE r.organization_id = ${organizationId}
+            ${responseEvent}
+        )
+        SELECT count(*)::int AS asked, count(ans.email)::int AS answered
+        FROM asked a
+        LEFT JOIN answered ans
+          ON ans.event_id = a.event_id AND ans.email = a.email
+      `);
+      const row = result.rows[0];
+      return {
+        asked: Number(row?.asked ?? 0),
+        answered: Number(row?.answered ?? 0),
+      };
     });
   }
 

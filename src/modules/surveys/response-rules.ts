@@ -105,3 +105,43 @@ export function summarise(ratings: number[]): RatingSummary {
     distribution,
   };
 }
+
+const PERCENT = 100;
+
+/** Who the post-event thank-you reached, and how many of THEM answered. */
+export interface Reach {
+  asked: number;
+  answered: number;
+}
+
+export interface Completion {
+  asked: number;
+  /** Whole percent, null when nobody was asked — never 0. */
+  completionRate: number | null;
+}
+
+export type FeedbackSummary = RatingSummary & Completion;
+
+/**
+ * How many of the people asked answered (US-MSG-08).
+ *
+ * `answered` counts only respondents who were ASKED — the overlap of "the
+ * thank-you reached them" and "they answered", worked out where the rows are.
+ * It is a subset of `asked` by construction, so the rate cannot pass 100% and
+ * nothing is capped. A cap was the alternative and it lies: ten asked, two of
+ * them answering and nine more answering from the portal unprompted would read
+ * 100% while eight in ten of those asked ignored it. Those nine still count,
+ * under responses; they just do not complete anything they were not asked.
+ *
+ * Nobody asked is null, not 0%: the thank-you was switched off, or never went,
+ * and that is a different fact from everybody ignoring it.
+ */
+export function completionOf(reach: Reach): Completion {
+  return {
+    asked: reach.asked,
+    completionRate:
+      reach.asked === 0
+        ? null
+        : Math.round((reach.answered / reach.asked) * PERCENT),
+  };
+}

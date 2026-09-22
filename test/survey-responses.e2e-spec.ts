@@ -26,11 +26,19 @@ const ORG = { slug: 'rsp-e2e', name: 'Responses E2E' };
 const ADMIN = 'admin@rsp-e2e.test';
 const WENT = 'went@rsp-e2e.test';
 const STAYED_HOME = 'absent@rsp-e2e.test';
+/** Emailed the thank-you, but has no account — nobody signs in as them. */
+const GUEST = 'guest@rsp-e2e.test';
+const THANK_YOU = 'post-event-thankyou';
 
 const PERM_GROUP: Record<string, string> = { evCreate: 'Events' };
 
 interface Success<T> {
   data: T;
+}
+interface Summary {
+  responses: number;
+  asked: number;
+  completionRate: number | null;
 }
 interface MySurvey {
   surveyId: string | null;
@@ -45,6 +53,7 @@ describe('Survey responses (e2e — US-MSG-08/10)', () => {
   let pool: Pool;
   let orgId: number;
   let eventId: string;
+  let meetupId: string;
   let adminJwt: string;
   let wentJwt: string;
   let absentJwt: string;
@@ -58,6 +67,7 @@ describe('Survey responses (e2e — US-MSG-08/10)', () => {
       { email: ADMIN, roleName: 'Admin', grants: ['evCreate'] },
     ]);
     eventId = await seedEvent(pool, orgId, 'rsp-summit', 'Tech Summit 2026');
+    meetupId = await seedEvent(pool, orgId, 'rsp-meetup', 'Meetup');
     // Attendees belong to the PLATFORM org, not the organizer's workspace.
     await seedAttendee(pool, WENT);
     await seedAttendee(pool, STAYED_HOME);
@@ -304,6 +314,125 @@ describe('Survey responses (e2e — US-MSG-08/10)', () => {
     });
   });
 
+  /**
+   * Completion = of the people the post-event thank-you reached, the share who
+   * answered. The thank-you is what carries the survey link, so its delivery
+   * log is the only honest record of who was ASKED.
+   */
+  describe('completion — of those asked, who answered', () => {
+    afterEach(async () => {
+      await pool.query(
+        `DELETE FROM message_deliveries WHERE organization_id = $1`,
+        [orgId],
+      );
+    });
+
+    const summaryOf = async (event?: string): Promise<Summary> => {
+      const res = await request(server)
+        .get('/api/v1/surveys/summary')
+        .query(event ? { eventId: event } : {})
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(200);
+      return (res.body as Success<Summary>).data;
+    };
+
+    const answer = async () => {
+      await makeLive();
+      await submit(wentJwt, await good(wentJwt)).expect(200);
+    };
+
+    it('is null, not 0 or 100, when somebody answered but nobody was asked', async () => {
+      await answer();
+      const summary = await summaryOf(eventId);
+      expect(summary).toMatchObject({ asked: 0, completionRate: null });
+      // The answer still counts where answers are counted.
+      expect(summary.responses).toBe(1);
+    });
+
+    it('counts only respondents who were asked, rather than capping at 100%', async () => {
+      // WENT answered without being emailed; GUEST was emailed and did not
+      // answer. A cap would call that 100%. It is nought of the one asked.
+      await seedAsked(pool, orgId, eventId, GUEST);
+      await answer();
+      expect(await summaryOf(eventId)).toMatchObject({
+        asked: 1,
+        completionRate: 0,
+      });
+    });
+
+    it('is the share of those asked who answered', async () => {
+      await seedAsked(pool, orgId, eventId, WENT);
+      await seedAsked(pool, orgId, eventId, GUEST);
+      await answer();
+      expect(await summaryOf(eventId)).toMatchObject({
+        asked: 2,
+        completionRate: 50,
+      });
+    });
+
+    it('matches the address whatever its case', async () => {
+      // The worker logs the buyer's spelling of the address; the respondent is
+      // known by their account's. Same person.
+      await seedAsked(pool, orgId, eventId, 'Went@RSP-E2E.test');
+      await answer();
+      expect(await summaryOf(eventId)).toMatchObject({
+        asked: 1,
+        completionRate: 100,
+      });
+    });
+
+    it('counts a failed send as asking nobody, and a retried one once', async () => {
+      await seedAsked(pool, orgId, eventId, GUEST, { status: 'failed' });
+      expect(await summaryOf(eventId)).toMatchObject({
+        asked: 0,
+        completionRate: null,
+      });
+
+      // Failed on one run, delivered on the next: one person asked.
+      await seedAsked(pool, orgId, eventId, WENT, { status: 'failed' });
+      await seedAsked(pool, orgId, eventId, WENT);
+      await answer();
+      expect(await summaryOf(eventId)).toMatchObject({
+        asked: 1,
+        completionRate: 100,
+      });
+    });
+
+    it('is asked only by the thank-you', async () => {
+      // A reminder carries no survey link, so it asked nobody anything.
+      await seedAsked(pool, orgId, eventId, GUEST, { kind: 'event-reminder' });
+      expect(await summaryOf(eventId)).toMatchObject({ asked: 0 });
+    });
+
+    it('does not let an answer about one event complete another', async () => {
+      // Asked about the meetup, answered about the summit.
+      await seedAsked(pool, orgId, meetupId, WENT);
+      await answer();
+      expect(await summaryOf(meetupId)).toMatchObject({
+        asked: 1,
+        completionRate: 0,
+      });
+      expect(await summaryOf()).toMatchObject({ asked: 1, completionRate: 0 });
+    });
+
+    it('pools every event by how many were asked, across the workspace', async () => {
+      // Summit: two asked, one answered. Meetup: two asked, nobody answered.
+      // Pooled, that is 1 of 4 — weighting by responses would drop the meetup
+      // and report 50%.
+      await seedAsked(pool, orgId, eventId, WENT);
+      await seedAsked(pool, orgId, eventId, GUEST);
+      await seedAsked(pool, orgId, meetupId, 'one@rsp-e2e.test');
+      await seedAsked(pool, orgId, meetupId, 'two@rsp-e2e.test');
+      await answer();
+
+      expect(await summaryOf()).toMatchObject({ asked: 4, completionRate: 25 });
+      expect(await summaryOf(meetupId)).toMatchObject({
+        asked: 2,
+        completionRate: 0,
+      });
+    });
+  });
+
   async function seedOrder(
     pool: Pool,
     org: number,
@@ -320,6 +449,25 @@ describe('Survey responses (e2e — US-MSG-08/10)', () => {
     );
   }
 });
+
+/** One logged send, as eventa-worker's delivery log records it. */
+async function seedAsked(
+  pool: Pool,
+  org: number,
+  event: string,
+  email: string,
+  {
+    status = 'sent',
+    kind = THANK_YOU,
+  }: { status?: string; kind?: string } = {},
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO message_deliveries (organization_id, event_id, kind, recipient_email,
+                                     recipient_name, status, sent_at)
+     VALUES ($1, $2, $3, $4, 'Anong Pattana', $5, now())`,
+    [org, event, kind, email, status],
+  );
+}
 
 async function seedAttendee(pool: Pool, email: string): Promise<void> {
   const passwordHash = await hash(PASSWORD);
@@ -398,6 +546,7 @@ async function cleanup(pool: Pool): Promise<void> {
   for (const table of [
     'audit_events',
     'outbox_events',
+    'message_deliveries',
     'survey_answers',
     'survey_responses',
     'survey_questions',

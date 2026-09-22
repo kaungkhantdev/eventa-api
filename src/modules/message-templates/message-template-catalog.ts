@@ -77,6 +77,14 @@ export interface MessageTemplateDefinition {
  * Email only, throughout. There is no SMS provider in the product yet, so an
  * SMS badge would promise a channel nothing can deliver on.
  */
+/**
+ * The thank-you that carries the survey link. Named because feedback reads the
+ * delivery log by it to know who was asked (US-MSG-08): it must equal
+ * eventa-worker's `POST_EVENT_THANKYOU_SLUG`, the kind the worker logs, and a
+ * rename on either side alone would quietly report that nobody was asked.
+ */
+export const POST_EVENT_THANKYOU_SLUG = 'post-event-thankyou';
+
 export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
   {
     slug: 'registration-confirmation',
@@ -144,7 +152,7 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     tags: ['{{first_name}}', '{{event_name}}', '{{ticket_type}}'],
   },
   {
-    slug: 'post-event-thankyou',
+    slug: POST_EVENT_THANKYOU_SLUG,
     title: 'Post-event thank-you',
     // Only when there is a LIVE survey: a link to "no survey to answer" is a
     // worse message than none, so an event without one is simply not thanked.

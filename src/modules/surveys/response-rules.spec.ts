@@ -1,5 +1,5 @@
 import { DomainException } from '../../common/errors/domain.exception';
-import { assertAnswers, summarise } from './response-rules';
+import { assertAnswers, completionOf, summarise } from './response-rules';
 
 const questions = [
   { id: 1, type: 'rating' as const, prompt: 'How was it?', options: [] },
@@ -81,5 +81,29 @@ describe('what a pile of responses adds up to (US-MSG-08)', () => {
     const summary = summarise([]);
     expect(summary.responses).toBe(0);
     expect(summary.average).toBeNull();
+  });
+});
+
+describe('how many of those asked answered (US-MSG-08)', () => {
+  it('has no completion rate when nobody was asked', () => {
+    // Not 0%. Nobody failing to answer and nobody being asked are different
+    // facts: the thank-you was switched off, or never went.
+    expect(completionOf({ asked: 0, answered: 0 })).toEqual({
+      asked: 0,
+      completionRate: null,
+    });
+  });
+
+  it('is a whole-number percentage of those asked', () => {
+    expect(completionOf({ asked: 20, answered: 9 }).completionRate).toBe(45);
+    expect(completionOf({ asked: 3, answered: 1 }).completionRate).toBe(33);
+  });
+
+  it('reports nought of those asked as a real 0%', () => {
+    // Everybody asked and nobody answered is exactly what the figure is for.
+    expect(completionOf({ asked: 10, answered: 0 })).toEqual({
+      asked: 10,
+      completionRate: 0,
+    });
   });
 });

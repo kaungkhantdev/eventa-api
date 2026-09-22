@@ -5,8 +5,9 @@ import type { AuthContext } from '../auth/auth.types';
 import { UsersRepository } from '../users/users.repository';
 import {
   assertAnswers,
+  completionOf,
   summarise,
-  type RatingSummary,
+  type FeedbackSummary,
   type SubmittedAnswer,
 } from './response-rules';
 import {
@@ -71,8 +72,17 @@ export class SurveyResponsesService {
     await this.repo.submit(survey, auth.userId, answers, this.clock.now());
   }
 
-  async summary(auth: AuthContext, eventId?: string): Promise<RatingSummary> {
-    return summarise(await this.repo.ratingsFor(auth.organizationId, eventId));
+  /**
+   * The ratings, and how many of those asked answered. The post-event
+   * thank-you is what asks — it carries the survey link — so the people it
+   * reached are the denominator.
+   */
+  async summary(auth: AuthContext, eventId?: string): Promise<FeedbackSummary> {
+    const [ratings, reach] = await Promise.all([
+      this.repo.ratingsFor(auth.organizationId, eventId),
+      this.repo.reachFor(auth.organizationId, eventId),
+    ]);
+    return { ...summarise(ratings), ...completionOf(reach) };
   }
 
   countsByEvent(

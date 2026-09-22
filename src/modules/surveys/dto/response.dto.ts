@@ -91,6 +91,22 @@ export class FeedbackSummaryDto {
     example: { 1: 0, 2: 1, 3: 4, 4: 12, 5: 25 },
   })
   distribution!: Record<number, number>;
+
+  @ApiProperty({
+    example: 120,
+    description:
+      'People the post-event thank-you (with the survey link) reached, counted once per event. A failed send asked nobody.',
+  })
+  asked!: number;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 38,
+    description:
+      'Whole percent of the people ASKED who answered. Answers from people who were never emailed count in `responses` but not here, so this never exceeds 100. Across the workspace it pools every event by how many were asked. Null when nobody was asked — never 0.',
+  })
+  completionRate!: number | null;
 }
 
 /** One person's response (US-MSG-10). */
