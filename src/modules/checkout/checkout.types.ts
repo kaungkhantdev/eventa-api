@@ -25,6 +25,8 @@ export interface CheckoutEvent {
   coverImage: string | null;
   organizerName: string;
   seatingMode: SeatingMode;
+  /** The organizer's switch for a sold-out ticket's waitlist (US-REG-04). */
+  waitlistEnabled: boolean;
 }
 
 /** A sellable tier as the checkout needs it — resolved through `TicketCatalogPort`. */

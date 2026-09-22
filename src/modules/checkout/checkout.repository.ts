@@ -9,6 +9,7 @@ import {
   isNull,
   max,
   ne,
+  sql,
 } from 'drizzle-orm';
 import { DomainException } from '../../common/errors/domain.exception';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
@@ -69,6 +70,69 @@ export interface PlaceOrderInput {
   buildEvent: (order: OrderRow, issued: TicketRow[]) => OutboxEventInput | null;
   now: Date;
 }
+
+/** A waitlist entry to write: priced, but holding nothing (US-REG-04). */
+export interface JoinWaitlistInput {
+  organizationId: number;
+  eventId: string;
+  reference: string;
+  idempotencyKey: string;
+  buyer: { name: string; email: string; phone?: string };
+  ticketTypeId: string;
+  quantity: number;
+  unitPriceSatang: number;
+  totals: OrderTotals;
+  now: Date;
+}
+
+/** The entry, and where it stands; 1 is next in line. */
+export interface JoinedWaitlist {
+  order: OrderRow;
+  position: number;
+}
+
+/** The fields an order row is written from, whichever path writes it. */
+type OrderInsert = Pick<
+  PlaceOrderInput,
+  | 'organizationId'
+  | 'reference'
+  | 'idempotencyKey'
+  | 'eventId'
+  | 'buyer'
+  | 'quantity'
+  | 'totals'
+> &
+  Partial<Pick<PlaceOrderInput, 'discountCodeId' | 'createdBy'>>;
+
+/** A waitlist entry with the one line it is waiting for. */
+export interface WaitlistEntry {
+  order: OrderRow;
+  ticketTypeId: string;
+  ticketTypeName: string;
+  quantity: number;
+}
+
+/** Recording an offer whose seats are already held (US-REG-04). */
+export interface MarkOfferedInput {
+  organizationId: number;
+  orderId: string;
+  offeredBy: string;
+  offerExpiresAt: Date;
+  now: Date;
+  buildEvent: (order: OrderRow) => OutboxEventInput;
+}
+
+/** Where a new order starts out. */
+interface OrderState {
+  status: OrderRow['status'];
+  paymentStatus: OrderRow['paymentStatus'];
+}
+
+/** A registration nobody has been offered a seat for yet. */
+const WAITLISTED: OrderState = {
+  status: 'waitlisted',
+  paymentStatus: 'pending',
+};
 
 /** What was placed — `replayed` when an identical request already did this. */
 export interface PlacedOrder {
@@ -250,7 +314,10 @@ export class CheckoutRepository {
 
       await this.assertHoldsStillActive(tx, input);
       const attendeeId = await this.upsertAttendee(tx, input);
-      const order = await this.insertOrder(tx, input, attendeeId);
+      const order = await this.insertOrder(tx, input, attendeeId, {
+        status: input.issueTickets ? 'confirmed' : 'pending',
+        paymentStatus: input.issueTickets ? 'paid' : 'pending',
+      });
       const item = await this.insertOrderItem(tx, input, order.id);
       const issued = input.issueTickets
         ? await this.issueTickets(tx, input, order, item.id, attendeeId)
@@ -265,6 +332,101 @@ export class CheckoutRepository {
       // Sorted the same way the replay reads them, so confirming twice returns
       // an identical response rather than the same tickets in another order.
       return { order, tickets: byId(issued), replayed: false };
+    });
+  }
+
+  /**
+   * Put a buyer in line for a sold-out ticket (US-REG-04): the entry and its
+   * line item are written together or not at all.
+   *
+   * Two things make it safe to repeat. A repeated idempotency key returns what
+   * that key already made. And somebody already waiting for this ticket gets
+   * their existing place back rather than a second one behind it — two entries
+   * would mean two offers to one person for seats somebody else was owed.
+   */
+  async joinWaitlist(input: JoinWaitlistInput): Promise<JoinedWaitlist> {
+    return withTenant(this.db, input.organizationId, async (tx) => {
+      const existing =
+        (
+          await this.findByIdempotencyKey(
+            tx,
+            input.organizationId,
+            input.idempotencyKey,
+          )
+        )?.order ?? (await this.alreadyWaiting(tx, input));
+      const order = existing ?? (await this.insertWaitlistEntry(tx, input));
+      const ahead = await this.waitlistAhead(
+        tx,
+        input.organizationId,
+        order.id,
+      );
+      return { order, position: ahead + 1 };
+    });
+  }
+
+  /** A registration and the ticket it waits for, or null if not this workspace's. */
+  async waitlistEntry(
+    organizationId: number,
+    orderId: string,
+  ): Promise<WaitlistEntry | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({
+          order: orders,
+          ticketTypeId: orderItems.ticketTypeId,
+          ticketTypeName: ticketTypes.name,
+          quantity: orderItems.quantity,
+        })
+        .from(orders)
+        .innerJoin(orderItems, eq(orderItems.orderId, orders.id))
+        .innerJoin(ticketTypes, eq(ticketTypes.id, orderItems.ticketTypeId))
+        .where(
+          and(
+            eq(orders.id, orderId),
+            eq(orders.organizationId, organizationId),
+          ),
+        )
+        .limit(1);
+      return row ?? null;
+    });
+  }
+
+  /**
+   * Turn a waitlist entry into an offer (US-REG-04), under the order's row
+   * lock: `pending` — so paying is the ordinary checkout payment — with who
+   * offered it, until when, and how many were ahead in line, and the offer
+   * email queued in the same transaction.
+   *
+   * The seats are held BEFORE this runs, by the seat-hold engine; this only
+   * records the offer. Somebody else deciding first is a conflict, and the
+   * caller gives the hold back.
+   */
+  async markOffered(input: MarkOfferedInput): Promise<OrderRow> {
+    return withTenant(this.db, input.organizationId, async (tx) => {
+      const order = await this.lockOrder(tx, input);
+      if (order.status !== WAITLISTED.status) {
+        throw DomainException.conflict(DECIDED_ELSEWHERE);
+      }
+      const skipped = await this.waitlistAhead(
+        tx,
+        input.organizationId,
+        order.id,
+      );
+      const [offered] = await tx
+        .update(orders)
+        .set({
+          status: 'pending',
+          offeredAt: input.now,
+          offeredBy: input.offeredBy,
+          offerExpiresAt: input.offerExpiresAt,
+          offerSkipped: skipped,
+          updatedAt: input.now,
+          version: order.version + 1,
+        })
+        .where(eq(orders.id, order.id))
+        .returning();
+      await this.outbox.enqueueIn(tx, input.buildEvent(offered));
+      return offered;
     });
   }
 
@@ -886,10 +1048,72 @@ export class CheckoutRepository {
     );
   }
 
+  /** This buyer's entry for this ticket, if they are already in line. */
+  private async alreadyWaiting(
+    tx: Tx,
+    input: JoinWaitlistInput,
+  ): Promise<OrderRow | null> {
+    const [row] = await tx
+      .select({ order: orders })
+      .from(orders)
+      .innerJoin(orderItems, eq(orderItems.orderId, orders.id))
+      .where(
+        and(
+          eq(orders.organizationId, input.organizationId),
+          eq(orders.eventId, input.eventId),
+          eq(orders.buyerEmail, input.buyer.email),
+          eq(orders.status, WAITLISTED.status),
+          eq(orderItems.ticketTypeId, input.ticketTypeId),
+        ),
+      )
+      .limit(1);
+    return row?.order ?? null;
+  }
+
+  private async insertWaitlistEntry(
+    tx: Tx,
+    input: JoinWaitlistInput,
+  ): Promise<OrderRow> {
+    const attendeeId = await this.upsertAttendee(tx, input);
+    const order = await this.insertOrder(tx, input, attendeeId, WAITLISTED);
+    await this.insertOrderItem(tx, input, order.id);
+    return order;
+  }
+
+  /**
+   * How many are ahead of this registration in line for the same ticket:
+   * first come, first served by when they joined, with the id breaking a tie
+   * so the order is total and two people can never both be "next".
+   *
+   * The subqueries are literal SQL with their own aliases — Drizzle drops the
+   * table qualifier from an interpolated column inside a subquery, and an
+   * unqualified `id` there would silently compare the outer row to itself.
+   */
+  private async waitlistAhead(
+    tx: Tx,
+    organizationId: number,
+    orderId: string,
+  ): Promise<number> {
+    const [row] = await tx
+      .select({ ahead: sql<number>`count(*)::int` })
+      .from(orders)
+      .innerJoin(orderItems, eq(orderItems.orderId, orders.id))
+      .where(
+        and(
+          eq(orders.organizationId, organizationId),
+          eq(orders.status, WAITLISTED.status),
+          ne(orders.id, orderId),
+          sql`${orderItems.ticketTypeId} = (SELECT mi.ticket_type_id FROM order_items mi WHERE mi.order_id = ${orderId} LIMIT 1)`,
+          sql`(${orders.registeredAt}, ${orders.id}) < (SELECT me.registered_at, me.id FROM orders me WHERE me.id = ${orderId})`,
+        ),
+      );
+    return row.ahead;
+  }
+
   /** One CRM row per person per workspace; a repeat buyer updates, never duplicates. */
   private async upsertAttendee(
     tx: Tx,
-    input: PlaceOrderInput,
+    input: Pick<PlaceOrderInput, 'organizationId' | 'buyer' | 'now'>,
   ): Promise<number> {
     const [row] = await tx
       .insert(attendees)
@@ -909,8 +1133,9 @@ export class CheckoutRepository {
 
   private async insertOrder(
     tx: Tx,
-    input: PlaceOrderInput,
+    input: OrderInsert,
     attendeeId: number,
+    state: OrderState,
   ): Promise<OrderRow> {
     const [row] = await tx
       .insert(orders)
@@ -923,11 +1148,11 @@ export class CheckoutRepository {
         buyerName: input.buyer.name,
         buyerEmail: input.buyer.email,
         buyerPhone: input.buyer.phone ?? null,
-        status: input.issueTickets ? 'confirmed' : 'pending',
-        paymentStatus: input.issueTickets ? 'paid' : 'pending',
+        status: state.status,
+        paymentStatus: state.paymentStatus,
         seats: input.quantity,
         subtotalSatang: input.totals.subtotalSatang,
-        discountCodeId: input.discountCodeId,
+        discountCodeId: input.discountCodeId ?? null,
         discountAmountSatang: input.totals.discountSatang,
         vatAmountSatang: input.totals.vatSatang,
         totalSatang: input.totals.totalSatang,
@@ -939,7 +1164,14 @@ export class CheckoutRepository {
 
   private async insertOrderItem(
     tx: Tx,
-    input: PlaceOrderInput,
+    input: Pick<
+      PlaceOrderInput,
+      | 'organizationId'
+      | 'ticketTypeId'
+      | 'quantity'
+      | 'unitPriceSatang'
+      | 'totals'
+    >,
     orderId: string,
   ): Promise<{ id: number }> {
     const [row] = await tx

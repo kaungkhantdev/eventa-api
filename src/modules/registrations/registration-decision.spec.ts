@@ -1,7 +1,9 @@
 import {
   APPROVE_BLOCKED_UNPAID,
+  OFFER_NOT_WAITLISTED,
   REJECT_BLOCKED_PAID,
   canApprove,
+  canOffer,
   canReject,
 } from './registration-decision';
 
@@ -79,6 +81,31 @@ describe('Registration decisions (US-REG-02)', () => {
 
     it('refuses to reject twice', () => {
       expect(canReject(pending({ status: 'rejected' })).allowed).toBe(false);
+    });
+  });
+
+  describe('offering a seat (US-REG-04)', () => {
+    it('allows someone on the waitlist, paid ticket or free', () => {
+      expect(
+        canOffer(pending({ status: 'waitlisted', totalSatang: 1000 })).allowed,
+      ).toBe(true);
+      expect(canOffer(pending({ status: 'waitlisted' })).allowed).toBe(true);
+    });
+
+    it('refuses anybody who is not on the waitlist', () => {
+      // A pending registration already has its seat; an offer would hold a
+      // second one for the same person.
+      for (const status of ['pending', 'confirmed', 'cancelled'] as const) {
+        const verdict = canOffer(pending({ status }));
+        expect(verdict.allowed).toBe(false);
+        expect(verdict.reason).toBe(OFFER_NOT_WAITLISTED);
+      }
+    });
+
+    it('never offers a seat to a rejected registration', () => {
+      expect(canOffer(pending({ status: 'rejected' })).reason).toMatch(
+        /rejected/,
+      );
     });
   });
 });

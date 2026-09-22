@@ -21,6 +21,29 @@ export class RejectRegistrationDto {
   reason?: string;
 }
 
+export class OfferOutcomeDto {
+  @ApiProperty({
+    enum: ['offered', 'already_offered', 'confirmed'],
+    description:
+      '`offered` holds a seat until `offerExpiresAt`; `confirmed` is a free ticket, issued at once.',
+  })
+  outcome!: 'offered' | 'already_offered' | 'confirmed';
+
+  @ApiProperty({ example: 'ORD-2026-0009' })
+  reference!: string;
+
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    format: 'date-time',
+    description: 'When an unpaid offer lapses and passes to the next in line.',
+  })
+  offerExpiresAt!: string | null;
+
+  @ApiProperty({ description: 'Tickets issued now — only for a free ticket.' })
+  ticketCount!: number;
+}
+
 export class DecisionOutcomeDto {
   @ApiProperty({
     enum: ['approved', 'already_approved', 'rejected'],

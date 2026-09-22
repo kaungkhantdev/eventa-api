@@ -117,6 +117,14 @@ export class UpdateEventDto {
   @IsPositive()
   capacity?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Let attendees join a waitlist once a general-admission ticket sells out (US-REG-04).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  waitlistEnabled?: boolean;
+
   @ApiPropertyOptional({ maxLength: 500 })
   @IsOptional()
   @IsString()

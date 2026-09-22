@@ -48,6 +48,7 @@ const CHECKOUT_EVENT_COLUMNS = {
   coverImage: events.coverImage,
   organizerName: events.organizerName,
   seatingMode: events.seatingMode,
+  waitlistEnabled: events.waitlistEnabled,
 };
 /** Only a public event is buyable by an anonymous visitor. */
 const PUBLIC_VISIBILITY = 'public';

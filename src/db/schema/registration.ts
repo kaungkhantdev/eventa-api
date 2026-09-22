@@ -100,6 +100,17 @@ export const orders = pgTable(
     rejectedAt: timestamp({ withTimezone: true }),
     decidedBy: uuid().references(() => users.id, { onDelete: 'set null' }),
     rejectionReason: text(),
+    /**
+     * A waitlist offer (US-REG-04): the registration was given a seat to pay
+     * for by `offerExpiresAt`. `offeredBy` is null when the queue passed a
+     * lapsed offer on by itself, and `offerSkipped` is how many people were
+     * ahead in line when an organizer chose this one — non-zero is the
+     * out-of-order choice the story says must be recorded.
+     */
+    offeredAt: timestamp({ withTimezone: true }),
+    offeredBy: uuid().references(() => users.id, { onDelete: 'set null' }),
+    offerExpiresAt: timestamp({ withTimezone: true }),
+    offerSkipped: smallint(),
     cancelledAt: timestamp({ withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

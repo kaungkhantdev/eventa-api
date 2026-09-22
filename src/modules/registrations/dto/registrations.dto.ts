@@ -127,6 +127,26 @@ export class RegistrationEntryDto {
 
   @ApiProperty({ nullable: true })
   rejectBlockedReason!: string | null;
+
+  @ApiProperty({ description: 'On the waitlist, so a seat may be offered.' })
+  canOffer!: boolean;
+
+  @ApiProperty({
+    nullable: true,
+    type: Number,
+    example: 1,
+    description:
+      'Place in line for its ticket; 1 is next. Null unless waitlisted.',
+  })
+  waitlistPosition!: number | null;
+
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    format: 'date-time',
+    description: 'When a waitlist offer lapses and passes to the next in line.',
+  })
+  offerExpiresAt!: string | null;
 }
 
 /** Live tab totals across the whole filtered queue. */

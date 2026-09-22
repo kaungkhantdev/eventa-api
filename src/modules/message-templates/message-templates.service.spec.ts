@@ -1,9 +1,13 @@
 import { DomainException } from '../../common/errors/domain.exception';
 import { MESSAGE_TEMPLATE_CATALOG } from './message-template-catalog';
 import { MessageTemplatesRepository } from './message-templates.repository';
-import { MessageTemplatesService } from './message-templates.service';
+import {
+  MessageTemplatesService,
+  assertSwitchable,
+} from './message-templates.service';
+import { organizerAuth } from '../../../test/support/auth-context';
 
-const auth = { organizationId: 1, userId: 'u1', sessionId: 's1' };
+const auth = organizerAuth();
 
 type StoredRows = Awaited<ReturnType<MessageTemplatesRepository['list']>>;
 
@@ -77,11 +81,34 @@ describe('MessageTemplatesService (US-MSG-01/02)', () => {
       expect(repo.setActive).toHaveBeenCalled();
     });
 
-    it('refuses a message nothing sends yet', async () => {
+    it('accepts switching off the payment receipt', async () => {
+      // Cross-repo, like the one above: eventa-worker's ReceiptSender reads
+      // `payment-receipt` before it sends.
       await expect(
         service.setActive(auth, 'payment-receipt', false),
-      ).rejects.toThrow(DomainException);
-      expect(repo.setActive).not.toHaveBeenCalled();
+      ).resolves.toBeDefined();
+    });
+
+    it('accepts switching off the waitlist offer', async () => {
+      // eventa-worker's waitlist offer handler reads `waitlist-offer` before
+      // it sends either the offer or the notice that it lapsed.
+      await expect(
+        service.setActive(auth, 'waitlist-offer', false),
+      ).resolves.toBeDefined();
+    });
+
+    it('refuses a message nothing sends yet', () => {
+      // Every message in today's catalog is sent, so this is proved on one
+      // made up for the purpose: the rule has to outlive the day the last
+      // planned message shipped, because the next one will be added planned.
+      const planned = {
+        ...MESSAGE_TEMPLATE_CATALOG[0],
+        slug: 'birthday-card',
+        title: 'Birthday card',
+        delivery: 'planned' as const,
+      };
+      expect(() => assertSwitchable(planned)).toThrow(DomainException);
+      expect(() => assertSwitchable(MESSAGE_TEMPLATE_CATALOG[0])).not.toThrow();
     });
 
     it('refuses a slug that is not a message at all', async () => {

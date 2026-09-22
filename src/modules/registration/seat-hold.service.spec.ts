@@ -73,6 +73,60 @@ describe('SeatHoldService', () => {
     );
   });
 
+  describe('holdForOffer (US-REG-04)', () => {
+    const OFFER_UNTIL = new Date('2026-08-01T00:00:00.000Z');
+    const input = {
+      eventId: 'e-1',
+      ticketTypeId: 'tt-1',
+      quantity: 2,
+      orderId: 'o-1',
+      expiresAt: OFFER_UNTIL,
+    };
+
+    it('holds the seats for the offer’s own window, attached to the registration', async () => {
+      repo.holdQuantity.mockResolvedValue({ ok: true, hold: seatHold(5) });
+      await expect(service.holdForOffer(actor, input)).resolves.toEqual(
+        seatHold(5),
+      );
+      expect(repo.holdQuantity).toHaveBeenCalledWith(
+        1,
+        'e-1',
+        'tt-1',
+        2,
+        OFFER_UNTIL,
+        NOW,
+        'o-1',
+      );
+    });
+
+    it('answers null — not an error — when no seat is free', async () => {
+      // "No seat" is an outcome the organizer is told about in words, and it
+      // leaves the registration in line.
+      repo.holdQuantity.mockResolvedValue({ ok: false, available: 0 });
+      await expect(service.holdForOffer(actor, input)).resolves.toBeNull();
+    });
+
+    it('does not ask whether the ticket is on sale', async () => {
+      // A waitlisted ticket is sold out by definition, and may be past its
+      // sales window: offering a freed seat is the organizer's decision, not
+      // a public sale.
+      repo.holdQuantity.mockResolvedValue({ ok: true, hold: seatHold(5) });
+      ticketSales.getEligibility.mockResolvedValue(
+        sellable({ status: 'soldout' }),
+      );
+      await expect(service.holdForOffer(actor, input)).resolves.not.toBeNull();
+      expect(ticketSales.getEligibility).not.toHaveBeenCalled();
+    });
+
+    it('still refuses more than a booking may hold', async () => {
+      expect(
+        await statusOf(() =>
+          service.holdForOffer(actor, { ...input, quantity: 9 }),
+        ),
+      ).toBe(HttpStatus.UNPROCESSABLE_ENTITY);
+    });
+  });
+
   describe('holdSeats', () => {
     it('dedupes seat ids and reserves them with a TTL expiry', async () => {
       repo.holdSeats.mockResolvedValue({ ok: true, holds: [seatHold(10)] });

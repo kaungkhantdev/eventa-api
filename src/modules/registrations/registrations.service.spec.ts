@@ -30,6 +30,8 @@ const row = (o: Partial<RegistrationRow> = {}): RegistrationRow => ({
   confirmedAt: null,
   rejectedAt: null,
   cancelledAt: null,
+  waitlistPosition: null,
+  offerExpiresAt: null,
   ...o,
 });
 
@@ -178,6 +180,33 @@ describe('RegistrationsService (US-REG-01)', () => {
       const [item] = (await list()).page.items;
       expect(item.canApprove).toBe(false);
       expect(item.canReject).toBe(false);
+    });
+  });
+
+  describe('the waitlist (US-REG-04)', () => {
+    it('offers a seat to someone waiting, and says where they are in line', async () => {
+      repo.page.mockResolvedValue({
+        items: [row({ status: 'waitlisted', waitlistPosition: 2 })],
+        total: 1,
+      });
+      const [item] = (await list()).page.items;
+      expect(item.canOffer).toBe(true);
+      expect(item.waitlistPosition).toBe(2);
+    });
+
+    it('offers no seat to anybody not waiting', async () => {
+      const [item] = (await list()).page.items;
+      expect(item.canOffer).toBe(false);
+      expect(item.waitlistPosition).toBeNull();
+    });
+
+    it('carries an open offer’s deadline', async () => {
+      repo.page.mockResolvedValue({
+        items: [row({ offerExpiresAt: new Date('2026-08-02T03:00:00Z') })],
+        total: 1,
+      });
+      const [item] = (await list()).page.items;
+      expect(item.offerExpiresAt).toBe('2026-08-02T03:00:00.000Z');
     });
   });
 });

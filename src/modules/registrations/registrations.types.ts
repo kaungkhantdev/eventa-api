@@ -25,6 +25,10 @@ export interface RegistrationRow {
   confirmedAt: Date | null;
   rejectedAt: Date | null;
   cancelledAt: Date | null;
+  /** Place in line for its ticket, 1 = next; null unless waitlisted (US-REG-04). */
+  waitlistPosition: number | null;
+  /** When a waitlist offer lapses; set once a seat has been offered. */
+  offerExpiresAt: Date | null;
 }
 
 export interface RegistrationFilters {

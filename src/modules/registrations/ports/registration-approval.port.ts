@@ -23,6 +23,22 @@ export interface ApprovalResult {
   reason: string | null;
 }
 
+/**
+ * What offering a waitlisted registration a seat turned out to mean
+ * (US-REG-04).
+ *
+ * `offered` — a seat is held for them until `offerExpiresAt` and the offer is
+ * queued. `already_offered` — a retry found that done; nothing was held twice
+ * and nothing was sent twice. `no_seat` — nothing is free on their ticket;
+ * the registration is left exactly as it was, still in line.
+ */
+export interface OfferResult {
+  outcome: 'offered' | 'already_offered' | 'no_seat';
+  reference: string;
+  /** When an unpaid offer lapses and passes on; null when nothing was held. */
+  offerExpiresAt: Date | null;
+}
+
 export interface RejectionInput {
   decidedBy: string;
   reason: string | null;
@@ -65,4 +81,17 @@ export abstract class RegistrationApprovalPort {
     orderId: string,
     input: RejectionInput,
   ): Promise<{ reference: string }>;
+
+  /**
+   * Offer a waitlisted registration a seat to pay for (US-REG-04): hold it for
+   * the offer window, turn the registration `pending` so paying for it is the
+   * ordinary checkout payment, record who offered it and how many were ahead,
+   * and queue the offer email. The status re-check happens under the order's
+   * row lock. Paid registrations only — a free one is simply approved.
+   */
+  abstract offer(
+    organizationId: number,
+    orderId: string,
+    offeredBy: string,
+  ): Promise<OfferResult>;
 }

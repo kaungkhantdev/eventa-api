@@ -26,6 +26,7 @@ import {
 } from './dto/add-registration.dto';
 import {
   DecisionOutcomeDto,
+  OfferOutcomeDto,
   RejectRegistrationDto,
 } from './dto/registration-decision.dto';
 import { RegistrationEntryService } from './registration-entry.service';
@@ -90,6 +91,21 @@ export class RegistrationsController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<DecisionOutcomeDto> {
     return this.decisions.approve(auth, id);
+  }
+
+  /**
+   * Offer someone on the waitlist a seat (US-REG-04). `regManage`, like
+   * approving: handing out a seat is a decision, not queue work.
+   */
+  @Post(':id/offer')
+  @RequirePermissions(Permission.regManage)
+  @ResponseMessage('Seat offered.')
+  @ApiData(OfferOutcomeDto)
+  offer(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<OfferOutcomeDto> {
+    return this.decisions.offer(auth, id);
   }
 
   @Post(':id/reject')

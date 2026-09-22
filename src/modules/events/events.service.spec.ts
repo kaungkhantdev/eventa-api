@@ -54,6 +54,11 @@ function eventRow(overrides: Partial<EventRow> = {}): EventRow {
     organizerName: 'Acme',
     contactEmail: null,
     landingTemplateId: null,
+    requiresApproval: false,
+    waitlistEnabled: false,
+    agendaTitle: null,
+    speakersTitle: null,
+    locale: null,
     publishedAt: null,
     cancelledAt: null,
     createdAt: new Date(),
@@ -294,6 +299,17 @@ describe('EventsService get/update', () => {
       await service.updateEvent(auth, 'e1', { landingTemplateId: 'noir' });
       const [, , values] = repo.update.mock.calls[0];
       expect(values).toMatchObject({ landingTemplateId: 'noir' });
+    });
+
+    it('turns the waitlist on for an event that is already selling (US-REG-04)', async () => {
+      // Demand shows up after launch; an organizer reaching for the waitlist
+      // is usually looking at a sold-out event that is live.
+      const res = await service.updateEvent(auth, 'e1', {
+        waitlistEnabled: true,
+      });
+      const [, , values] = repo.update.mock.calls[0];
+      expect(values).toMatchObject({ waitlistEnabled: true });
+      expect(res.waitlistEnabled).toBe(true);
     });
 
     it('leaves the template alone when the update does not mention it', async () => {

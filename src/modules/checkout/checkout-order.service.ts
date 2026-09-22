@@ -11,7 +11,7 @@ import {
   type TicketRow,
 } from './checkout.repository';
 import { registrationConfirmedEvent } from './events/registration-confirmed.event';
-import { generateOrderReference, generateQrToken } from './order-reference';
+import { generateQrToken, withFreshReference } from './order-reference';
 import { ticketsUrlFor } from './ticket-links';
 import type { ConfirmOrderDto } from './dto/confirm-order.dto';
 import type { GuestOrderDto } from './dto/guest-order.dto';
@@ -28,10 +28,6 @@ export interface OrganizerEntry {
   createdBy: string;
   notify: boolean;
 }
-
-/** How many fresh references to try before admitting defeat (32^8 collisions). */
-const REFERENCE_ATTEMPTS = 3;
-const UNIQUE_VIOLATION = '23505';
 
 /**
  * Placing the registration (US-DISC-06): one order, one ticket per admission,
@@ -135,32 +131,10 @@ export class CheckoutOrderService {
           : null,
       now,
     };
-    return this.withFreshReference(base);
-  }
-
-  /**
-   * References are random, so a collision is astronomically unlikely but not
-   * impossible; `uq_orders_org_reference` catches it and we simply try another.
-   * Note this retries ONLY on the reference — the idempotency key is untouched,
-   * so a retry still resolves to the one order this buyer meant to place.
-   */
-  private async withFreshReference(
-    base: Omit<PlaceOrderInput, 'reference'>,
-  ): Promise<{ order: OrderRow; tickets: TicketRow[] }> {
-    for (let attempt = 1; attempt <= REFERENCE_ATTEMPTS; attempt += 1) {
-      try {
-        return await this.repo.placeOrder({
-          ...base,
-          reference: generateOrderReference(),
-        });
-      } catch (error) {
-        if (!isReferenceCollision(error) || attempt === REFERENCE_ATTEMPTS) {
-          throw error;
-        }
-      }
-    }
-    throw DomainException.conflict(
-      "We couldn't complete your booking. Please try again.",
+    // Retried ONLY on the reference — the idempotency key is untouched, so a
+    // retry still resolves to the one order this buyer meant to place.
+    return withFreshReference((reference) =>
+      this.repo.placeOrder({ ...base, reference }),
     );
   }
 
@@ -237,12 +211,4 @@ export class CheckoutOrderService {
       paymentRequired: summary.paymentRequired,
     };
   }
-}
-
-/** A duplicate `reference` — the one collision worth retrying blind. */
-function isReferenceCollision(error: unknown): boolean {
-  const code = (error as { code?: string } | null)?.code;
-  const constraint = (error as { constraint_name?: string } | null)
-    ?.constraint_name;
-  return code === UNIQUE_VIOLATION && constraint === 'uq_orders_org_reference';
 }

@@ -1,12 +1,20 @@
 import { Injectable } from '@nestjs/common';
 import { DomainException } from '../../common/errors/domain.exception';
 import type { AuthContext } from '../auth/auth.types';
-import type { DecisionOutcomeDto } from './dto/registration-decision.dto';
+import type {
+  DecisionOutcomeDto,
+  OfferOutcomeDto,
+} from './dto/registration-decision.dto';
 import {
   type DecidableOrder,
   RegistrationApprovalPort,
 } from './ports/registration-approval.port';
-import { type Verdict, canApprove, canReject } from './registration-decision';
+import {
+  type Verdict,
+  canApprove,
+  canOffer,
+  canReject,
+} from './registration-decision';
 
 export interface RejectRegistrationCommand {
   confirm: boolean;
@@ -18,6 +26,9 @@ const NEEDS_CONFIRMATION =
 const GONE = "This registration isn't available.";
 /** The blocker had no message of its own — a race we could not name. */
 const UNAVAILABLE = 'This registration can no longer be approved.';
+/** US-REG-04: "promotion is refused and I'm told to free capacity first". */
+export const NO_SEAT_FREE =
+  'No seat is free on this ticket — raise its capacity, or wait for one to free up.';
 
 /**
  * The organizer's decision on a sign-up (US-REG-02).
@@ -77,6 +88,57 @@ export class RegistrationDecisionsService {
       { decidedBy: auth.userId, reason: command.reason },
     );
     return { outcome: 'rejected', reference, ticketCount: 0 };
+  }
+
+  /**
+   * Offer someone on the waitlist a seat (US-REG-04). A paid ticket is held
+   * for them to pay for by a deadline; a free one is simply confirmed, which
+   * is approval — the story's "free tickets confirm immediately".
+   *
+   * Offering someone other than the person at the front is allowed; it is
+   * recorded on the registration (how many were passed over), not refused.
+   */
+  async offer(auth: AuthContext, orderId: string): Promise<OfferOutcomeDto> {
+    const order = await this.mustFind(auth, orderId);
+    if (order.totalSatang === 0) return this.confirmFree(auth, order);
+    this.assertDecidable(order, 'pending', canOffer);
+    const result = await this.approvals.offer(
+      auth.organizationId,
+      orderId,
+      auth.userId,
+    );
+    if (result.outcome === 'no_seat') {
+      throw DomainException.conflict(NO_SEAT_FREE);
+    }
+    return {
+      outcome: result.outcome,
+      reference: result.reference,
+      offerExpiresAt: result.offerExpiresAt?.toISOString() ?? null,
+      ticketCount: 0,
+    };
+  }
+
+  private async confirmFree(
+    auth: AuthContext,
+    order: DecidableOrder,
+  ): Promise<OfferOutcomeDto> {
+    this.assertDecidable(order, 'confirmed', canOffer);
+    const result = await this.approvals.approve(
+      auth.organizationId,
+      order.id,
+      auth.userId,
+    );
+    // Approval's own sold-out sentence says "offer the attendee the waitlist",
+    // which is where this attendee already is.
+    if (result.outcome === 'unavailable') {
+      throw DomainException.conflict(NO_SEAT_FREE);
+    }
+    return {
+      outcome: 'confirmed',
+      reference: result.reference,
+      offerExpiresAt: null,
+      ticketCount: result.ticketCount,
+    };
   }
 
   /**

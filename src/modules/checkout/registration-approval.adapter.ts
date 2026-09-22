@@ -1,10 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { DomainException } from '../../common/errors/domain.exception';
 import { Clock } from '../../common/time/clock';
 import type { Env } from '../../config/env.validation';
+import { SeatHoldService } from '../registration/seat-hold.service';
 import {
   type ApprovalResult,
   type DecidableOrder,
+  type OfferResult,
   RegistrationApprovalPort,
   type RejectionInput,
 } from '../registrations/ports/registration-approval.port';
@@ -16,12 +19,15 @@ import {
 import { registrationConfirmedEvent } from './events/registration-confirmed.event';
 import { registrationRejectedEvent } from './events/registration-rejected.event';
 import { refundRequiredEvent } from './events/refund-required.event';
+import { waitlistOfferedEvent } from './events/waitlist-offered.event';
 import { generateQrToken } from './order-reference';
 import { CheckoutEventPort } from './ports/checkout-event.port';
 import { ticketsUrlFor } from './ticket-links';
 
 /** Approval moves no money, so the settlement's ledger hook does nothing. */
 const NO_PAYMENT = () => Promise.resolve();
+const MS_PER_HOUR = 60 * 60 * 1000;
+const GONE = "This registration isn't available.";
 
 /**
  * Checkout's implementation of the Registrations-owned decision port
@@ -35,15 +41,92 @@ const NO_PAYMENT = () => Promise.resolve();
 @Injectable()
 export class RegistrationApprovalAdapter extends RegistrationApprovalPort {
   private readonly publicWebUrl: string;
+  private readonly offerWindowMs: number;
 
   constructor(
     private readonly repo: CheckoutRepository,
     private readonly events: CheckoutEventPort,
     private readonly clock: Clock,
     config: ConfigService<Env, true>,
+    private readonly holds: SeatHoldService,
   ) {
     super();
     this.publicWebUrl = config.getOrThrow('PUBLIC_WEB_URL', { infer: true });
+    this.offerWindowMs =
+      config.getOrThrow('WAITLIST_OFFER_HOURS', { infer: true }) * MS_PER_HOUR;
+  }
+
+  /**
+   * Offer a waitlisted registration its seats (US-REG-04).
+   *
+   * Two steps, in this order. The seats are held first, through the seat-hold
+   * engine's row-locked availability check — the one authority on whether a
+   * seat is free, so an offer can never oversell. Only then is the offer
+   * recorded, under the order's own lock. If that second step fails —
+   * somebody decided first, or the write failed — the hold is given straight
+   * back: left alone it would keep a seat off sale for the whole offer window.
+   */
+  async offer(
+    organizationId: number,
+    orderId: string,
+    offeredBy: string,
+  ): Promise<OfferResult> {
+    const entry = await this.repo.waitlistEntry(organizationId, orderId);
+    if (!entry) throw DomainException.notFound(GONE);
+    const { order } = entry;
+    if (order.status === 'pending' && order.offerExpiresAt) {
+      return {
+        outcome: 'already_offered',
+        reference: order.reference,
+        offerExpiresAt: order.offerExpiresAt,
+      };
+    }
+    const now = this.clock.now();
+    const offerExpiresAt = new Date(now.getTime() + this.offerWindowMs);
+    const actor = { organizationId };
+    const hold = await this.holds.holdForOffer(actor, {
+      eventId: order.eventId,
+      ticketTypeId: entry.ticketTypeId,
+      quantity: entry.quantity,
+      orderId,
+      expiresAt: offerExpiresAt,
+    });
+    if (!hold) {
+      return {
+        outcome: 'no_seat',
+        reference: order.reference,
+        offerExpiresAt: null,
+      };
+    }
+    try {
+      await this.repo.markOffered({
+        organizationId,
+        orderId,
+        offeredBy,
+        offerExpiresAt,
+        now,
+        buildEvent: (offered) =>
+          waitlistOfferedEvent({
+            organizationId,
+            orderId: offered.id,
+            reference: offered.reference,
+            eventId: offered.eventId,
+            buyerEmail: offered.buyerEmail,
+            buyerName: offered.buyerName,
+            ticketTypeName: entry.ticketTypeName,
+            ticketCount: offered.seats,
+            totalSatang: offered.totalSatang,
+            currency: offered.currency,
+            offerExpiresAt,
+            payUrl: ticketsUrlFor(this.publicWebUrl, offered.id),
+            occurredAt: now,
+          }),
+      });
+    } catch (error) {
+      await this.holds.release(actor, [hold.id]);
+      throw error;
+    }
+    return { outcome: 'offered', reference: order.reference, offerExpiresAt };
   }
 
   async findDecidable(

@@ -14,6 +14,7 @@ import type { CheckoutTierDto, CheckoutViewDto } from './dto/checkout-view.dto';
 import { CheckoutEventPort } from './ports/checkout-event.port';
 import { SeatMapPort } from './ports/seat-map.port';
 import { TicketCatalogPort } from './ports/ticket-catalog.port';
+import { canJoinWaitlist } from './waitlist-rules';
 
 const FREE_LABEL = 'Free';
 const ONSALE = 'onsale';
@@ -53,7 +54,7 @@ export class CheckoutViewService {
     );
     return {
       event: this.toEventDto(event),
-      tiers: tiers.map((tier) => this.toTierDto(tier)),
+      tiers: tiers.map((tier) => this.toTierDto(event, tier)),
       seatMap: await this.toSeatMap(event),
       notes: this.notes(event),
       maxPerBooking: MAX_SEATS_PER_BOOKING,
@@ -155,7 +156,7 @@ export class CheckoutViewService {
     };
   }
 
-  private toTierDto(tier: CheckoutTier): CheckoutTierDto {
+  private toTierDto(event: CheckoutEvent, tier: CheckoutTier): CheckoutTierDto {
     return {
       id: tier.id,
       name: tier.name,
@@ -168,6 +169,7 @@ export class CheckoutViewService {
       maxPerOrder: tier.maxPerOrder,
       remaining:
         tier.total === UNLIMITED ? null : Math.max(0, tier.total - tier.sold),
+      waitlist: canJoinWaitlist(event, tier),
     };
   }
 

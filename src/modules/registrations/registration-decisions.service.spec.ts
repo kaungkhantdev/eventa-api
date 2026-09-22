@@ -5,7 +5,11 @@ import type {
   DecidableOrder,
   RegistrationApprovalPort,
 } from './ports/registration-approval.port';
-import { APPROVE_BLOCKED_UNPAID } from './registration-decision';
+import {
+  APPROVE_BLOCKED_UNPAID,
+  OFFER_NOT_WAITLISTED,
+} from './registration-decision';
+import { NO_SEAT_FREE } from './registration-decisions.service';
 
 const ORG = 7;
 const ORDER = 'o-1';
@@ -50,6 +54,11 @@ describe('RegistrationDecisionsService (US-REG-02)', () => {
         reason: null,
       }),
       reject: jest.fn().mockResolvedValue({ reference: REFERENCE }),
+      offer: jest.fn().mockResolvedValue({
+        outcome: 'offered',
+        reference: REFERENCE,
+        offerExpiresAt: new Date('2026-08-02T03:00:00Z'),
+      }),
     };
     service = new RegistrationDecisionsService(approvals);
   });
@@ -192,6 +201,107 @@ describe('RegistrationDecisionsService (US-REG-02)', () => {
       await expect(
         service.reject(auth, ORDER, { confirm: true, reason: null }),
       ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+  });
+
+  describe('offering a seat from the waitlist (US-REG-04)', () => {
+    const waitlisted = (o: Partial<DecidableOrder> = {}) =>
+      decidable({ status: 'waitlisted', totalSatang: 180_000, ...o });
+
+    it('holds a seat for a paid entry to pay for by the deadline, recording who offered it', async () => {
+      approvals.findDecidable.mockResolvedValue(waitlisted());
+      const result = await service.offer(auth, ORDER);
+      expect(approvals.offer).toHaveBeenCalledWith(ORG, ORDER, 'u-1');
+      expect(result).toEqual({
+        outcome: 'offered',
+        reference: REFERENCE,
+        offerExpiresAt: '2026-08-02T03:00:00.000Z',
+        ticketCount: 0,
+      });
+      expect(approvals.approve).not.toHaveBeenCalled();
+    });
+
+    it('confirms a free entry at once — there is nothing to pay for', async () => {
+      approvals.findDecidable.mockResolvedValue(waitlisted({ totalSatang: 0 }));
+      const result = await service.offer(auth, ORDER);
+      expect(approvals.approve).toHaveBeenCalledWith(ORG, ORDER, 'u-1');
+      expect(approvals.offer).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        outcome: 'confirmed',
+        ticketCount: 2,
+        offerExpiresAt: null,
+      });
+    });
+
+    it('refuses when no seat is free, and says to free capacity first', async () => {
+      approvals.findDecidable.mockResolvedValue(waitlisted());
+      approvals.offer.mockResolvedValue({
+        outcome: 'no_seat',
+        reference: REFERENCE,
+        offerExpiresAt: null,
+      });
+      const error = await failure(service.offer(auth, ORDER));
+      expect(error.getStatus()).toBe(409);
+      expect(error.message).toBe(NO_SEAT_FREE);
+    });
+
+    it('says the same for a free entry, not the approval’s “offer the waitlist”', async () => {
+      // Approval's sold-out wording points at the waitlist — which is where
+      // this person already is.
+      approvals.findDecidable.mockResolvedValue(waitlisted({ totalSatang: 0 }));
+      approvals.approve.mockResolvedValue({
+        outcome: 'unavailable',
+        reference: REFERENCE,
+        ticketCount: 0,
+        reason:
+          'This ticket is now sold out — offer the attendee the waitlist instead.',
+      });
+      const error = await failure(service.offer(auth, ORDER));
+      expect(error.message).toBe(NO_SEAT_FREE);
+    });
+
+    it('refuses somebody who is not on the waitlist, without touching anything', async () => {
+      approvals.findDecidable.mockResolvedValue(
+        decidable({
+          status: 'confirmed',
+          paymentStatus: 'paid',
+          totalSatang: 180_000,
+        }),
+      );
+      const error = await failure(service.offer(auth, ORDER));
+      expect(error.getStatus()).toBe(409);
+      expect(error.message).toBe(OFFER_NOT_WAITLISTED);
+      expect(approvals.offer).not.toHaveBeenCalled();
+    });
+
+    it('refuses a free registration that was never on the waitlist', async () => {
+      // Otherwise "offer" would be a second, unguarded way to approve.
+      approvals.findDecidable.mockResolvedValue(
+        decidable({ status: 'pending' }),
+      );
+      const error = await failure(service.offer(auth, ORDER));
+      expect(error.message).toBe(OFFER_NOT_WAITLISTED);
+      expect(approvals.approve).not.toHaveBeenCalled();
+    });
+
+    it('reports a retried offer as already made, not as a conflict', async () => {
+      // The first click turned them `pending`; the second must find its own
+      // work done rather than be told they are not on the waitlist.
+      approvals.findDecidable.mockResolvedValue(
+        waitlisted({ status: 'pending' }),
+      );
+      approvals.offer.mockResolvedValue({
+        outcome: 'already_offered',
+        reference: REFERENCE,
+        offerExpiresAt: new Date('2026-08-02T03:00:00Z'),
+      });
+      const result = await service.offer(auth, ORDER);
+      expect(result.outcome).toBe('already_offered');
+    });
+
+    it('404s an order belonging to another workspace', async () => {
+      approvals.findDecidable.mockResolvedValue(null);
+      expect((await failure(service.offer(auth, ORDER))).getStatus()).toBe(404);
     });
   });
 });

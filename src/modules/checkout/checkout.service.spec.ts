@@ -33,6 +33,7 @@ function event(o: Partial<CheckoutEvent> = {}): CheckoutEvent {
     coverImage: null,
     organizerName: 'Acme',
     seatingMode: 'ga',
+    waitlistEnabled: false,
     ...o,
   };
 }

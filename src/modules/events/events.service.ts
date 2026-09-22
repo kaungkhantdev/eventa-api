@@ -82,6 +82,7 @@ const UPDATABLE_KEYS: (keyof NewEventValues & keyof UpdateEventInput)[] = [
   'onlineNote',
   'seatingMode',
   'capacity',
+  'waitlistEnabled',
   'coverImage',
   'accentColor',
   'contactEmail',
@@ -188,6 +189,9 @@ export class EventsService {
       onlineNote: src.onlineNote,
       seatingMode: src.seatingMode,
       capacity: src.capacity,
+      // A setting, not a queue: the copy starts with the waitlist switched on
+      // or off as the original was, and with nobody on it (US-EVT-13).
+      waitlistEnabled: src.waitlistEnabled,
       coverImage: src.coverImage,
       accentColor: src.accentColor,
       organizerName: src.organizerName,

@@ -21,6 +21,7 @@ import { CheckoutPolicy } from './checkout.policy';
 import { CheckoutRepository } from './checkout.repository';
 import { CheckoutService } from './checkout.service';
 import { CheckoutViewService } from './checkout-view.service';
+import { CheckoutWaitlistService } from './checkout-waitlist.service';
 
 /**
  * Checkout: the attendee's path from "Get tickets" to held inventory
@@ -53,6 +54,7 @@ import { CheckoutViewService } from './checkout-view.service';
     CheckoutViewService,
     CheckoutService,
     CheckoutOrderService,
+    CheckoutWaitlistService,
     CheckoutRepository,
     CheckoutPolicy,
     { provide: OrderPaymentPort, useClass: OrderPaymentAdapter },

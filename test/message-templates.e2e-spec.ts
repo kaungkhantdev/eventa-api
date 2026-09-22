@@ -11,6 +11,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
 import { MESSAGE_TEMPLATE_CATALOG } from '../src/modules/message-templates/message-template-catalog';
+import { listenOnLoopback } from './support/loopback';
 
 /**
  * The automated-message switch against a real database (US-MSG-01).
@@ -83,7 +84,7 @@ describe('Message templates (e2e — US-MSG-01)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
 
     adminJwt = await token(ADMIN, ORG.slug);
@@ -116,7 +117,7 @@ describe('Message templates (e2e — US-MSG-01)', () => {
       .get('/api/v1/message-templates')
       .set('Authorization', `Bearer ${jwt}`);
 
-  const setActive = (jwt: string, slug: string, body: unknown) =>
+  const setActive = (jwt: string, slug: string, body: object) =>
     request(server)
       .patch(`/api/v1/message-templates/${slug}`)
       .set('Authorization', `Bearer ${jwt}`)
@@ -196,7 +197,7 @@ describe('Message templates (e2e — US-MSG-01)', () => {
   });
 
   describe('the organizer’s own wording (US-MSG-02)', () => {
-    const wording = (jwt: string, slug: string, body: unknown) =>
+    const wording = (jwt: string, slug: string, body: object) =>
       request(server)
         .patch(`/api/v1/message-templates/${slug}/wording`)
         .set('Authorization', `Bearer ${jwt}`)
@@ -254,22 +255,21 @@ describe('Message templates (e2e — US-MSG-01)', () => {
       expect(JSON.stringify(res.body)).toMatch(/venue/);
     });
 
-    it('refuses wording for a message nothing sends yet', async () => {
-      // Text that will never reach anybody is a draft with nowhere to go.
-      await wording(adminJwt, 'payment-receipt', {
-        en: EN,
-        th: BLANK,
-      }).expect(422);
-    });
-
     it('offers the fields each message can actually fill', async () => {
       const res = await list(adminJwt).expect(200);
       expect(find(res.body, CONFIRMATION).tags).toEqual([
         '{{first_name}}',
         '{{event_name}}',
       ]);
-      // Nothing sends this one, so there is nothing to fill it with.
-      expect(find(res.body, 'payment-receipt').tags).toEqual([]);
+      expect(find(res.body, 'payment-receipt').tags).toEqual([
+        '{{first_name}}',
+        '{{event_name}}',
+      ]);
+      expect(find(res.body, 'waitlist-offer').tags).toEqual([
+        '{{first_name}}',
+        '{{event_name}}',
+        '{{ticket_type}}',
+      ]);
     });
 
     it('refuses a member without the settings permission', async () => {
@@ -278,14 +278,6 @@ describe('Message templates (e2e — US-MSG-01)', () => {
   });
 
   describe('switches that would change nothing', () => {
-    it('refuses a message nothing sends yet', async () => {
-      // 422: the request was understood and names a real message — it is the
-      // intent that cannot be honoured.
-      await setActive(adminJwt, 'payment-receipt', { active: false }).expect(
-        422,
-      );
-    });
-
     it('404s a slug that is not a message at all', async () => {
       await setActive(adminJwt, 'not-a-message', { active: false }).expect(404);
     });

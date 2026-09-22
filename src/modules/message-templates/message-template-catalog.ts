@@ -87,11 +87,15 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
   {
     slug: 'payment-receipt',
     title: 'Payment receipt',
-    description: 'An itemized receipt for a successful payment, VAT included.',
+    // Two switches govern it — this one, and "Email receipts" in the payment
+    // settings (US-SET-10) — and eventa-worker sends only when both are on.
+    // Saying so here is what stops one of them looking broken.
+    description:
+      'An itemized receipt, VAT included, sent when a registration is paid for. Also needs “Email receipts” on in payment settings.',
     channels: ['email'],
-    delivery: 'planned',
+    delivery: 'controlled',
     expected: true,
-    tags: [],
+    tags: ['{{first_name}}', '{{event_name}}'],
   },
   {
     slug: 'event-reminder',
@@ -106,12 +110,14 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
   {
     slug: 'waitlist-offer',
     title: 'Waitlist offer',
+    // Governs the notice that an offer lapsed as well: somebody who was never
+    // told of an offer should not be told it expired.
     description:
-      'Sent when a seat frees up, offering it to the next person on the waitlist.',
+      'Sent when a seat is offered to someone on the waitlist, with the deadline to pay for it — and again if that deadline passes.',
     channels: ['email'],
-    delivery: 'planned',
+    delivery: 'controlled',
     expected: false,
-    tags: [],
+    tags: ['{{first_name}}', '{{event_name}}', '{{ticket_type}}'],
   },
   {
     slug: 'post-event-thankyou',

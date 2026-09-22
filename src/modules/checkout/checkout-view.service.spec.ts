@@ -34,6 +34,7 @@ function event(o: Partial<CheckoutEvent> = {}): CheckoutEvent {
     coverImage: null,
     organizerName: 'Acme',
     seatingMode: 'ga',
+    waitlistEnabled: false,
     ...o,
   };
 }
@@ -80,6 +81,7 @@ describe('CheckoutViewService (US-DISC-04)', () => {
     events = {
       findPublishedBySlug: jest.fn().mockResolvedValue(event()),
       findPublishedById: jest.fn().mockResolvedValue(event()),
+      findOwnedById: jest.fn().mockResolvedValue(event()),
     };
     catalog = {
       tiersForEvent: jest.fn().mockResolvedValue([tier()]),
@@ -156,6 +158,23 @@ describe('CheckoutViewService (US-DISC-04)', () => {
       const view = await service.view(SLUG);
       expect(view.tiers).toHaveLength(1);
       expect(view.tiers[0].canSelect).toBe(false);
+    });
+
+    it('offers the waitlist on a sold-out tier when the organizer switched it on (US-REG-04)', async () => {
+      events.findPublishedBySlug.mockResolvedValue(
+        event({ waitlistEnabled: true }),
+      );
+      catalog.tiersForEvent.mockResolvedValue([
+        tier({ id: 'gone', status: 'soldout' }),
+        tier({ id: 'left', status: 'onsale' }),
+      ]);
+      const view = await service.view(SLUG);
+      expect(view.tiers.map((t) => t.waitlist)).toEqual([true, false]);
+    });
+
+    it('offers no waitlist when the organizer has not switched it on', async () => {
+      catalog.tiersForEvent.mockResolvedValue([tier({ status: 'soldout' })]);
+      expect((await service.view(SLUG)).tiers[0].waitlist).toBe(false);
     });
 
     it('reports what is left of a bounded tier, and nothing for an unlimited one', async () => {

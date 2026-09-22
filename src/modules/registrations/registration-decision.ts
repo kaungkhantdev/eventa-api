@@ -11,6 +11,8 @@ const ALREADY_REJECTED =
   'This registration was rejected, and a rejection cannot be undone.';
 const NOT_AWAITING =
   'Only a pending or waitlisted registration can be decided.';
+export const OFFER_NOT_WAITLISTED =
+  'Only someone on the waitlist can be offered a seat.';
 
 /** The slice of a registration a decision turns on. */
 export interface DecidableRegistration {
@@ -53,6 +55,19 @@ export function canReject(registration: DecidableRegistration): Verdict {
   const terminal = terminalReason(registration.status);
   if (terminal) return refuse(terminal);
   if (registration.paymentStatus === 'paid') return refuse(REJECT_BLOCKED_PAID);
+  return { allowed: true, reason: null };
+}
+
+/**
+ * Whether an organizer may offer this registration a seat (US-REG-04). Only a
+ * waitlist entry: anybody else either has a seat already or is finished, and
+ * an offer would hold a second seat for them. Paid or free alike — what the
+ * offer then does differs (a free one confirms at once), whether it may be
+ * made does not.
+ */
+export function canOffer(registration: DecidableRegistration): Verdict {
+  if (registration.status === 'rejected') return refuse(ALREADY_REJECTED);
+  if (registration.status !== 'waitlisted') return refuse(OFFER_NOT_WAITLISTED);
   return { allowed: true, reason: null };
 }
 

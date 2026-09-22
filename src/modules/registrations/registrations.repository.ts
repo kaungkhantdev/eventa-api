@@ -99,6 +99,8 @@ export class RegistrationsRepository {
       confirmedAt: orders.confirmedAt,
       rejectedAt: orders.rejectedAt,
       cancelledAt: orders.cancelledAt,
+      waitlistPosition: waitlistPosition(),
+      offerExpiresAt: orders.offerExpiresAt,
     };
   }
 
@@ -145,6 +147,33 @@ function ticketTypeNames(): SQL<string | null> {
   )`;
 }
 
+/**
+ * Where a waitlisted registration stands in line for its ticket (US-REG-04):
+ * one plus everybody waiting for the same ticket who joined earlier, the id
+ * breaking a tie — the same order checkout uses to say "you're 3rd" and
+ * eventa-worker uses to pick who is offered a lapsed seat.
+ *
+ * Literal SQL with its own aliases: Drizzle drops the table qualifier from an
+ * interpolated column inside a subquery, and an unqualified `id` or `status`
+ * here would bind to the inner row and compare it with itself.
+ */
+function waitlistPosition(): SQL<number | null> {
+  return sql<number | null>`(
+    CASE WHEN "orders"."status" = 'waitlisted' THEN (
+      SELECT count(*)::int + 1
+      FROM orders w
+      JOIN order_items wi ON wi.order_id = w.id
+      WHERE w.organization_id = "orders"."organization_id"
+        AND w.status = 'waitlisted'
+        AND wi.ticket_type_id = (
+          SELECT mi.ticket_type_id FROM order_items mi
+          WHERE mi.order_id = "orders"."id" LIMIT 1
+        )
+        AND (w.registered_at, w.id) < ("orders"."registered_at", "orders"."id")
+    ) END
+  )`;
+}
+
 function toRow(row: Record<string, unknown>): RegistrationRow {
   return {
     id: row.id as string,
@@ -162,5 +191,10 @@ function toRow(row: Record<string, unknown>): RegistrationRow {
     confirmedAt: (row.confirmedAt as Date | null) ?? null,
     rejectedAt: (row.rejectedAt as Date | null) ?? null,
     cancelledAt: (row.cancelledAt as Date | null) ?? null,
+    waitlistPosition:
+      row.waitlistPosition === null || row.waitlistPosition === undefined
+        ? null
+        : Number(row.waitlistPosition),
+    offerExpiresAt: (row.offerExpiresAt as Date | null) ?? null,
   };
 }

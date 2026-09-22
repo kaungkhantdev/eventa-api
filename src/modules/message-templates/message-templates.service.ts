@@ -131,7 +131,7 @@ function assertKnown(slug: string): MessageTemplateDefinition {
  * A switch that moves and changes nothing is worse than no switch, so the one
  * case where it would change nothing is refused with the reason.
  */
-function assertSwitchable(definition: MessageTemplateDefinition): void {
+export function assertSwitchable(definition: MessageTemplateDefinition): void {
   if (definition.delivery === 'planned') {
     throw DomainException.validation(
       `“${definition.title}” isn’t being sent yet, so there is nothing to switch off.`,

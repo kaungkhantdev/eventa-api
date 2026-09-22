@@ -85,6 +85,12 @@ export class CheckoutTierDto {
     description: 'Null when the allocation is unlimited',
   })
   remaining!: number | null;
+
+  @ApiProperty({
+    description:
+      'Sold out, and a buyer may join its waitlist instead (US-REG-04)',
+  })
+  waitlist!: boolean;
 }
 
 /** One seat on a reserved-seating map. Taken seats are drawn, not hidden. */

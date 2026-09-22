@@ -106,6 +106,33 @@ export class SeatHoldService {
     return result.hold;
   }
 
+  /**
+   * Hold a quantity for a waitlist offer (US-REG-04), until `expiresAt` and
+   * attached to the registration being offered it.
+   *
+   * The same row-locked availability check as a purchase, so an offer can
+   * never oversell — but NOT the purchasability check: the ticket is sold out
+   * by definition, and may be past its sales window, and handing a freed seat
+   * to someone already in line is the organizer's decision rather than a
+   * public sale. Null when nothing is free; the caller says so in words.
+   */
+  async holdForOffer(
+    actor: SeatHoldActor,
+    input: HoldQuantityInput & { orderId: string; expiresAt: Date },
+  ): Promise<SeatHoldRow | null> {
+    this.assertBookingSize(input.quantity);
+    const result = await this.repo.holdQuantity(
+      actor.organizationId,
+      input.eventId,
+      input.ticketTypeId,
+      input.quantity,
+      input.expiresAt,
+      this.clock.now(),
+      input.orderId,
+    );
+    return result.ok ? result.hold : null;
+  }
+
   /** Release active holds early (buyer abandoned the checkout). */
   async release(actor: SeatHoldActor, holdIds: number[]): Promise<void> {
     await this.repo.release(actor.organizationId, holdIds);

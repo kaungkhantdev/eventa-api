@@ -1,5 +1,5 @@
 import { formatBaht } from '../../common/money/baht';
-import { canApprove, canReject } from './registration-decision';
+import { canApprove, canOffer, canReject } from './registration-decision';
 import type { RegistrationEntryDto } from './dto/registrations.dto';
 import type { RegistrationRow } from './registrations.types';
 
@@ -39,6 +39,9 @@ export function toRegistrationEntry(
     approveBlockedReason: approve.reason,
     canReject: reject.allowed,
     rejectBlockedReason: reject.reason,
+    canOffer: canOffer(row).allowed,
+    waitlistPosition: row.waitlistPosition,
+    offerExpiresAt: row.offerExpiresAt?.toISOString() ?? null,
   };
 }
 
