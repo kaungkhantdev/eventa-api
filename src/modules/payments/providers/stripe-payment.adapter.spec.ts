@@ -668,9 +668,106 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
       expect(result.failureReason).toBe('expired_or_canceled_card');
     });
 
-    it('treats an unknown provider status as failed, never as money returned', async () => {
+    /**
+     * Stripe's own flow for PromptPay ("Refunds that require action"): the
+     * refund STARTS in `requires_action` while Stripe emails the buyer for a
+     * bank account. It is live at Stripe — calling it failed would leave the
+     * buyer holding both the money and valid tickets.
+     */
+    it('reports a refund waiting on the buyer’s bank details (requires_action) as pending', async () => {
       const { adapter } = refundHarness({ status: 'requires_action' });
+      expect((await adapter.refund(input)).status).toBe('pending');
+    });
+
+    it('reports a cancelled refund as failed', async () => {
+      const { adapter } = refundHarness({ status: 'canceled' });
       expect((await adapter.refund(input)).status).toBe('failed');
+    });
+
+    it('treats an unknown provider status as failed, never as money returned', async () => {
+      const { adapter } = refundHarness({ status: 'something_new' });
+      expect((await adapter.refund(input)).status).toBe('failed');
+    });
+  });
+
+  /**
+   * A refund that did not settle at once (PromptPay) is finished by these
+   * events. `gatewayRef` is the REFUND's own `re_…` — what the refund row
+   * stored — not the charge's.
+   */
+  describe('verifyWebhook — refunds (US-FIN-02)', () => {
+    function refundEvent(
+      type: string,
+      refund: Record<string, unknown> = {},
+    ): Record<string, unknown> {
+      return {
+        id: 'evt_re_1',
+        object: 'event',
+        type,
+        data: {
+          object: {
+            id: 're_123',
+            object: 'refund',
+            amount: 210_000,
+            status: 'succeeded',
+            failure_reason: null,
+            payment_intent: 'pi_123',
+            ...refund,
+          },
+        },
+      };
+    }
+
+    const verify = (event: Record<string, unknown>) => {
+      const { adapter } = harness();
+      const { raw, signature } = signed(event);
+      return adapter.verifyWebhook(raw, signature, SECRETS);
+    };
+
+    it('reports a refund that went through, under the refund’s own reference', () => {
+      expect(verify(refundEvent('refund.updated'))).toMatchObject({
+        eventId: 'evt_re_1',
+        type: 'refund_succeeded',
+        gatewayRef: 're_123',
+        amountSatang: 210_000,
+        declineReason: null,
+      });
+    });
+
+    it('reports a failed refund with Stripe’s reason', () => {
+      expect(
+        verify(
+          refundEvent('refund.failed', {
+            status: 'failed',
+            failure_reason: 'insufficient_funds',
+          }),
+        ),
+      ).toMatchObject({
+        type: 'refund_failed',
+        gatewayRef: 're_123',
+        declineReason: 'insufficient_funds',
+      });
+    });
+
+    it('reports a cancelled refund as failed — the money never went back', () => {
+      expect(
+        verify(refundEvent('refund.updated', { status: 'canceled' })).type,
+      ).toBe('refund_failed');
+    });
+
+    it.each(['requires_action', 'pending'])(
+      'ignores a refund still in flight (%s)',
+      (status) => {
+        expect(verify(refundEvent('refund.updated', { status })).type).toBe(
+          'ignored',
+        );
+      },
+    );
+
+    // `refunds.create` already answered synchronously for this one; only a
+    // later change of state needs a webhook.
+    it('ignores refund.created', () => {
+      expect(verify(refundEvent('refund.created')).type).toBe('ignored');
     });
   });
 });

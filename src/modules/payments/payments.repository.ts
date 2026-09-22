@@ -401,6 +401,48 @@ export class PaymentsRepository {
     });
   }
 
+  /**
+   * Keep the provider's reference on a refund that has not settled yet — the
+   * only thing its later webhook carries to find this row by. Only a pending
+   * row takes it: a refund already finished has its reference already.
+   */
+  async markRefundPending(
+    refundId: string,
+    gatewayRef: string,
+    now: Date,
+  ): Promise<void> {
+    await this.db
+      .update(refunds)
+      .set({ gatewayRef, updatedAt: now })
+      .where(and(eq(refunds.id, refundId), eq(refunds.status, 'pending')));
+  }
+
+  /**
+   * The refund a provider callback names, by the provider's refund reference.
+   *
+   * Tenant-scoped on purpose, unlike `findByGatewayRef`: the webhook's URL
+   * token has already said whose callback this is, so one workspace's signed
+   * callback can never finish — or fail — another workspace's refund.
+   */
+  async findRefundByGatewayRef(
+    organizationId: number,
+    gatewayRef: string,
+  ): Promise<RefundRow | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(refunds)
+        .where(
+          and(
+            eq(refunds.organizationId, organizationId),
+            eq(refunds.gatewayRef, gatewayRef),
+          ),
+        )
+        .limit(1);
+      return row ?? null;
+    });
+  }
+
   /** The money did not move — record why, and leave the ticket valid. */
   async markRefundFailed(
     refundId: string,

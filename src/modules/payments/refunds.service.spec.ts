@@ -5,7 +5,7 @@ import type { OrderPaymentPort } from './ports/order-payment.port';
 import type { PaymentProviderPort } from './ports/payment-provider.port';
 import type { PaymentRow, RefundRow } from './payments.repository';
 import type { PaymentsRepository } from './payments.repository';
-import { RefundsService } from './refunds.service';
+import { RefundsService, type ProviderRefundReport } from './refunds.service';
 
 const NOW = new Date('2026-06-01T00:00:00Z');
 const ORG = 7;
@@ -61,6 +61,10 @@ describe('RefundsService (US-FIN-02)', () => {
         .mockResolvedValue({ refund: refundRow(), fresh: true }),
       markRefundFailed: jest.fn().mockResolvedValue(undefined),
       markRefundedIn: jest.fn().mockResolvedValue(undefined),
+      markRefundPending: jest.fn().mockResolvedValue(undefined),
+      findRefundByGatewayRef: jest
+        .fn()
+        .mockResolvedValue(refundRow({ gatewayRef: 're_pending' })),
     } as unknown as jest.Mocked<PaymentsRepository>;
     provider = {
       refund: jest.fn().mockResolvedValue({
@@ -199,5 +203,120 @@ describe('RefundsService (US-FIN-02)', () => {
     const result = await refund();
     expect(result.status).toBe('pending');
     expect(orders.refundOrder).not.toHaveBeenCalled();
+  });
+
+  it('records the provider’s reference on a pending refund, so its webhook can find it', async () => {
+    provider.refund.mockResolvedValue({
+      refundRef: 're_pending',
+      status: 'pending',
+      failureReason: null,
+    });
+    await refund();
+    expect(repo.markRefundPending).toHaveBeenCalledWith(
+      'r-1',
+      're_pending',
+      NOW,
+    );
+  });
+
+  /**
+   * The provider's refund webhook finishing a refund left pending — the
+   * PromptPay case, settled only once the buyer has given Stripe a bank
+   * account. It must land exactly as the immediate path would have.
+   */
+  describe('completePending — the provider settles later', () => {
+    const report = (o: Partial<ProviderRefundReport> = {}) =>
+      service.completePending({
+        organizationId: ORG,
+        refundRef: 're_pending',
+        outcome: 'succeeded',
+        amountSatang: TOTAL,
+        failureReason: null,
+        ...o,
+      });
+
+    it('looks the refund up only within the workspace the callback named', async () => {
+      await report();
+      expect(repo.findRefundByGatewayRef).toHaveBeenCalledWith(
+        ORG,
+        're_pending',
+      );
+    });
+
+    it('frees the tickets in the same transaction as the ledger, as the immediate path does', async () => {
+      const tx = {};
+      orders.refundOrder.mockImplementation((_o, _r, work) =>
+        work(tx as never).then(() => ({ ticketsVoided: 2, seatsReleased: 0 })),
+      );
+      expect(await report()).toBe('settled');
+      expect(orders.refundOrder).toHaveBeenCalledWith(
+        ORG,
+        'o-1',
+        expect.any(Function),
+      );
+      expect(repo.markRefundedIn).toHaveBeenCalledWith(tx, {
+        refundId: 'r-1',
+        paymentId: PAYMENT_ID,
+        gatewayRef: 're_pending',
+        now: NOW,
+      });
+    });
+
+    it('does nothing for a refund it has no record of', async () => {
+      repo.findRefundByGatewayRef.mockResolvedValue(null);
+      expect(await report()).toBe('unknown');
+      expect(orders.refundOrder).not.toHaveBeenCalled();
+      expect(repo.markRefundFailed).not.toHaveBeenCalled();
+    });
+
+    it('does nothing twice — a refund already finished stays as it is', async () => {
+      repo.findRefundByGatewayRef.mockResolvedValue(
+        refundRow({ status: 'succeeded' }),
+      );
+      expect(await report()).toBe('already_final');
+      expect(orders.refundOrder).not.toHaveBeenCalled();
+    });
+
+    it('does not reopen a refund already recorded as failed', async () => {
+      repo.findRefundByGatewayRef.mockResolvedValue(
+        refundRow({ status: 'failed' }),
+      );
+      expect(await report()).toBe('already_final');
+      expect(orders.refundOrder).not.toHaveBeenCalled();
+    });
+
+    it('records a failure and leaves the tickets valid — the money never went back', async () => {
+      expect(
+        await report({
+          outcome: 'failed',
+          failureReason: 'insufficient_funds',
+        }),
+      ).toBe('failed');
+      expect(repo.markRefundFailed).toHaveBeenCalledWith(
+        'r-1',
+        'insufficient_funds',
+      );
+      expect(orders.refundOrder).not.toHaveBeenCalled();
+    });
+
+    it('refuses to settle a refund for a different amount than was issued', async () => {
+      expect(await report({ amountSatang: TOTAL - 1 })).toBe('amount_mismatch');
+      expect(orders.refundOrder).not.toHaveBeenCalled();
+      expect(repo.markRefundFailed).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Stripe can take a succeeded refund back (the buyer's bank returned it)
+     * and then fail it. The tickets are already void; reviving them silently
+     * would be a guess, so a person has to look.
+     */
+    it('flags a failure reported after the refund had already settled, and changes nothing', async () => {
+      repo.findRefundByGatewayRef.mockResolvedValue(
+        refundRow({ status: 'succeeded' }),
+      );
+      expect(await report({ outcome: 'failed' })).toBe('failed_after_settled');
+      expect(repo.markRefundFailed).not.toHaveBeenCalled();
+      expect(orders.refundOrder).not.toHaveBeenCalled();
+    });
   });
 });

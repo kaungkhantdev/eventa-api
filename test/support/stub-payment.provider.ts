@@ -33,6 +33,14 @@ const DECLINE_PREFIX = 'decline';
 const DECLINE_REASON = 'Your card was declined. Please try another card.';
 
 /**
+ * A charge whose reference starts with this refunds as `pending`, the way a
+ * PromptPay refund waits while Stripe emails the buyer for their bank details.
+ * It is how a suite walks the webhook that finishes such a refund, without a
+ * provider account — the counterpart of `DECLINE_PREFIX` for the way back.
+ */
+export const PENDING_REFUND_PREFIX = 'fake_pi_refund_pending_';
+
+/**
  * A TEST-ONLY stand-in for the payment provider.
  *
  * It lives here rather than in `src/` on purpose: a double that can mint a
@@ -81,7 +89,9 @@ export class StubPaymentProvider extends PaymentProviderPort {
   refund(input: RefundPaymentInput): Promise<RefundedPayment> {
     return Promise.resolve({
       refundRef: `fake_re_${digest(input.idempotencyKey).slice(0, 24)}`,
-      status: 'succeeded',
+      status: input.gatewayRef.startsWith(PENDING_REFUND_PREFIX)
+        ? 'pending'
+        : 'succeeded',
       failureReason: null,
     });
   }
@@ -185,7 +195,12 @@ function declined(gatewayRef: string): StartedPayment {
   };
 }
 
-/** The stub's callback body — the same shape the Stripe adapter normalises to. */
+/**
+ * The stub's callback body — the same shape the Stripe adapter normalises to.
+ * A refund's callback carries `type: 'refund_succeeded' | 'refund_failed'` and,
+ * as `gatewayRef`, the REFUND's own reference (`refunds.gateway_ref`) rather
+ * than the charge's.
+ */
 function parseEvent(rawBody: Buffer): VerifiedWebhook {
   const body = JSON.parse(rawBody.toString('utf8')) as Partial<VerifiedWebhook>;
   return {
