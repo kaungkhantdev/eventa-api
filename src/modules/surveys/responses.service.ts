@@ -3,6 +3,7 @@ import { Clock } from '../../common/time/clock';
 import { DomainException } from '../../common/errors/domain.exception';
 import type { AuthContext } from '../auth/auth.types';
 import { UsersRepository } from '../users/users.repository';
+import { summariseNps, type NpsSummary } from './nps-rules';
 import {
   assertAnswers,
   completionOf,
@@ -12,9 +13,13 @@ import {
 } from './response-rules';
 import {
   SurveyResponsesRepository,
+  type FeedbackScope,
   type LiveSurvey,
   type ResponseRow,
 } from './responses.repository';
+
+/** The ratings, completion, and the NPS — all over the same answers. */
+export type FeedbackFigures = FeedbackSummary & { nps: NpsSummary };
 
 /** A personal list, not an export — one event's feedback is bounded. */
 const MAX_RESPONSES = 500;
@@ -73,16 +78,29 @@ export class SurveyResponsesService {
   }
 
   /**
-   * The ratings, and how many of those asked answered. The post-event
-   * thank-you is what asks — it carries the survey link — so the people it
-   * reached are the denominator.
+   * The ratings, how many of those asked answered, and the NPS — for the
+   * workspace, one event, or one survey. The post-event thank-you is what asks
+   * — it carries the survey link — so the people it reached are the
+   * denominator.
+   *
+   * Every figure reads the same scope: an average for one survey beside a
+   * completion for the whole workspace would be two numbers on one screen
+   * describing different things.
    */
-  async summary(auth: AuthContext, eventId?: string): Promise<FeedbackSummary> {
-    const [ratings, reach] = await Promise.all([
-      this.repo.ratingsFor(auth.organizationId, eventId),
-      this.repo.reachFor(auth.organizationId, eventId),
+  async summary(
+    auth: AuthContext,
+    scope: FeedbackScope,
+  ): Promise<FeedbackFigures> {
+    const [ratings, scores, reach] = await Promise.all([
+      this.repo.ratingsFor(auth.organizationId, scope),
+      this.repo.npsScoresFor(auth.organizationId, scope),
+      this.repo.reachFor(auth.organizationId, scope),
     ]);
-    return { ...summarise(ratings), ...completionOf(reach) };
+    return {
+      ...summarise(ratings),
+      ...completionOf(reach),
+      nps: summariseNps(scores),
+    };
   }
 
   countsByEvent(

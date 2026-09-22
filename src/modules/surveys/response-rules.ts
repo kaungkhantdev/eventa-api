@@ -1,4 +1,5 @@
 import { DomainException } from '../../common/errors/domain.exception';
+import { MAX_NPS_SCORE, MIN_NPS_SCORE } from './nps-rules';
 import type { SurveyQuestionType } from './survey-rules';
 
 /** The scale a rating question is answered on. */
@@ -17,16 +18,36 @@ export interface SubmittedAnswer {
   rating?: number;
   answerText?: string;
   choice?: string;
+  /** 0–10, answering an `nps` question. */
+  score?: number;
 }
+
+type AnswerField = keyof Omit<SubmittedAnswer, 'questionId'>;
+
+/** The one field each kind of question is answered in. */
+const ANSWER_FIELD: Record<SurveyQuestionType, AnswerField> = {
+  rating: 'rating',
+  text: 'answerText',
+  choice: 'choice',
+  nps: 'score',
+};
+
+const ANSWER_FIELDS = Object.values(ANSWER_FIELD);
 
 /**
  * Whether a submitted set of answers is one this survey can accept
  * (US-MSG-08).
  *
- * Ratings and choices are REQUIRED; free text is not. A number and a chosen
- * option are what the figures are built from, and an average taken over a
- * question half the room skipped says something different from the one an
- * organizer thinks they are reading. Nobody should be made to write prose.
+ * Ratings, recommendation scores and choices are REQUIRED; free text is not. A
+ * number and a chosen option are what the figures are built from, and an
+ * average taken over a question half the room skipped says something different
+ * from the one an organizer thinks they are reading. Nobody should be made to
+ * write prose.
+ *
+ * Each answer carries a value in its own question's field and no other. The
+ * figures read a column without asking which question filled it, so a `score`
+ * riding along on a rating question would be counted in the NPS, and a
+ * `rating` on a recommendation question in the average.
  */
 export function assertAnswers(
   questions: AnsweredQuestion[],
@@ -57,14 +78,19 @@ function assertShape(
   question: AnsweredQuestion,
   answer: SubmittedAnswer,
 ): void {
+  assertOnlyItsOwnField(question, answer);
+
+  if (question.type === 'nps') {
+    if (!isOnScale(answer.score, MIN_NPS_SCORE, MAX_NPS_SCORE)) {
+      throw DomainException.validation(
+        `“${question.prompt}” is answered from ${MIN_NPS_SCORE} to ${MAX_NPS_SCORE}.`,
+      );
+    }
+    return;
+  }
+
   if (question.type === 'rating') {
-    const rating = answer.rating;
-    if (
-      rating === undefined ||
-      !Number.isInteger(rating) ||
-      rating < MIN_RATING ||
-      rating > MAX_RATING
-    ) {
+    if (!isOnScale(answer.rating, MIN_RATING, MAX_RATING)) {
       throw DomainException.validation(
         `“${question.prompt}” is answered from ${MIN_RATING} to ${MAX_RATING}.`,
       );
@@ -79,6 +105,34 @@ function assertShape(
       );
     }
   }
+}
+
+function assertOnlyItsOwnField(
+  question: AnsweredQuestion,
+  answer: SubmittedAnswer,
+): void {
+  const own = ANSWER_FIELD[question.type];
+  const stray = ANSWER_FIELDS.some(
+    (field) => field !== own && answer[field] != null,
+  );
+  if (stray) {
+    throw DomainException.validation(
+      `“${question.prompt}” was sent an answer meant for a different kind of question.`,
+    );
+  }
+}
+
+function isOnScale(
+  value: number | undefined,
+  min: number,
+  max: number,
+): boolean {
+  return (
+    value !== undefined &&
+    Number.isInteger(value) &&
+    value >= min &&
+    value <= max
+  );
 }
 
 export interface RatingSummary {

@@ -68,6 +68,68 @@ describe('answering a survey (US-MSG-08)', () => {
   });
 });
 
+describe('answering a recommendation question (US-MSG-08)', () => {
+  const withNps = [
+    ...questions,
+    {
+      id: 4,
+      type: 'nps' as const,
+      prompt: 'How likely are you to recommend us?',
+      options: [],
+    },
+  ];
+  const npsOf = (score: number) => [...answers, { questionId: 4, score }];
+
+  it('accepts 0, which is an answer and not a missing one', () => {
+    expect(() => assertAnswers(withNps, npsOf(0))).not.toThrow();
+  });
+
+  it('accepts 10', () => {
+    expect(() => assertAnswers(withNps, npsOf(10))).not.toThrow();
+  });
+
+  it('insists on the score', () => {
+    // A score half the room skipped measures who bothered, not who would
+    // recommend it.
+    expect(() => assertAnswers(withNps, answers)).toThrow(/recommend us/);
+  });
+
+  it('refuses a score off the 0–10 scale, or between its points', () => {
+    for (const score of [11, -1, 7.5]) {
+      expect(() => assertAnswers(withNps, npsOf(score))).toThrow(/0 to 10/);
+    }
+  });
+
+  it('refuses a recommendation answered as a star rating', () => {
+    // A 9 in the rating column would land in the average, not the NPS.
+    expect(() =>
+      assertAnswers(withNps, [...answers, { questionId: 4, rating: 5 }]),
+    ).toThrow(DomainException);
+  });
+});
+
+describe('a value meant for a different kind of question (US-MSG-08)', () => {
+  it('refuses a score sent with a star rating', () => {
+    // Stored, it would count in the NPS through a question that never asked
+    // for one.
+    expect(() =>
+      assertAnswers(questions, [
+        { questionId: 1, rating: 5, score: 9 },
+        answers[1],
+      ]),
+    ).toThrow(/How was it/);
+  });
+
+  it('refuses a rating sent with a choice', () => {
+    expect(() =>
+      assertAnswers(questions, [
+        answers[0],
+        { questionId: 3, choice: 'Panel', rating: 2 },
+      ]),
+    ).toThrow(/Best bit/);
+  });
+});
+
 describe('what a pile of responses adds up to (US-MSG-08)', () => {
   it('averages the ratings and counts each star', () => {
     const summary = summarise([5, 4, 5, 3]);

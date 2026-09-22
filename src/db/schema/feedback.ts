@@ -1,8 +1,11 @@
+import { sql } from 'drizzle-orm';
 import {
   bigint,
+  check,
   index,
   integer,
   pgTable,
+  smallint,
   text,
   timestamp,
   unique,
@@ -109,9 +112,13 @@ export const surveyResponses = pgTable(
 /**
  * One answer within a response (US-MSG-10).
  *
- * Three columns, one per question type, and exactly one is filled. A single
+ * Four columns, one per question type, and exactly one is filled. A single
  * `value` text column would have meant parsing "4" back into a number every
  * time an average was taken, and an average is the whole point of a rating.
+ *
+ * A recommendation score has its own column rather than sharing `rating`:
+ * every rating read takes "rating is not null" to mean a star, with no join to
+ * the question's type, and a 0 or a 9 there would drag the average.
  */
 export const surveyAnswers = pgTable(
   'survey_answers',
@@ -132,9 +139,14 @@ export const surveyAnswers = pgTable(
     answerText: text(),
     /** The option chosen, for a `choice` question. */
     choice: text(),
+    /** 0–10, for an `nps` question. */
+    score: smallint(),
     createdAt: createdAt(),
   },
-  (t) => [index('ix_survey_answers_response').on(t.responseId)],
+  (t) => [
+    index('ix_survey_answers_response').on(t.responseId),
+    check('ck_survey_answers_score', sql`${t.score} BETWEEN 0 AND 10`),
+  ],
 );
 
 /**

@@ -20,6 +20,12 @@ export interface DraftSurvey {
 const MIN_OPTIONS = 2;
 
 /**
+ * One recommendation question per survey: a second would count each person
+ * twice in that survey's NPS.
+ */
+const MAX_NPS_QUESTIONS = 1;
+
+/**
  * Whether a survey can actually be answered (US-MSG-09).
  *
  * Checked on every save, not only on going live: a draft is still something an
@@ -41,6 +47,20 @@ export function assertAnswerable(survey: DraftSurvey): void {
   survey.questions.forEach((question, index) =>
     assertQuestion(question, index + 1),
   );
+  assertOneRecommendation(survey.questions);
+}
+
+function assertOneRecommendation(questions: DraftQuestion[]): void {
+  let seen = 0;
+  questions.forEach((question, index) => {
+    if (question.type !== 'nps') return;
+    seen += 1;
+    if (seen > MAX_NPS_QUESTIONS) {
+      throw DomainException.validation(
+        `Question ${index + 1} is a second recommendation score — a survey asks it once.`,
+      );
+    }
+  });
 }
 
 function assertQuestion(question: DraftQuestion, number: number): void {

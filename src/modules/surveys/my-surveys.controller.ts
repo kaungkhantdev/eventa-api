@@ -67,6 +67,7 @@ export class MySurveysController {
         rating: answer.rating,
         answerText: answer.answerText,
         choice: answer.choice,
+        score: answer.score,
       })),
     );
   }

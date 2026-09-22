@@ -435,6 +435,20 @@
       "when": 1787500000011,
       "tag": "0061_order_approval",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1787500000012,
+      "tag": "0062_survey_question_nps",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1787500000013,
+      "tag": "0063_survey_answer_score",
+      "breakpoints": true
     }
   ]
 }

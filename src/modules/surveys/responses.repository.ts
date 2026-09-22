@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
   orders,
@@ -23,6 +23,15 @@ const SENT = 'sent';
 
 /** A type alias, not an interface: `execute<T>` wants a Record. */
 type ReachRow = { asked: number; answered: number };
+
+/**
+ * Which answers a feedback figure is taken over: the whole workspace, one
+ * event, or one survey. Every figure in a summary reads the same scope.
+ */
+export interface FeedbackScope {
+  eventId?: string;
+  surveyId?: number;
+}
 
 export interface LiveSurvey {
   id: number;
@@ -149,13 +158,14 @@ export class SurveyResponsesRepository {
           rating: answer.rating ?? null,
           answerText: answer.answerText?.trim() || null,
           choice: answer.choice ?? null,
+          score: answer.score ?? null,
         })),
       );
     });
   }
 
-  /** Every rating given for an event, for the averages and the breakdown. */
-  ratingsFor(organizationId: number, eventId?: string): Promise<number[]> {
+  /** Every rating given in scope, for the averages and the breakdown. */
+  ratingsFor(organizationId: number, scope: FeedbackScope): Promise<number[]> {
     return withTenant(this.db, organizationId, async (tx) => {
       const rows = await tx
         .select({ rating: surveyAnswers.rating })
@@ -166,12 +176,39 @@ export class SurveyResponsesRepository {
         )
         .where(
           and(
-            eq(surveyAnswers.organizationId, organizationId),
-            eventId ? eq(surveyResponses.eventId, eventId) : undefined,
+            ...inScope(organizationId, scope),
             sql`${surveyAnswers.rating} is not null`,
           ),
         );
       return rows.map((row) => Number(row.rating));
+    });
+  }
+
+  /**
+   * Every recommendation score given in scope, for the NPS (US-MSG-08).
+   *
+   * Pooled answer by answer, so a workspace-wide figure weighs each event by
+   * how many answered it — US-MSG-08's "weighted by responses".
+   */
+  npsScoresFor(
+    organizationId: number,
+    scope: FeedbackScope,
+  ): Promise<number[]> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({ score: surveyAnswers.score })
+        .from(surveyAnswers)
+        .innerJoin(
+          surveyResponses,
+          eq(surveyResponses.id, surveyAnswers.responseId),
+        )
+        .where(
+          and(
+            ...inScope(organizationId, scope),
+            isNotNull(surveyAnswers.score),
+          ),
+        );
+      return rows.map((row) => Number(row.score));
     });
   }
 
@@ -203,12 +240,25 @@ export class SurveyResponsesRepository {
    *   the BUYER's spelling of the address while `users.email` is citext. Without
    *   it "Anan@…" asked and "anan@…" answering would never meet.
    *
+   * Scoped to one survey, both halves are that survey's: asked is the
+   * thank-you for ITS event, and answered is answers to IT. A second survey of
+   * the same event is not completed by somebody answering the first.
+   *
    * Literal SQL with explicit aliases: Drizzle drops table qualifiers from
    * interpolated columns inside a CTE, so only values are interpolated here.
    */
-  reachFor(organizationId: number, eventId?: string): Promise<Reach> {
+  reachFor(organizationId: number, scope: FeedbackScope): Promise<Reach> {
+    const { eventId, surveyId } = scope;
     const deliveryEvent = eventId ? sql`AND d.event_id = ${eventId}` : sql``;
     const responseEvent = eventId ? sql`AND r.event_id = ${eventId}` : sql``;
+    const deliverySurvey = surveyId
+      ? sql`AND d.event_id = (SELECT s.event_id FROM surveys s
+                               WHERE s.id = ${surveyId}
+                                 AND s.organization_id = ${organizationId})`
+      : sql``;
+    const responseSurvey = surveyId
+      ? sql`AND r.survey_id = ${surveyId}`
+      : sql``;
     return withTenant(this.db, organizationId, async (tx) => {
       const result = await tx.execute<ReachRow>(sql`
         WITH asked AS (
@@ -219,6 +269,7 @@ export class SurveyResponsesRepository {
             AND d.status = ${SENT}
             AND d.event_id IS NOT NULL
             ${deliveryEvent}
+            ${deliverySurvey}
         ),
         answered AS (
           SELECT DISTINCT r.event_id, lower(u.email) AS email
@@ -226,6 +277,7 @@ export class SurveyResponsesRepository {
           JOIN users u ON u.id = r.user_id
           WHERE r.organization_id = ${organizationId}
             ${responseEvent}
+            ${responseSurvey}
         )
         SELECT count(*)::int AS asked, count(ans.email)::int AS answered
         FROM asked a
@@ -309,4 +361,16 @@ export class SurveyResponsesRepository {
         .filter((row) => !filter.rating || row.rating === filter.rating);
     });
   }
+}
+
+/**
+ * The answers a figure is taken over. Filtered on the RESPONSE's event and
+ * survey — each answer's response says what it was about.
+ */
+function inScope(organizationId: number, scope: FeedbackScope) {
+  return [
+    eq(surveyAnswers.organizationId, organizationId),
+    scope.eventId ? eq(surveyResponses.eventId, scope.eventId) : undefined,
+    scope.surveyId ? eq(surveyResponses.surveyId, scope.surveyId) : undefined,
+  ];
 }
