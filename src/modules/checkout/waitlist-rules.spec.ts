@@ -2,6 +2,7 @@ import {
   WAITLIST_CLOSED,
   WAITLIST_RESERVED_SEATING,
   WAITLIST_TICKETS_LEFT,
+  autoOffersWaitlist,
   canJoinWaitlist,
   confirmsOnOffer,
   hasOpenWaitlist,
@@ -65,5 +66,30 @@ describe('offering new places to the line (US-REG-04)', () => {
     // "Free tickets confirm immediately."
     expect(confirmsOnOffer({ totalSatang: 0 })).toBe(true);
     expect(confirmsOnOffer({ totalSatang: 210_000 })).toBe(false);
+  });
+});
+
+describe('a raised allocation offering itself to the line (US-REG-04)', () => {
+  const NO_APPROVAL = { ...OPEN, requiresApproval: false };
+
+  it('offers on its own on an open waitlist nobody has to approve', () => {
+    expect(autoOffersWaitlist(NO_APPROVAL)).toBe(true);
+  });
+
+  it('leaves the line to the organizer when the event requires approval', () => {
+    // US-REG-02: every registration there waits for a decision, and handing
+    // out a place is one — a capacity edit is not.
+    expect(autoOffersWaitlist({ ...NO_APPROVAL, requiresApproval: true })).toBe(
+      false,
+    );
+  });
+
+  it('offers nobody where there is no open waitlist to offer from', () => {
+    expect(autoOffersWaitlist({ ...NO_APPROVAL, waitlistEnabled: false })).toBe(
+      false,
+    );
+    expect(
+      autoOffersWaitlist({ ...NO_APPROVAL, seatingMode: 'reserved' }),
+    ).toBe(false);
   });
 });

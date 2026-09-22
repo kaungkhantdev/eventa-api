@@ -7,7 +7,8 @@
  * The line is served strictly in order, exactly as an organizer's offer
  * serves one person: a paid registration is held its places for the offer
  * window and sent the offer; a free one is confirmed. It stops at the first
- * person whose request no longer fits — nobody is skipped.
+ * person whose request no longer fits — nobody is skipped. On an event that
+ * requires approval nobody is given a place: that is the organizer's decision.
  */
 export abstract class WaitlistOffersPort {
   /**

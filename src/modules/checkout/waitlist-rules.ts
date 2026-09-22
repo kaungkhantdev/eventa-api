@@ -53,6 +53,24 @@ export function hasOpenWaitlist(event: {
 }
 
 /**
+ * Whether a raised allocation offers its new places to the line by itself
+ * (US-REG-04), rather than waiting for an organizer to offer them.
+ *
+ * Not on an event that requires approval (US-REG-02): every registration there
+ * waits for a decision, and handing out a place is one — a free place would be
+ * confirmed, a paid one sold, with nobody deciding. A capacity edit is not that
+ * decision (it needs a different permission from the one deciding needs), so
+ * the line stays as it is and the organizer offers from it by hand.
+ */
+export function autoOffersWaitlist(event: {
+  waitlistEnabled: boolean;
+  seatingMode: SeatingMode;
+  requiresApproval: boolean;
+}): boolean {
+  return hasOpenWaitlist(event) && !event.requiresApproval;
+}
+
+/**
  * A free registration is confirmed when its place comes up, not offered: the
  * story's "free tickets confirm immediately" — there is nothing to pay for by
  * a deadline.

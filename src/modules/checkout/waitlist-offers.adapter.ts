@@ -5,7 +5,7 @@ import { WaitlistOffersPort } from '../ticketing/ports/waitlist-offers.port';
 import { CheckoutRepository, type WaitlistEntry } from './checkout.repository';
 import { CheckoutEventPort } from './ports/checkout-event.port';
 import { RegistrationApprovalAdapter } from './registration-approval.adapter';
-import { confirmsOnOffer, hasOpenWaitlist } from './waitlist-rules';
+import { autoOffersWaitlist, confirmsOnOffer } from './waitlist-rules';
 
 /**
  * How long a free registration's place is held while its approval runs. The
@@ -30,7 +30,8 @@ const STOPPED_EARLY = 'Waitlist auto-offer stopped early';
  * for the offer window and sent `waitlist.offered`; a free one is confirmed
  * through the approval settlement. The line stops at the first person whose
  * request no longer fits: serving whoever is behind them would be skipping
- * them.
+ * them. An event that requires approval is left to its organizer
+ * (`autoOffersWaitlist`).
  */
 @Injectable()
 export class WaitlistOffersAdapter extends WaitlistOffersPort {
@@ -59,7 +60,7 @@ export class WaitlistOffersAdapter extends WaitlistOffersPort {
     const served: string[] = [];
     try {
       const event = await this.events.findOwnedById(organizationId, eventId);
-      if (event && hasOpenWaitlist(event)) {
+      if (event && autoOffersWaitlist(event)) {
         await this.serveInOrder(organizationId, ticketTypeId, served);
       }
     } catch (err) {

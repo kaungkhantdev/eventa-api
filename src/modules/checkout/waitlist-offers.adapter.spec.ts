@@ -24,6 +24,7 @@ const OPEN_EVENT = {
   id: EVENT,
   waitlistEnabled: true,
   seatingMode: 'ga',
+  requiresApproval: false,
 } as CheckoutEvent;
 
 function inLine(id: string, totalSatang = 105_000, quantity = 1) {
@@ -124,6 +125,9 @@ describe('WaitlistOffersAdapter (US-REG-04)', () => {
       { ...OPEN_EVENT, seatingMode: 'reserved' },
     ],
     ['the event is not live (draft, completed or cancelled)', null],
+    // US-REG-02: a place there is the organizer's decision, not a capacity
+    // edit's — free or paid, they can still offer it by hand.
+    ['the event requires approval', { ...OPEN_EVENT, requiresApproval: true }],
   ])('offers nobody when %s', async (_why, event) => {
     events.findOwnedById.mockResolvedValue(event);
     line(inLine('A'));

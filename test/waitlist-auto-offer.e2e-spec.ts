@@ -90,7 +90,7 @@ describe('Raising capacity offers the waitlist the new places (e2e — US-REG-04
       ]);
     }
     // Both tickets sold out again, under their own names, and the event back
-    // to a general-admission one with the waitlist on.
+    // to a general-admission one with the waitlist on and no approval step.
     await pool.query(
       `UPDATE ticket_types SET sold = $2, total = $2 WHERE organization_id = $1`,
       [orgId, SOLD_OUT_AT],
@@ -100,7 +100,8 @@ describe('Raising capacity offers the waitlist the new places (e2e — US-REG-04
       PAID_NAME,
     ]);
     await pool.query(
-      `UPDATE events SET waitlist_enabled = true, seating_mode = 'ga' WHERE id = $1`,
+      `UPDATE events SET waitlist_enabled = true, seating_mode = 'ga', requires_approval = false
+        WHERE id = $1`,
       [eventId],
     );
   });
@@ -268,6 +269,36 @@ describe('Raising capacity offers the waitlist the new places (e2e — US-REG-04
     const confirmed = await outbox('registration.confirmed');
     expect(confirmed.map((c) => c.aggregate_id)).toEqual([first]);
     expect((await orderRow(second)).status).toBe('waitlisted');
+  });
+
+  it('an event that requires approval leaves the line to the organizer', async () => {
+    // US-REG-02: every registration there waits for a decision, and a
+    // capacity edit is not one — free or paid, nobody is given a place.
+    await pool.query(
+      `UPDATE events SET requires_approval = true WHERE id = $1`,
+      [eventId],
+    );
+    const free = await joined({ tier: freeTier });
+    const paid = await joined();
+
+    const freeRaise = await updated(freeTier, { total: SOLD_OUT_AT + 1 });
+    const paidRaise = await updated(paidTier, { total: SOLD_OUT_AT + 1 });
+
+    expect(freeRaise.waitlistOffered).toBe(0);
+    expect(paidRaise.waitlistOffered).toBe(0);
+    for (const id of [free, paid]) {
+      const row = await orderRow(id);
+      expect(row.status).toBe('waitlisted');
+      expect(row.approved_at).toBeNull();
+      expect(await holdsFor(id)).toEqual([]);
+    }
+    const issued = await pool.query(
+      `SELECT id FROM tickets WHERE organization_id = $1`,
+      [orgId],
+    );
+    expect(issued.rows).toHaveLength(0);
+    expect(await outbox('registration.confirmed')).toEqual([]);
+    expect(await outbox('waitlist.offered')).toEqual([]);
   });
 
   it('a place a buyer is checking out with is not offered', async () => {
