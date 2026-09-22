@@ -284,9 +284,18 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
         order_id: 'o-1',
         org_id: '7',
       });
+      // Prefills the hosted page's email field; it is not a receipt.
       expect(params.customer_email).toBe('anan@example.test');
-      expect(params.payment_intent_data?.receipt_email).toBe(
-        'anan@example.test',
+    });
+
+    // Eventa's itemized VAT receipt (eventa-worker, behind the organizer's
+    // message switch AND `email_receipts`) is the only receipt. `receipt_email`
+    // makes Stripe send its own in live mode whatever the dashboard says.
+    it('asks Stripe for no receipt of its own — Eventa sends the VAT receipt', async () => {
+      const { adapter, session } = harness();
+      await adapter.start(input());
+      expect(sessionParams(session).payment_intent_data).not.toHaveProperty(
+        'receipt_email',
       );
     });
 
@@ -333,6 +342,19 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
       const [params] = create.mock.calls[0] as [
         Stripe.PaymentIntentCreateParams,
       ];
+      expect(params.payment_method_data?.billing_details?.email).toBe(
+        'anan@example.test',
+      );
+    });
+
+    // The billing email above is for a refund; a receipt is Eventa's to send.
+    it('asks Stripe for no receipt of its own, but keeps the email a refund needs', async () => {
+      const { adapter, create } = harness(qrIntent);
+      await adapter.start(input({ method: 'PromptPay' }));
+      const [params] = create.mock.calls[0] as [
+        Stripe.PaymentIntentCreateParams,
+      ];
+      expect(params).not.toHaveProperty('receipt_email');
       expect(params.payment_method_data?.billing_details?.email).toBe(
         'anan@example.test',
       );

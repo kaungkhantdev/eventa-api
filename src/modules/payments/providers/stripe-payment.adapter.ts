@@ -94,7 +94,7 @@ const IGNORED: VerifiedWebhook = {
  * a `client_secret` that authorises Stripe's OWN hosted fields, and PromptPay
  * returns a bank-scannable payload for an amount.
  *
- * Three Stripe specifics worth knowing, each verified against the installed SDK
+ * Four Stripe specifics worth knowing, each verified against the installed SDK
  * and the published docs rather than assumed:
  *
  * - **PromptPay has no provider-side expiry.** Unlike PayNow or Pix, Stripe
@@ -108,6 +108,12 @@ const IGNORED: VerifiedWebhook = {
  * - **Cards take `statement_descriptor_suffix`, PromptPay takes nothing.**
  *   Stripe rejects a full descriptor on cards and documents that PromptPay
  *   ignores the value outright (buyers see Stripe's Thai entity instead).
+ * - **No `receipt_email`, on any path.** Eventa's itemized VAT receipt, sent by
+ *   eventa-worker behind the organizer's message switch and `email_receipts`,
+ *   is the only receipt. `receipt_email` makes Stripe send its own in live mode
+ *   regardless of the account's email settings — a second receipt that ignores
+ *   both switches. `customer_email` only prefills the hosted page and
+ *   PromptPay's billing email is what a refund needs, so both stay.
  */
 @Injectable()
 export class StripePaymentAdapter extends PaymentProviderPort {
@@ -214,7 +220,6 @@ export class StripePaymentAdapter extends PaymentProviderPort {
       metadata,
       payment_intent_data: {
         metadata,
-        receipt_email: input.buyerEmail,
         // A SUFFIX, and Latin-only — the same rule the intent path follows,
         // because cards reject the full form and reject Thai script outright.
         ...(suffix ? { statement_descriptor_suffix: suffix } : {}),
@@ -345,7 +350,6 @@ function cardParams(
   const suffix = statementDescriptorSuffix(input.statementDescriptor);
   return {
     payment_method_types: ['card'],
-    receipt_email: input.buyerEmail,
     ...(suffix ? { statement_descriptor_suffix: suffix } : {}),
   };
 }
