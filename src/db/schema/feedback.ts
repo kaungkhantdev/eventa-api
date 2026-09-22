@@ -136,3 +136,32 @@ export const surveyAnswers = pgTable(
   },
   (t) => [index('ix_survey_answers_response').on(t.responseId)],
 );
+
+/**
+ * Bookkeeping for messages eventa-worker sends on a SCHEDULE (US-MSG-01/08) —
+ * the post-event thank-you and the event reminder.
+ *
+ * A job that runs every hour runs again, and this row is what stops the second
+ * run emailing everybody twice. `completedAt` is separate from `requestedAt`
+ * so a run that crashed halfway is RESUMED rather than treated as done: the
+ * claim says somebody started, the completion says everybody was reached.
+ *
+ * One table for every scheduled kind rather than one per job — each has
+ * exactly this shape, and a third job should be a new `kind`, not a new table.
+ */
+export const eventMessageRuns = pgTable(
+  'event_message_runs',
+  {
+    id: idPk(),
+    organizationId: bigint({ mode: 'number' })
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    eventId: uuid().notNull(),
+    /** The catalog slug of the message. */
+    kind: text().notNull(),
+    requestedAt: timestamp({ withTimezone: true }).notNull(),
+    completedAt: timestamp({ withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [unique('uq_event_message_runs').on(t.eventId, t.kind)],
+);

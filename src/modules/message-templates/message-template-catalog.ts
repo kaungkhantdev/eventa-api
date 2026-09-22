@@ -97,11 +97,11 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     slug: 'event-reminder',
     title: 'Event reminder',
     description:
-      'Sent 24 hours before an event starts, with the time and place.',
+      'Sent the day before an event starts, with the time, the place and the tickets.',
     channels: ['email'],
-    delivery: 'planned',
+    delivery: 'controlled',
     expected: false,
-    tags: [],
+    tags: ['{{first_name}}', '{{event_name}}', '{{event_venue}}'],
   },
   {
     slug: 'waitlist-offer',
@@ -116,11 +116,14 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
   {
     slug: 'post-event-thankyou',
     title: 'Post-event thank-you',
-    description: 'Sent the day after an event, with a link to leave feedback.',
+    // Only when there is a LIVE survey: a link to "no survey to answer" is a
+    // worse message than none, so an event without one is simply not thanked.
+    description:
+      'Sent the day after an event that has a live survey, with the link to answer it.',
     channels: ['email'],
-    delivery: 'planned',
+    delivery: 'controlled',
     expected: false,
-    tags: [],
+    tags: ['{{first_name}}', '{{event_name}}', '{{survey_url}}'],
   },
 ];
 
