@@ -223,6 +223,27 @@ describe('Checking a password-reset link (US-ACC-04, e2e)', () => {
     });
   });
 
+  /**
+   * Deleting or removing an account stamps `deleted_at` and leaves the
+   * password hash alone, so a link sent beforehand still carries a matching
+   * fingerprint: the soft-delete filter is the only thing that refuses it.
+   */
+  it('refuses a link to an account deleted after it was sent, on open and on submit', async () => {
+    const link = await requestLink(OWNER, 'admin');
+    await setOwnerDeleted(pool, true);
+    try {
+      const onOpen = await check(link);
+      const onSubmit = await request(server)
+        .post('/api/v1/auth/reset-password')
+        .send({ token: link, newPassword: 'deleted4pass' });
+
+      expectRefusedAsInvalid(onOpen);
+      expectRefusedAsInvalid(onSubmit);
+    } finally {
+      await setOwnerDeleted(pool, false);
+    }
+  });
+
   /** openapi.json is what eventa-web is written against. */
   it('is in the contract, with the token in the body and a nullable workspace', () => {
     const document = buildOpenApiDocument(app);
@@ -249,6 +270,19 @@ async function seedActiveAttendee(pool: Pool, email: string): Promise<void> {
      SELECT id, 'Reset Link Fan', $2, 'attendee', 'Active', 'argon2-seeded-hash'
        FROM organizations WHERE slug = $1`,
     [ORG_SLUG, email],
+  );
+}
+
+/**
+ * Soft-delete the owner's account the way account deletion and member removal
+ * do — `deleted_at` stamped, password hash untouched — or undo it.
+ */
+async function setOwnerDeleted(pool: Pool, deleted: boolean): Promise<void> {
+  await pool.query(
+    `UPDATE users SET deleted_at = CASE WHEN $3::boolean THEN now() END
+      WHERE email = $1
+        AND organization_id = (SELECT id FROM organizations WHERE slug = $2)`,
+    [OWNER, ORG_SLUG, deleted],
   );
 }
 
