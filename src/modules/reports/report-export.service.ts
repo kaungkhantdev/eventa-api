@@ -62,6 +62,10 @@ export type ExportableReport = (typeof EXPORTABLE)[number];
  * slice — until then a report that would run to tens of thousands of rows is
  * truncated rather than allowed to time out mid-download. The workbook and the
  * PDF say when they have been cut.
+ *
+ * One ceiling for all three formats, though they do not cost the same: see the
+ * capacity note in `common/export/pdf` for what a full one costs the event
+ * loop, and why a PDF-only ceiling is a decision rather than a tweak.
  */
 export const EXPORT_LIMIT = 5000;
 

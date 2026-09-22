@@ -13,6 +13,18 @@ import type { Column, TabularDocument } from './tabular';
  * money the reader may not see prints as a dash rather than ฿0.
  *
  * Drawn in Sarabun throughout so Thai event names render: see `thai-font`.
+ *
+ * CAPACITY, measured on a dev machine against a full 5,000-row, 8-column
+ * transactions document with Thai names: ~0.36 s of UNINTERRUPTED synchronous
+ * layout (of a 0.41 s total, 631 KB, 201 pages), against ~0.04 s for the same
+ * document as a workbook and ~6 ms as CSV. Nothing bounds how many run at
+ * once, so concurrent PDF exports stall everything else in the process —
+ * health checks and checkout included. Tolerable today because the routes are
+ * permission-gated and the story's own answer (US-RPT-11 AC5: prepare the file
+ * off the request thread, hand back a link) is a separate slice. The interim
+ * options, neither taken here because both change behaviour: a PDF-only row
+ * ceiling well under EXPORT_LIMIT — 201 pages is past useful anyway — or a
+ * per-caller throttle.
  */
 
 /** The kit's own tokens, so the file looks like the screen it came from. */

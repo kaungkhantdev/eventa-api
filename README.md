@@ -168,6 +168,15 @@ pnpm test -- auth        # e.g. everything matching "auth"
 | `pnpm lint`      | ESLint (type-aware) + Prettier, autofix              |
 | `pnpm build`     | Compile to `dist/` (`dist/main.js`, `dist/relay.js`) |
 
+## Deploying: what has to travel with `dist/`
+
+The PDF report exports (`GET /reports/<report>.pdf`) embed the **Sarabun** Thai face, because a PDF
+carries the glyphs it draws — without it every Thai event name prints blank. The faces live in
+`assets/fonts/sarabun/` at the repo root, and `nest-cli.json` copies them to **`dist/assets/`** on
+build. An image or artifact that ships `dist/` must therefore keep `dist/assets/` with it; the app
+falls back to the repo-root `assets/` when it is present, and otherwise refuses the export with a
+message naming both paths. Ship the `OFL.txt` beside the faces — the Open Font License requires it.
+
 ## Troubleshooting
 
 - **`DATABASE_URL is required` on `pnpm seed`** — you haven't created `.env` yet (step 2).

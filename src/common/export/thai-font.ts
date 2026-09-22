@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -12,25 +12,29 @@ import { join } from 'node:path';
  * Sarabun is by Cadson Demak under the SIL Open Font License 1.1 and covers
  * Thai, Latin and ฿. It is committed to this repo with its licence rather than
  * fetched, so a build with no network still renders a correct document.
- *
- * DEPLOYMENT: these files live under `assets/` at the repo root and are
- * resolved relative to this module, which works from `src/` and from `dist/`
- * alike. An image that copies only `dist/` must copy `assets/` too, or the
- * export routes fail with ENOENT.
  */
 
-/** Repo root, from either `src/common/export` or `dist/common/export`. */
-const FONT_DIR = join(
-  __dirname,
-  '..',
-  '..',
-  '..',
-  'assets',
-  'fonts',
-  'sarabun',
-);
+/**
+ * Where the build puts the faces, so `dist/` carries them (`nest-cli.json`).
+ *
+ * The faces live outside `src/`, which means nothing copies them unless the
+ * build is told to — and an image that ships only `dist/` would then answer
+ * every export request with ENOENT. Named here because this module and the
+ * build config have to agree; `thai-font.spec` holds them to it.
+ */
+export const FONT_ASSET_OUT_DIR = 'dist/assets';
 
-export const SARABUN_LICENCE = join(FONT_DIR, 'OFL.txt');
+/**
+ * Where to look, nearest first.
+ *
+ * `../../assets` is the copy beside the compiled code (`dist/assets`), which
+ * is the one a deployment has. `../../../assets` is the repo root, which is
+ * what running from `src/` — and `node dist/main` from a full checkout — sees.
+ */
+const FONT_DIRS = [
+  join(__dirname, '..', '..', 'assets', 'fonts', 'sarabun'),
+  join(__dirname, '..', '..', '..', 'assets', 'fonts', 'sarabun'),
+];
 
 export type SarabunWeight = 'regular' | 'bold';
 
@@ -39,8 +43,37 @@ const FILES: Record<SarabunWeight, string> = {
   bold: 'Sarabun-Bold.ttf',
 };
 
+const LICENCE_FILE = 'OFL.txt';
+
+/**
+ * The first candidate that actually holds the file.
+ *
+ * Absent from both, the error says where it looked and what to do: a bare
+ * ENOENT on a font path is a puzzle for whoever is paged at the time.
+ */
+function resolve(file: string): string {
+  const found = FONT_DIRS.map((dir) => join(dir, file)).find((path) =>
+    existsSync(path),
+  );
+  if (found) return found;
+  throw new Error(
+    `Missing the Sarabun face ${file}, without which a PDF export cannot ` +
+      `render Thai. Looked in: ${FONT_DIRS.join(', ')}. A deployment must ` +
+      `ship assets/fonts/sarabun (the build copies it to ${FONT_ASSET_OUT_DIR}).`,
+  );
+}
+
+/**
+ * Resolved on demand rather than at import: a missing face must fail the
+ * export that needs it, loudly and with the message above — not take the whole
+ * API down at boot over a report format.
+ */
+export function sarabunLicence(): string {
+  return resolve(LICENCE_FILE);
+}
+
 export function sarabun(weight: SarabunWeight): string {
-  return join(FONT_DIR, FILES[weight]);
+  return resolve(FILES[weight]);
 }
 
 // Read once and kept: ~90 KB each, and a five-thousand-row export would
