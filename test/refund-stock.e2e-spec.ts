@@ -324,8 +324,12 @@ async function seedOrg(pool: Pool): Promise<number> {
       [key, key],
     );
   }
+  // `is_system` false: this is the spec's own Admin, holding just the four keys a
+  // refund needs. A built-in role is reconciled against DEFAULT_ROLES at sign-in,
+  // and a fixture topped up behind the test's back no longer seeds what it says.
   const role = await pool.query<{ id: string }>(
-    `INSERT INTO roles (organization_id, name, description) VALUES ($1, 'Admin', 'seed') RETURNING id`,
+    `INSERT INTO roles (organization_id, name, description, is_system)
+     VALUES ($1, 'Admin', 'seed', false) RETURNING id`,
     [orgId],
   );
   for (const key of GRANTS) {
@@ -355,6 +359,7 @@ async function seedOrg(pool: Pool): Promise<number> {
 
 async function cleanup(pool: Pool): Promise<void> {
   const org = `SELECT id FROM organizations WHERE slug = $1`;
+  // audit_events is ON DELETE RESTRICT (a sign-in writes one), so it is cleared first.
   for (const table of [
     'audit_events',
     'refunds',

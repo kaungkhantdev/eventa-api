@@ -250,8 +250,12 @@ async function seedOrg(
     `INSERT INTO permissions (key, "group", label) VALUES ('regView','Registrations','regView')
      ON CONFLICT (key) DO NOTHING`,
   );
+  // `is_system` defaults to TRUE, so a bare INSERT would have this fixture claim
+  // to be a built-in role — and sign-in reconciles a built-in named Admin,
+  // Organizer or Staff up to the full grant set its name carries, widening the
+  // narrow grants this seed holds on purpose. This role is the spec's own.
   const role = await pool.query<{ id: string }>(
-    `INSERT INTO roles (organization_id, name, description) VALUES ($1,'Admin','seed') RETURNING id`,
+    `INSERT INTO roles (organization_id, name, description, is_system) VALUES ($1,'Admin','seed',false) RETURNING id`,
     [orgId],
   );
   await pool.query(
@@ -277,6 +281,8 @@ async function cleanup(pool: Pool): Promise<void> {
        (SELECT id FROM organizations WHERE slug = ANY($1))`;
   // Order matters: check_ins and tickets hold ON DELETE RESTRICT references to
   // events, deliberately — admission history outlives the event it belongs to.
+  // audit_events leads for the same reason (a failed login writes one): the
+  // organizations delete below fails unless it is cleared first.
   for (const table of [
     'audit_events',
     'check_ins',

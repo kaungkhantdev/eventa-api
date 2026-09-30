@@ -221,5 +221,11 @@ async function seed(pool: Pool): Promise<{ orgId: number; liveId: string }> {
 }
 
 async function cleanup(pool: Pool): Promise<void> {
+  // audit_events is ON DELETE RESTRICT (a sign-in writes one), so clear it first.
+  await pool.query(
+    `DELETE FROM audit_events WHERE organization_id IN
+       (SELECT id FROM organizations WHERE slug = $1)`,
+    [ORG.slug],
+  );
   await pool.query(`DELETE FROM organizations WHERE slug = $1`, [ORG.slug]);
 }

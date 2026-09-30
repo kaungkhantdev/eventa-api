@@ -328,8 +328,13 @@ async function seedOrg(
         [key, PERM_GROUP[key], key],
       );
     }
+    // `is_system` false: these are the spec's own roles, each cut down to the
+    // keys its case needs — Staff holds regView alone, so that adding a
+    // registration is refused. A built-in role is reconciled against
+    // DEFAULT_ROLES at sign-in, which would widen them past what is asserted.
     const role = await pool.query<{ id: string }>(
-      `INSERT INTO roles (organization_id, name, description) VALUES ($1, $2, 'seed') RETURNING id`,
+      `INSERT INTO roles (organization_id, name, description, is_system)
+       VALUES ($1, $2, 'seed', false) RETURNING id`,
       [orgId, p.roleName],
     );
     const roleId = Number(role.rows[0].id);
@@ -381,6 +386,7 @@ async function seedEvent(
 async function cleanup(pool: Pool): Promise<void> {
   const slugs = [ORG.slug, ORG2.slug];
   // Order matters: tickets reference events ON DELETE RESTRICT.
+  // audit_events is ON DELETE RESTRICT too (a sign-in writes one), so it leads the list.
   for (const table of [
     'audit_events',
     'outbox_events',

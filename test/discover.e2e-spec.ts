@@ -488,7 +488,12 @@ async function insertOrder(
 }
 
 async function cleanup(pool: Pool): Promise<void> {
-  await pool.query(`DELETE FROM organizations WHERE slug = ANY($1)`, [
-    [ORG_A.slug, ORG_B.slug],
-  ]);
+  const slugs = [ORG_A.slug, ORG_B.slug];
+  // audit_events is ON DELETE RESTRICT (a failed login writes one), so clear it first.
+  await pool.query(
+    `DELETE FROM audit_events WHERE organization_id IN
+       (SELECT id FROM organizations WHERE slug = ANY($1))`,
+    [slugs],
+  );
+  await pool.query(`DELETE FROM organizations WHERE slug = ANY($1)`, [slugs]);
 }

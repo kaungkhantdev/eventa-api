@@ -342,8 +342,13 @@ async function seedOrg(pool: Pool): Promise<number> {
     `INSERT INTO permissions (key, "group", label) VALUES ('evCreate', 'Events', 'evCreate')
      ON CONFLICT (key) DO NOTHING`,
   );
+  // A role this spec invented for its own fixtures, not one the product
+  // provisioned, so is_system is spelled out rather than left to the column
+  // default of true: a role that claims to be built-in has its deliberately
+  // narrow grants topped up by SystemRolesService.reconcile(), and would then
+  // stop denying what these tests assert.
   const role = await pool.query<{ id: string }>(
-    `INSERT INTO roles (organization_id, name, description) VALUES ($1, 'Organizer', 'seed') RETURNING id`,
+    `INSERT INTO roles (organization_id, name, description, is_system) VALUES ($1, 'Organizer', 'seed', false) RETURNING id`,
     [orgId],
   );
   await pool.query(

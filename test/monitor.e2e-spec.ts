@@ -301,8 +301,12 @@ describe('Event Monitor — Overview / Registrations / Attendees (US-EVT-14, e2e
         [key, group[key], key],
       );
     }
+    // `is_system` defaults to TRUE, so a bare INSERT would have this fixture claim
+    // to be a built-in role — and sign-in reconciles a built-in named Admin,
+    // Organizer or Staff up to the full grant set its name carries, widening the
+    // grants each case here holds on purpose. This role is the spec's own.
     const role = await pool.query<{ id: string }>(
-      `INSERT INTO roles (organization_id, name, description) VALUES ($1, $2, 'seed') RETURNING id`,
+      `INSERT INTO roles (organization_id, name, description, is_system) VALUES ($1, $2, 'seed', false) RETURNING id`,
       [orgId, roleName],
     );
     const roleId = Number(role.rows[0].id);

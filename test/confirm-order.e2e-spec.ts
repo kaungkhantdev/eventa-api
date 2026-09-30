@@ -704,5 +704,11 @@ async function insertSeats(
 }
 
 async function cleanup(pool: Pool): Promise<void> {
+  // audit_events is ON DELETE RESTRICT (a failed login writes one), so clear it first.
+  await pool.query(
+    `DELETE FROM audit_events WHERE organization_id IN
+       (SELECT id FROM organizations WHERE slug = $1)`,
+    [ORG.slug],
+  );
   await pool.query(`DELETE FROM organizations WHERE slug = $1`, [ORG.slug]);
 }

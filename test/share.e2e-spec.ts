@@ -162,8 +162,13 @@ async function seedOrg(
         [key, PERM_GROUP[key], key],
       );
     }
+    // `is_system` false: these are the spec's own roles, not the product's. The
+    // Organizer here holds regView alone, so that a share link is refused it; a
+    // built-in Organizer is reconciled against DEFAULT_ROLES at sign-in, which
+    // would hand it evCreate and dissolve the 403 this spec asserts.
     const role = await pool.query<{ id: string }>(
-      `INSERT INTO roles (organization_id, name, description) VALUES ($1, $2, 'seed') RETURNING id`,
+      `INSERT INTO roles (organization_id, name, description, is_system)
+       VALUES ($1, $2, 'seed', false) RETURNING id`,
       [orgId, p.roleName],
     );
     const roleId = Number(role.rows[0].id);

@@ -218,8 +218,12 @@ async function seed(pool: Pool): Promise<number> {
        ('setSettings','Settings','Manage settings')
      ON CONFLICT (key) DO NOTHING`,
   );
+  // `is_system` defaults to TRUE, so a bare INSERT would have this fixture claim
+  // to be a built-in role — and sign-in reconciles a built-in named Admin,
+  // Organizer or Staff up to the full grant set its name carries, widening the
+  // narrow grants this seed holds on purpose. This role is the spec's own.
   const role = await pool.query<{ id: string }>(
-    `INSERT INTO roles (organization_id, name, description) VALUES ($1,'Admin','Full access') RETURNING id`,
+    `INSERT INTO roles (organization_id, name, description, is_system) VALUES ($1,'Admin','Full access',false) RETURNING id`,
     [orgId],
   );
   const roleId = Number(role.rows[0].id);

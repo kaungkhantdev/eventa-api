@@ -178,8 +178,12 @@ describe('Events list — registrations fill, sort & summary (US-EVT-01, e2e)', 
       `INSERT INTO permissions (key, "group", label) VALUES ('evCreate', 'Events', 'evCreate')
        ON CONFLICT (key) DO NOTHING`,
     );
+    // `is_system` defaults to TRUE, so a bare INSERT would have this fixture claim
+    // to be a built-in role — and sign-in reconciles a built-in named Admin,
+    // Organizer or Staff up to the full grant set its name carries, widening the
+    // grants each case here holds on purpose. This role is the spec's own.
     const role = await db.query<{ id: string }>(
-      `INSERT INTO roles (organization_id, name, description) VALUES ($1, 'Admin', 'seed') RETURNING id`,
+      `INSERT INTO roles (organization_id, name, description, is_system) VALUES ($1, 'Admin', 'seed', false) RETURNING id`,
       [id],
     );
     const roleId = Number(role.rows[0].id);
@@ -197,5 +201,11 @@ describe('Events list — registrations fill, sort & summary (US-EVT-01, e2e)', 
 });
 
 async function cleanup(pool: Pool): Promise<void> {
+  // audit_events is ON DELETE RESTRICT (a failed login writes one), so clear it first.
+  await pool.query(
+    `DELETE FROM audit_events WHERE organization_id IN
+       (SELECT id FROM organizations WHERE slug = $1)`,
+    [ORG.slug],
+  );
   await pool.query(`DELETE FROM organizations WHERE slug = $1`, [ORG.slug]);
 }

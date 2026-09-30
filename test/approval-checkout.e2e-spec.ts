@@ -996,8 +996,12 @@ async function seedOrg(pool: Pool): Promise<number> {
     [ADMIN, 'Admin', ADMIN_GRANTS],
     [ORGANIZER, 'Organizer', ORGANIZER_GRANTS],
   ] as const) {
+    // `is_system` defaults to TRUE, so a bare INSERT would have this fixture claim
+    // to be a built-in role — and sign-in reconciles a built-in named Admin,
+    // Organizer or Staff up to the full grant set its name carries, widening the
+    // grants each case here holds on purpose. This role is the spec's own.
     const role = await pool.query<{ id: string }>(
-      `INSERT INTO roles (organization_id, name, description) VALUES ($1, $2, 'seed') RETURNING id`,
+      `INSERT INTO roles (organization_id, name, description, is_system) VALUES ($1, $2, 'seed', false) RETURNING id`,
       [orgId, roleName],
     );
     for (const key of grants) {
@@ -1046,6 +1050,8 @@ const ORDER_TABLES = [
   'seat_maps',
   'ticket_types',
   'events',
+  // audit_events is ON DELETE RESTRICT (a failed login writes one), so the
+  // organizations delete in cleanup() fails unless this sweep clears it first.
   'audit_events',
 ];
 

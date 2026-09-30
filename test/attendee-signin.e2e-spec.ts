@@ -197,6 +197,12 @@ async function cleanup(pool: Pool): Promise<void> {
        (SELECT id::text FROM users WHERE email LIKE '%@att-signin.test')`,
   );
   await pool.query(`DELETE FROM users WHERE email LIKE '%@att-signin.test'`);
+  // audit_events is ON DELETE RESTRICT (a failed login writes one), so clear it first.
+  await pool.query(
+    `DELETE FROM audit_events WHERE organization_id IN
+       (SELECT id FROM organizations WHERE slug = $1)`,
+    [WORKSPACE.slug],
+  );
   await pool.query(`DELETE FROM organizations WHERE slug = $1`, [
     WORKSPACE.slug,
   ]);

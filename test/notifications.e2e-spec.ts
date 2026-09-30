@@ -482,8 +482,14 @@ async function seedOrg(
         [key, PERM_GROUP[key], key],
       );
     }
+    // `is_system` false on purpose. The role below is this spec's own fixture,
+    // wearing a built-in's name only so the membership reads plausibly. A role
+    // marked built-in is reconciled against DEFAULT_ROLES, which would top the
+    // deliberately narrow grants back up and leave the refusal cases with
+    // nothing left to refuse.
     const role = await pool.query<{ id: string }>(
-      `INSERT INTO roles (organization_id, name, description) VALUES ($1, $2, 'seed') RETURNING id`,
+      `INSERT INTO roles (organization_id, name, description, is_system)
+       VALUES ($1, $2, 'seed', false) RETURNING id`,
       [orgId, p.roleName],
     );
     const roleId = Number(role.rows[0].id);
@@ -527,6 +533,8 @@ async function seedEvent(
 
 async function cleanup(pool: Pool): Promise<void> {
   const slugs = [ORG.slug, ORG2.slug];
+  // audit_events is ON DELETE RESTRICT (a sign-in writes one), so it leads the
+  // list — the organization below cannot be deleted while a row remains.
   for (const table of [
     'audit_events',
     'outbox_events',

@@ -700,8 +700,13 @@ async function seedOrg(pool: Pool): Promise<number> {
       [key, key],
     );
   }
+  // `is_system` false on purpose. This Admin is the spec's own fixture rather
+  // than a role the product provisioned, and a role marked built-in is
+  // reconciled against DEFAULT_ROLES — which would quietly hand it keys this
+  // spec never granted.
   const role = await pool.query<{ id: string }>(
-    `INSERT INTO roles (organization_id, name, description) VALUES ($1, 'Admin', 'seed') RETURNING id`,
+    `INSERT INTO roles (organization_id, name, description, is_system)
+     VALUES ($1, 'Admin', 'seed', false) RETURNING id`,
     [orgId],
   );
   for (const key of GRANTS) {
@@ -745,7 +750,6 @@ async function seedOtherOrg(pool: Pool): Promise<void> {
 async function cleanup(pool: Pool): Promise<void> {
   const org = `SELECT id FROM organizations WHERE slug = $1`;
   for (const table of [
-    'audit_events',
     'refunds',
     'payments',
     'seat_assignments',
@@ -761,6 +765,13 @@ async function cleanup(pool: Pool): Promise<void> {
   await pool.query(
     `DELETE FROM webhook_events WHERE provider_event_id LIKE $1`,
     [`${EVENT_PREFIX}%`],
+  );
+  // audit_events is ON DELETE RESTRICT (a sign-in writes one), so clear it
+  // first — for both workspaces the delete below removes, not just ORG.
+  await pool.query(
+    `DELETE FROM audit_events WHERE organization_id IN
+       (SELECT id FROM organizations WHERE slug IN ($1, $2))`,
+    [ORG.slug, OTHER_ORG.slug],
   );
   await pool.query(`DELETE FROM organizations WHERE slug IN ($1, $2)`, [
     ORG.slug,
