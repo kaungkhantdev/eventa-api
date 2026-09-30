@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
 import { DomainException } from '../../common/errors/domain.exception';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
@@ -21,6 +22,10 @@ import type {
   PermissionCatalogItem,
   RoleWithPermissions,
 } from './access.types';
+import {
+  DEFAULT_ROLES,
+  backfillableGrantsForSystemRole,
+} from './workspace-defaults';
 
 const ACTIVE_STATUS = 'Active' as const;
 /** The role that must never be left without a holder. */
@@ -86,23 +91,102 @@ export class AccessRepository {
     });
   }
 
-  /** Replace the role's granted keys (grant/revoke) atomically, tenant-checked. */
+  /**
+   * Replace the role's granted keys (grant/revoke) atomically, tenant-checked.
+   *
+   * A key that is turned off is RECORDED as `granted = false`, not deleted.
+   * Deleting it left "the organizer took this away" and "this workspace was
+   * never offered this key" as the same absence, and the two have to be told
+   * apart: `reconcileSystemRoles` fills the second and must never undo the
+   * first. Every read filters on `granted`, so a false row grants nothing.
+   *
+   * The second statement only ever UPDATES: it records a removal for keys the
+   * role already has a row for, and creates nothing. A key with no row is one
+   * this workspace was never offered, and the editor cannot say so — it draws
+   * the switch off exactly as it does for a key the organizer took away, since
+   * it is seeded from the keys the role grants. Writing a row for it would
+   * record a decision nobody made, and because the backfill never overwrites a
+   * row, it would seal shut the very gap the backfill exists to close: save any
+   * older workspace's "Full access" Admin once, and it could never be given
+   * `finManage` again.
+   */
   async setRolePermissions(
     organizationId: number,
     roleId: number,
     keys: PermissionKey[],
   ): Promise<void> {
     await withTenant(this.db, organizationId, async (tx) => {
-      await tx
-        .delete(rolePermissions)
-        .where(eq(rolePermissions.roleId, roleId));
       if (keys.length > 0) {
         await tx
           .insert(rolePermissions)
           .values(
             keys.map((key) => ({ roleId, permissionKey: key, granted: true })),
-          );
+          )
+          .onConflictDoUpdate({
+            target: [rolePermissions.roleId, rolePermissions.permissionKey],
+            set: { granted: true },
+          });
       }
+      await tx.execute(sql`
+        update role_permissions
+           set granted = false
+         where role_id = ${roleId}
+           and permission_key <> all(${keyArray(keys)})
+      `);
+    });
+  }
+
+  /**
+   * Give this workspace's BUILT-IN roles the keys they were always meant to
+   * hold, without overriding anything an organizer decided.
+   *
+   * A workspace receives its roles once, at creation, so a permission key added
+   * to the catalog later never reaches a workspace older than it: `finManage`
+   * (0034), `evProgramView` (0038) and `regManage` (0042) are all missing from
+   * every workspace made before them, and the Admin who "has full access" quietly
+   * cannot void an invoice. `ON CONFLICT DO NOTHING` keeps a recorded removal —
+   * a row saying `granted = false` conflicts, so it survives — but it is only
+   * half the safety property, because a removal made before removals were
+   * recorded left no row at all. The other half is
+   * `backfillableGrantsForSystemRole`: restricted to the keys that postdate the
+   * roles themselves, an absence cannot be an old revoke, and this can only
+   * fill a gap. Widened to the whole of `DEFAULT_ROLES` it would hand an Admin
+   * back the `finRefund` somebody deliberately took away — which is why
+   * migration `0067` is restricted to the same three keys, and why the two
+   * lists are compared in `workspace-defaults.spec.ts`.
+   *
+   * This is deliberately NOT a sweep at boot. `roles` has RLS enabled, the role
+   * the app connects as is not BYPASSRLS, and at boot there is no tenant GUC to
+   * set — so a boot sweep would see no rows in production while appearing to
+   * work on a developer's superuser connection. Migrations do run as the owning
+   * role and are the right place for a one-off backfill, but they are a separate
+   * script rather than a boot step. That leaves per-workspace reconciliation,
+   * scoped by the same tenant transaction as everything else here.
+   *
+   * The explicit `organization_id` predicate is not redundant with RLS for the
+   * same reason: it is what makes a superuser connection behave exactly as
+   * `eventa_app` does, instead of silently reconciling every tenant on disk.
+   * Joining `permissions` keeps the `permission_key` foreign key satisfiable
+   * when the catalog and this code disagree.
+   */
+  async reconcileSystemRoles(organizationId: number): Promise<void> {
+    const defaults = DEFAULT_ROLES.flatMap(({ name }) =>
+      backfillableGrantsForSystemRole(name).map(
+        (key) => sql`(${name}, ${key})`,
+      ),
+    );
+    await withTenant(this.db, organizationId, async (tx) => {
+      await tx.execute(sql`
+        insert into role_permissions (role_id, permission_key, granted)
+        select r.id, p.key, true
+          from roles r
+          join (values ${sql.join(defaults, sql`, `)}) as d(role_name, key)
+            on d.role_name = r.name
+          join permissions p on p.key = d.key::permission_key
+         where r.organization_id = ${organizationId}
+           and r.is_system
+        on conflict (role_id, permission_key) do nothing
+      `);
     });
   }
 
@@ -576,28 +660,53 @@ export class AccessRepository {
     }));
   }
 
-  /** Permission keys granted to the user in this org (via their active membership's role). */
+  /**
+   * Permission keys granted to the user in this org (via their active
+   * membership's role).
+   *
+   * Tenant-scoped like every other read here, and for a reason that does not
+   * show up on a developer's machine: `memberships` carries RLS, and the
+   * owning role the local DATABASE_URL connects as bypasses it. Read outside
+   * `withTenant` there is no `app.current_org`, so under the role the app
+   * connects as in staging the policy matches nothing and this returns an
+   * empty list — which every `@RequirePermissions` route then reads as "holds
+   * nothing" and answers 403. Proven in test/rls.e2e-spec.ts under SET ROLE.
+   */
   async getPermissions(
     organizationId: number,
     userId: string,
   ): Promise<string[]> {
-    const rows = await this.db
-      .select({ key: rolePermissions.permissionKey })
-      .from(memberships)
-      .innerJoin(
-        rolePermissions,
-        eq(rolePermissions.roleId, memberships.roleId),
-      )
-      .where(
-        and(
-          eq(memberships.organizationId, organizationId),
-          eq(memberships.userId, userId),
-          eq(memberships.status, 'Active'),
-          eq(rolePermissions.granted, true),
-        ),
-      );
-    return rows.map((r) => r.key);
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({ key: rolePermissions.permissionKey })
+        .from(memberships)
+        .innerJoin(
+          rolePermissions,
+          eq(rolePermissions.roleId, memberships.roleId),
+        )
+        .where(
+          and(
+            eq(memberships.organizationId, organizationId),
+            eq(memberships.userId, userId),
+            eq(memberships.status, 'Active'),
+            eq(rolePermissions.granted, true),
+          ),
+        );
+      return rows.map((r) => r.key);
+    });
   }
+}
+
+/**
+ * The keys as a Postgres array, for `<> all(...)`.
+ *
+ * The cast is written out rather than left to inference because a role stripped
+ * of everything sends no keys at all, and `array[]` with nothing in it gives
+ * Postgres no element to take a type from.
+ */
+function keyArray(keys: readonly PermissionKey[]): SQL {
+  const items = keys.map((key) => sql`${key}`);
+  return sql`array[${sql.join(items, sql`, `)}]::permission_key[]`;
 }
 
 /**

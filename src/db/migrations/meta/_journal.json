@@ -470,6 +470,13 @@
       "when": 1787500000016,
       "tag": "0066_confirmation_sms_channel",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1787500000017,
+      "tag": "0067_backfill_system_role_grants",
+      "breakpoints": true
     }
   ]
 }
