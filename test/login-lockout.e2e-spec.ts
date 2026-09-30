@@ -11,6 +11,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'lockpass1word';
 const OWNER = 'lockout-owner@lockout-e2e.test';
@@ -37,7 +38,7 @@ describe('Sign-in brute-force lockout (US-ACC-12, e2e)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
 
     await request(server).post('/api/v1/auth/register').send({

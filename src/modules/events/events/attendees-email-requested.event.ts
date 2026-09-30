@@ -20,6 +20,11 @@ export interface AttendeesEmailRequestedInput {
  * payload deliberately carries no recipient addresses — the Engagement worker (E12)
  * resolves the current confirmed attendees at send time (no PII on the bus, no
  * stale list) and delivers the message. `version` lets producer/consumer evolve apart.
+ *
+ * eventa-worker writes this SAME row itself when a scheduled announcement's
+ * time comes (US-MSG-04/05 — `attendeesEmailRequestedOutbox`), counting the
+ * attendees as `attendeeCount` does. Keep the two in step: the handler cannot
+ * tell a send-now from a scheduled one, and must not need to.
  */
 export function attendeesEmailRequestedEvent(
   input: AttendeesEmailRequestedInput,

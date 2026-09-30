@@ -127,6 +127,40 @@ export class RegistrationEntryDto {
 
   @ApiProperty({ nullable: true })
   rejectBlockedReason!: string | null;
+
+  @ApiProperty({ description: 'On the waitlist, so a seat may be offered.' })
+  canOffer!: boolean;
+
+  @ApiProperty({
+    nullable: true,
+    type: Number,
+    example: 1,
+    description:
+      'Place in line for its ticket; 1 is next. Null unless waitlisted.',
+  })
+  waitlistPosition!: number | null;
+
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    format: 'date-time',
+    description: 'When a waitlist offer lapses and passes to the next in line.',
+  })
+  offerExpiresAt!: string | null;
+
+  @ApiProperty({
+    description:
+      'Waiting for the organizer to approve or reject it (US-REG-02) — paid ' +
+      'for already if it cost anything, ticketed only on approval.',
+  })
+  awaitingApproval!: boolean;
+
+  @ApiProperty({
+    description:
+      'Rejecting this registration refunds its payment — it was paid for ' +
+      'while it waited for approval.',
+  })
+  rejectRefunds!: boolean;
 }
 
 /** Live tab totals across the whole filtered queue. */

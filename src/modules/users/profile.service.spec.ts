@@ -5,11 +5,13 @@ import type { TokenService } from '../auth/token.service';
 import { ProfileService } from './profile.service';
 import { ProfileRepository } from './profile.repository';
 import type { ProfileRow } from './users.types';
+import { organizerAuth } from '../../../test/support/auth-context';
+import { outboxDouble } from '../../../test/support/outbox-double';
 
 const orgId = 1;
 const userId = 'u1';
 const NOW = new Date('2026-08-01T00:00:00Z');
-const auth = { organizationId: orgId, userId, sessionId: 's1' };
+const auth = organizerAuth({ organizationId: orgId, userId });
 
 function profileRow(overrides: Partial<ProfileRow> = {}): ProfileRow {
   return {
@@ -21,6 +23,10 @@ function profileRow(overrides: Partial<ProfileRow> = {}): ProfileRow {
     phone: null,
     timezone: null,
     locale: null,
+    city: null,
+    dateOfBirth: null,
+    bio: null,
+    displayCurrency: null,
     avatarUrl: null,
     ...overrides,
   };
@@ -47,7 +53,7 @@ describe('ProfileService (US-SET-01)', () => {
       signEmailChange: jest.fn().mockResolvedValue('change.jwt'),
       verifyEmailChange: jest.fn(),
     } as unknown as jest.Mocked<TokenService>;
-    outbox = { enqueue: jest.fn().mockResolvedValue(undefined) };
+    outbox = outboxDouble();
     const clock: Clock = { now: () => NOW };
     service = new ProfileService(repo, tokens, outbox, clock, {
       getOrThrow: () => 'https://web.test',

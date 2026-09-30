@@ -19,5 +19,11 @@
     "strict": true,
     "forceConsistentCasingInFileNames": true,
     "noFallthroughCasesInSwitch": false
-  }
+  },
+  // Without this, the default program is every .ts file under the repo
+  // bar node_modules and outDir, which drags in dist-openapi/ (the
+  // machine-local output of `pnpm check:openapi`) and makes `pnpm typecheck`
+  // depend on when that last ran. `dist` must be listed: an explicit exclude
+  // replaces the implicit outDir exclusion.
+  "exclude": ["node_modules", "dist", "dist-openapi"]
 }

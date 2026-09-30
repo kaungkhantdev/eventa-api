@@ -54,6 +54,11 @@ function eventRow(overrides: Partial<EventRow> = {}): EventRow {
     organizerName: 'Acme',
     contactEmail: null,
     landingTemplateId: null,
+    requiresApproval: false,
+    waitlistEnabled: false,
+    agendaTitle: null,
+    speakersTitle: null,
+    locale: null,
     publishedAt: null,
     cancelledAt: null,
     createdAt: new Date(),
@@ -296,12 +301,53 @@ describe('EventsService get/update', () => {
       expect(values).toMatchObject({ landingTemplateId: 'noir' });
     });
 
+    it('turns the waitlist on for an event that is already selling (US-REG-04)', async () => {
+      // Demand shows up after launch; an organizer reaching for the waitlist
+      // is usually looking at a sold-out event that is live.
+      const res = await service.updateEvent(auth, 'e1', {
+        waitlistEnabled: true,
+      });
+      const [, , values] = repo.update.mock.calls[0];
+      expect(values).toMatchObject({ waitlistEnabled: true });
+      expect(res.waitlistEnabled).toBe(true);
+    });
+
+    it('switches "Require approval" on, and says so back (US-REG-02)', async () => {
+      const res = await service.updateEvent(auth, 'e1', {
+        requiresApproval: true,
+      });
+      const [, , values] = repo.update.mock.calls[0];
+      expect(values).toMatchObject({ requiresApproval: true });
+      expect(res.requiresApproval).toBe(true);
+    });
+
     it('leaves the template alone when the update does not mention it', async () => {
       // The repo applies only the keys it is given. Passing the key through as
       // undefined would blank a chosen template on every unrelated edit.
       await service.updateEvent(auth, 'e1', { name: 'Renamed' });
       const [, , values] = repo.update.mock.calls[0];
       expect(values).not.toHaveProperty('landingTemplateId');
+    });
+  });
+
+  describe('duplicateBasics', () => {
+    it('copies the approval rule — a setting, like the waitlist switch (US-EVT-13)', async () => {
+      repo.findEvent.mockResolvedValue(
+        eventRow({ ...existing, requiresApproval: true }),
+      );
+      Object.assign(repo, {
+        existingSlugs: jest.fn().mockResolvedValue([]),
+        insert: jest
+          .fn()
+          .mockImplementation((v: Partial<EventRow>) =>
+            Promise.resolve(eventRow({ ...v, id: 'e2' })),
+          ),
+      });
+      const res = await service.duplicateBasics(auth, 'e1');
+      expect(repo.insert).toHaveBeenCalledWith(
+        expect.objectContaining({ requiresApproval: true }),
+      );
+      expect(res.requiresApproval).toBe(true);
     });
   });
 });

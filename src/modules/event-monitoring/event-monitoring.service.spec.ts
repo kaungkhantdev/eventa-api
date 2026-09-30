@@ -41,6 +41,7 @@ describe('EventMonitoringService', () => {
       overview: jest.fn().mockResolvedValue(OVERVIEW),
       registrations: jest.fn(),
       attendees: jest.fn(),
+      attendeeCount: jest.fn(),
     };
     permissions = {
       getFor: jest.fn().mockResolvedValue(grants),

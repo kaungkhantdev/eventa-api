@@ -1,7 +1,9 @@
+import { Logger } from '@nestjs/common';
 import { Clock } from '../../common/time/clock';
 import { DomainException } from '../../common/errors/domain.exception';
 import { EventsService } from '../events/events.service';
 import { CheckoutActivityPort } from './ports/checkout-activity.port';
+import { WaitlistOffersPort } from './ports/waitlist-offers.port';
 import { TicketingPolicy } from './ticketing.policy';
 import { TicketingRepository } from './ticketing.repository';
 import { TicketingService } from './ticketing.service';
@@ -42,10 +44,14 @@ function ticketRow(o: Partial<TicketRow> = {}): TicketRow {
   };
 }
 
+/** What the waitlist made of a raise — every offer tried, none cut short. */
+const OFFERS_FINISHED = (offered: number) => ({ offered, interrupted: false });
+
 describe('TicketingService', () => {
   let repo: jest.Mocked<TicketingRepository>;
   let events: jest.Mocked<EventsService>;
   let checkout: jest.Mocked<CheckoutActivityPort>;
+  let waitlist: jest.Mocked<WaitlistOffersPort>;
   let service: TicketingService;
 
   beforeEach(() => {
@@ -74,6 +80,9 @@ describe('TicketingService', () => {
     events = {
       getEvent: jest.fn().mockResolvedValue({ id: eventId }),
     } as unknown as jest.Mocked<EventsService>;
+    waitlist = {
+      offerNewPlaces: jest.fn().mockResolvedValue(OFFERS_FINISHED(0)),
+    };
     const clock: Clock = { now: () => NOW };
     service = new TicketingService(
       repo,
@@ -81,6 +90,7 @@ describe('TicketingService', () => {
       new TicketingPolicy(),
       clock,
       checkout,
+      waitlist,
     );
   });
 
@@ -272,6 +282,117 @@ describe('TicketingService', () => {
       );
       await service.updateTicket(actor, eventId, 't1', { name: 'VVIP' });
       expect(repo.update.mock.calls[0][2].status).toBe('paused');
+    });
+  });
+
+  describe('updateTicket — new places go to the waitlist (US-REG-04)', () => {
+    beforeEach(() => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      repo.findTicket.mockResolvedValue(
+        ticketRow({ status: 'soldout', sold: 100, total: 100, version: 1 }),
+      );
+    });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it('offers the new places to the waitlist and says how many', async () => {
+      waitlist.offerNewPlaces.mockResolvedValue(OFFERS_FINISHED(2));
+      const res = await service.updateTicket(actor, eventId, 't1', {
+        total: 120,
+      });
+      expect(waitlist.offerNewPlaces).toHaveBeenCalledWith(1, 'e1', 't1');
+      expect(res).toMatchObject({
+        waitlistOffered: 2,
+        waitlistOfferInterrupted: false,
+      });
+    });
+
+    it('says when the offers were cut short, so the rest can be offered by hand', async () => {
+      // The allocation is saved and on sale either way; without this the
+      // organizer could not tell a failure from "the front did not fit".
+      waitlist.offerNewPlaces.mockResolvedValue({
+        offered: 1,
+        interrupted: true,
+      });
+      const res = await service.updateTicket(actor, eventId, 't1', {
+        total: 120,
+      });
+      expect(res).toMatchObject({
+        waitlistOffered: 1,
+        waitlistOfferInterrupted: true,
+      });
+    });
+
+    it('offers only after the new allocation is saved', async () => {
+      await service.updateTicket(actor, eventId, 't1', { total: 120 });
+      expect(repo.update.mock.invocationCallOrder[0]).toBeLessThan(
+        waitlist.offerNewPlaces.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('asks nobody when the edit does not raise the allocation', async () => {
+      const renamed = await service.updateTicket(actor, eventId, 't1', {
+        name: 'VVIP',
+      });
+      repo.findTicket.mockResolvedValue(
+        ticketRow({ sold: 10, total: 100, version: 1 }),
+      );
+      const cut = await service.updateTicket(actor, eventId, 't1', {
+        total: 90,
+      });
+      expect(waitlist.offerNewPlaces).not.toHaveBeenCalled();
+      for (const res of [renamed, cut]) {
+        expect(res).toMatchObject({
+          waitlistOffered: 0,
+          waitlistOfferInterrupted: false,
+        });
+      }
+    });
+
+    it('does not treat a tier leaving unlimited as new places', async () => {
+      repo.findTicket.mockResolvedValue(
+        ticketRow({ sold: 10, total: 0, version: 1 }),
+      );
+      await service.updateTicket(actor, eventId, 't1', { total: 50 });
+      expect(waitlist.offerNewPlaces).not.toHaveBeenCalled();
+    });
+
+    it('keeps the capacity change, and says the offers were cut short, if the waitlist throws', async () => {
+      // The port promises not to reject; were it to, the saved change must
+      // not come back as a 500 — nor as a quiet "nobody offered".
+      waitlist.offerNewPlaces.mockRejectedValue(new Error('broker down'));
+      const res = await service.updateTicket(actor, eventId, 't1', {
+        total: 120,
+      });
+      expect(repo.update).toHaveBeenCalled();
+      expect(res).toMatchObject({
+        total: 120,
+        waitlistOffered: 0,
+        waitlistOfferInterrupted: true,
+      });
+      expect(Logger.prototype.error).toHaveBeenCalled();
+    });
+
+    it('answers with the ticket as it stands after the offers', async () => {
+      // A free place confirmed off the waitlist counts as sold.
+      waitlist.offerNewPlaces.mockResolvedValue(OFFERS_FINISHED(1));
+      repo.findTicket
+        .mockResolvedValueOnce(
+          ticketRow({ status: 'soldout', sold: 100, total: 100, version: 1 }),
+        )
+        .mockResolvedValueOnce(
+          ticketRow({ status: 'onsale', sold: 101, total: 120, version: 2 }),
+        );
+      const res = await service.updateTicket(actor, eventId, 't1', {
+        total: 120,
+      });
+      expect(repo.findTicket).toHaveBeenCalledTimes(2);
+      expect(res).toMatchObject({ sold: 101, total: 120, waitlistOffered: 1 });
+    });
+
+    it('does not read the ticket again when nobody was offered a place', async () => {
+      await service.updateTicket(actor, eventId, 't1', { total: 120 });
+      expect(repo.findTicket).toHaveBeenCalledTimes(1);
     });
   });
 

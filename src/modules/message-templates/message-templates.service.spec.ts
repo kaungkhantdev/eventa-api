@@ -1,9 +1,13 @@
 import { DomainException } from '../../common/errors/domain.exception';
 import { MESSAGE_TEMPLATE_CATALOG } from './message-template-catalog';
 import { MessageTemplatesRepository } from './message-templates.repository';
-import { MessageTemplatesService } from './message-templates.service';
+import {
+  MessageTemplatesService,
+  assertSwitchable,
+} from './message-templates.service';
+import { organizerAuth } from '../../../test/support/auth-context';
 
-const auth = { organizationId: 1, userId: 'u1', sessionId: 's1' };
+const auth = organizerAuth();
 
 type StoredRows = Awaited<ReturnType<MessageTemplatesRepository['list']>>;
 
@@ -23,12 +27,28 @@ describe('MessageTemplatesService (US-MSG-01/02)', () => {
   });
 
   describe('the catalog a workspace starts with', () => {
-    it('lists every message, switched on, before anything is stored', async () => {
-      // An absent row means ACTIVE — a workspace that has never opened these
-      // settings still sends its confirmations.
+    it('lists every message at its default before anything is stored', async () => {
+      // An absent row means the message's default — ON for everything but the
+      // reminder, so a workspace that has never opened these settings still
+      // sends its confirmations.
       const list = await service.list(auth);
       expect(list).toHaveLength(MESSAGE_TEMPLATE_CATALOG.length);
-      expect(list.every((t) => t.active)).toBe(true);
+      expect(
+        list.filter((t) => t.slug !== 'event-reminder').every((t) => t.active),
+      ).toBe(true);
+    });
+
+    it('keeps the event reminder off until the workspace switches it on', async () => {
+      // Mail a workspace never asked for is mail it cannot explain to its
+      // attendees: the reminder is theirs to choose, not Eventa's.
+      const list = await service.list(auth);
+      expect(bySlug(list, 'event-reminder').active).toBe(false);
+    });
+
+    it('lets a workspace switch the reminder on', async () => {
+      stored([{ slug: 'event-reminder', active: true }]);
+      const list = await service.list(auth);
+      expect(bySlug(list, 'event-reminder').active).toBe(true);
     });
 
     it('prefers a stored choice over the default', async () => {
@@ -36,7 +56,7 @@ describe('MessageTemplatesService (US-MSG-01/02)', () => {
       const list = await service.list(auth);
       expect(bySlug(list, 'registration-confirmation').active).toBe(false);
       // Everything else is untouched by one workspace's decision.
-      expect(bySlug(list, 'event-reminder').active).toBe(true);
+      expect(bySlug(list, 'cancellation-notice').active).toBe(true);
     });
 
     it('ignores a stored row for a message no longer in the catalog', async () => {
@@ -77,11 +97,34 @@ describe('MessageTemplatesService (US-MSG-01/02)', () => {
       expect(repo.setActive).toHaveBeenCalled();
     });
 
-    it('refuses a message nothing sends yet', async () => {
+    it('accepts switching off the payment receipt', async () => {
+      // Cross-repo, like the one above: eventa-worker's ReceiptSender reads
+      // `payment-receipt` before it sends.
       await expect(
         service.setActive(auth, 'payment-receipt', false),
-      ).rejects.toThrow(DomainException);
-      expect(repo.setActive).not.toHaveBeenCalled();
+      ).resolves.toBeDefined();
+    });
+
+    it('accepts switching off the waitlist offer', async () => {
+      // eventa-worker's waitlist offer handler reads `waitlist-offer` before
+      // it sends either the offer or the notice that it lapsed.
+      await expect(
+        service.setActive(auth, 'waitlist-offer', false),
+      ).resolves.toBeDefined();
+    });
+
+    it('refuses a message nothing sends yet', () => {
+      // Every message in today's catalog is sent, so this is proved on one
+      // made up for the purpose: the rule has to outlive the day the last
+      // planned message shipped, because the next one will be added planned.
+      const planned = {
+        ...MESSAGE_TEMPLATE_CATALOG[0],
+        slug: 'birthday-card',
+        title: 'Birthday card',
+        delivery: 'planned' as const,
+      };
+      expect(() => assertSwitchable(planned)).toThrow(DomainException);
+      expect(() => assertSwitchable(MESSAGE_TEMPLATE_CATALOG[0])).not.toThrow();
     });
 
     it('refuses a slug that is not a message at all', async () => {
@@ -99,6 +142,25 @@ describe('MessageTemplatesService (US-MSG-01/02)', () => {
       expect(new Set(slugs).size).toBe(slugs.length);
     });
 
+    it('never starts a message attendees are entitled to switched off', () => {
+      // A new workspace must still confirm registrations and send receipts
+      // without anybody having to find this page first.
+      const expected = MESSAGE_TEMPLATE_CATALOG.filter((t) => t.expected);
+      expect(expected.every((t) => t.defaultActive)).toBe(true);
+    });
+
+    it('holds only the event reminder off by default — eventa-worker mirrors this list', () => {
+      // The other half of this contract is OFF_UNTIL_SWITCHED_ON_SLUGS in
+      // eventa-worker's src/db/schema/messaging.ts, pinned by its own spec. This
+      // side decides what the organizer SEES, that side what is SENT: change
+      // one without the other and the page says "Inactive" while attendees are
+      // mailed, or "Active" while nobody is.
+      const offByDefault = MESSAGE_TEMPLATE_CATALOG.filter(
+        (t) => !t.defaultActive,
+      ).map((t) => t.slug);
+      expect(offByDefault).toEqual(['event-reminder']);
+    });
+
     it('marks the messages attendees are entitled to', async () => {
       // US-MSG-02 asks for a warning before one of these is switched off; the
       // UI is told which they are rather than keeping its own list.
@@ -108,10 +170,19 @@ describe('MessageTemplatesService (US-MSG-01/02)', () => {
       expect(bySlug(list, 'event-reminder').expected).toBe(false);
     });
 
-    it('offers no channel the product cannot deliver on', async () => {
-      // There is no SMS provider yet, so an SMS badge would be a promise.
+    it('texts only the registration confirmation', async () => {
+      // A channel badge is a promise that something sends on it. eventa-worker
+      // texts exactly one message — the confirmation (US-DISC-06 AC5) — and
+      // nothing it sends goes by SMS besides. The day another handler texts,
+      // this test is what has to change with it.
       const list = await service.list(auth);
-      expect(list.every((t) => t.channels.every((c) => c === 'email'))).toBe(
+      expect(bySlug(list, 'registration-confirmation').channels).toEqual([
+        'email',
+        'sms',
+      ]);
+      const others = list.filter((t) => t.slug !== 'registration-confirmation');
+      expect(others.every((t) => t.channels.length > 0)).toBe(true);
+      expect(others.every((t) => t.channels.every((c) => c === 'email'))).toBe(
         true,
       );
     });

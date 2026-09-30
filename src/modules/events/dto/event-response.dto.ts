@@ -71,6 +71,17 @@ export class EventResponseDto {
   @ApiProperty({ nullable: true, type: Number })
   capacity!: number | null;
 
+  @ApiProperty({
+    description: 'Attendees may join a waitlist once a ticket sells out.',
+  })
+  waitlistEnabled!: boolean;
+
+  @ApiProperty({
+    description:
+      'Each registration waits for the organizer to approve it; a paid one pays first.',
+  })
+  requiresApproval!: boolean;
+
   @ApiProperty({ nullable: true, type: String })
   coverImage!: string | null;
 

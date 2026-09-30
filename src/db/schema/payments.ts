@@ -85,6 +85,11 @@ export const refunds = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
     issuedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    /**
+     * When the money went back — the VAT month a refund belongs to. Null until
+     * it succeeds; a PromptPay refund settles days after it was issued.
+     */
+    settledAt: timestamp({ withTimezone: true }),
     gatewayRef: text(),
     idempotencyKey: text().notNull(),
     createdAt: createdAt(),

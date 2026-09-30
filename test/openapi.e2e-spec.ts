@@ -98,4 +98,25 @@ describe('OpenAPI (e2e)', () => {
       }
     });
   });
+
+  describe('the ticket edit (US-REG-04)', () => {
+    it('says how many in the waitlist a raised allocation gave a place', () => {
+      const schema = document.components?.schemas?.UpdatedTicketResponseDto as
+        | {
+            properties?: Record<string, { type?: string }>;
+            required?: string[];
+          }
+        | undefined;
+      expect(schema?.properties?.waitlistOffered?.type).toBe('number');
+      expect(schema?.required).toContain('waitlistOffered');
+      // A failure part-way is told apart from "the front did not fit", so the
+      // organizer knows to offer the rest by hand.
+      expect(schema?.properties?.waitlistOfferInterrupted?.type).toBe(
+        'boolean',
+      );
+      expect(schema?.required).toContain('waitlistOfferInterrupted');
+      // Still the whole ticket, so the edit form can re-render from it.
+      expect(schema?.properties).toHaveProperty('sold');
+    });
+  });
 });

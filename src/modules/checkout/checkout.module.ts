@@ -1,9 +1,10 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { DiscountsModule } from '../discounts/discounts.module';
 import { PlatformModule } from '../platform/platform.module';
 import { EventsModule } from '../events/events.module';
 import { RegistrationModule } from '../registration/registration.module';
 import { TicketingModule } from '../ticketing/ticketing.module';
+import { WaitlistOffersPort } from '../ticketing/ports/waitlist-offers.port';
 import { InvoiceOrderPort } from '../invoices/ports/invoice-order.port';
 import { OrderPaymentPort } from '../payments/ports/order-payment.port';
 import { RegistrationApprovalPort } from '../registrations/ports/registration-approval.port';
@@ -21,6 +22,8 @@ import { CheckoutPolicy } from './checkout.policy';
 import { CheckoutRepository } from './checkout.repository';
 import { CheckoutService } from './checkout.service';
 import { CheckoutViewService } from './checkout-view.service';
+import { CheckoutWaitlistService } from './checkout-waitlist.service';
+import { WaitlistOffersAdapter } from './waitlist-offers.adapter';
 
 /**
  * Checkout: the attendee's path from "Get tickets" to held inventory
@@ -37,13 +40,20 @@ import { CheckoutViewService } from './checkout-view.service';
  *     a live-derived status so a tier that just sold out cannot be bought.
  *   · `SeatMapPort` (Registration) — which seats can be picked right now.
  * The fourth is a plain service dependency: `SeatHoldService` for the row-locked
- * reservation, and `DiscountRedemptionService` for what a code is worth. No
- * `forwardRef` anywhere — nothing in those contexts needs Checkout back.
+ * reservation, and `DiscountRedemptionService` for what a code is worth.
+ *
+ * Ticketing and Checkout reference each other (`forwardRef`): Checkout reads
+ * the tiers through Ticketing's catalog, and Ticketing asks Checkout to give a
+ * raised allocation's new places to the waitlist (`WaitlistOffersPort`,
+ * US-REG-04) — the waitlist is orders and the places are seat holds, neither
+ * of which Ticketing may read. The adapter serves each person through
+ * `RegistrationApprovalAdapter`, the organizer's own offer, so that one
+ * instance backs both `RegistrationApprovalPort` (`useExisting`) and it.
  */
 @Module({
   imports: [
     EventsModule,
-    TicketingModule,
+    forwardRef(() => TicketingModule),
     RegistrationModule,
     DiscountsModule,
     PlatformModule,
@@ -53,15 +63,18 @@ import { CheckoutViewService } from './checkout-view.service';
     CheckoutViewService,
     CheckoutService,
     CheckoutOrderService,
+    CheckoutWaitlistService,
     CheckoutRepository,
     CheckoutPolicy,
     { provide: OrderPaymentPort, useClass: OrderPaymentAdapter },
     { provide: InvoiceOrderPort, useClass: InvoiceOrderAdapter },
+    RegistrationApprovalAdapter,
     {
       provide: RegistrationApprovalPort,
-      useClass: RegistrationApprovalAdapter,
+      useExisting: RegistrationApprovalAdapter,
     },
     { provide: RegistrationEntryPort, useClass: RegistrationEntryAdapter },
+    { provide: WaitlistOffersPort, useClass: WaitlistOffersAdapter },
   ],
   exports: [
     CheckoutViewService,
@@ -71,6 +84,7 @@ import { CheckoutViewService } from './checkout-view.service';
     InvoiceOrderPort,
     RegistrationApprovalPort,
     RegistrationEntryPort,
+    WaitlistOffersPort,
   ],
 })
 export class CheckoutModule {}

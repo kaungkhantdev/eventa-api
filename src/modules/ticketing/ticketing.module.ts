@@ -4,6 +4,7 @@ import { TicketAvailabilityPort } from '../events/ports/ticket-availability.port
 import { AccessModule } from '../access/access.module';
 import { TicketSalesPort } from '../payment-settings/ports/ticket-sales.port';
 import { RegistrationModule } from '../registration/registration.module';
+import { CheckoutModule } from '../checkout/checkout.module';
 import { TicketEligibilityPort } from '../registration/ports/ticket-eligibility.port';
 import { TicketCatalogPort } from '../checkout/ports/ticket-catalog.port';
 import { CheckoutCatalogAdapter } from './checkout-catalog.adapter';
@@ -25,11 +26,17 @@ import { InventoryInsightsAdapter } from './inventory-insights.adapter';
  * (the RBAC PermissionsGuard) — never on the events tables directly. Provides
  * TicketAvailabilityPort back to Events for the publish gate; the two contexts
  * reference each other (`forwardRef`) — an event has tickets, a ticket an event.
+ *
+ * Checkout, too, both ways (`forwardRef`): it reads the tiers through
+ * TicketCatalogPort, and a raised allocation is handed to it through
+ * `WaitlistOffersPort` so the new places go to the waitlist (US-REG-04) —
+ * Ticketing never reads orders or holds seats itself.
  */
 @Module({
   imports: [
     forwardRef(() => EventsModule),
     forwardRef(() => RegistrationModule),
+    forwardRef(() => CheckoutModule),
     AccessModule,
   ],
   controllers: [TicketingController, TicketingQueryController],

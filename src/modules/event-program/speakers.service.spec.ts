@@ -3,6 +3,7 @@ import { EventsService } from '../events/events.service';
 import { SpeakersRepository } from './speakers.repository';
 import { SpeakersService } from './speakers.service';
 import type { SpeakerRow } from './speakers.types';
+import { refusalOf } from '../../../test/support/refusal';
 
 const actor = { organizationId: 1, userId: 'u1' };
 const eventId = 'e1';
@@ -17,6 +18,10 @@ function speakerRow(o: Partial<SpeakerRow> = {}): SpeakerRow {
     email: null,
     phone: null,
     talkTitle: null,
+    website: null,
+    bio: null,
+    photoUrl: null,
+    socialLinks: null,
     tag: null,
     initials: null,
     tone: null,
@@ -128,9 +133,7 @@ describe('SpeakersService', () => {
     });
 
     it('refuses without an explicit confirm, warning about the unlinking', async () => {
-      const err = await service
-        .deleteSpeaker(actor, eventId, 'sp1')
-        .catch((e: unknown) => e as DomainException);
+      const err = await refusalOf(service.deleteSpeaker(actor, eventId, 'sp1'));
       expect(err).toBeInstanceOf(DomainException);
       expect(err.message).toMatch(/ALL of their sessions/i);
       expect(err.message).toMatch(/cannot be undone/i);

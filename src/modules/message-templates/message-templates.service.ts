@@ -34,9 +34,6 @@ export interface MessageTemplateView {
   };
 }
 
-/** No row stored means the message is on — see the catalog's note. */
-const DEFAULT_ACTIVE = true;
-
 /**
  * The automated messages a workspace sends, and the one thing an organizer can
  * change about them today: whether they send at all (US-MSG-01).
@@ -58,7 +55,8 @@ export class MessageTemplatesService {
       const row = stored.get(definition.slug);
       return {
         ...view(definition),
-        active: row?.active ?? DEFAULT_ACTIVE,
+        // No row means the workspace never chose: the catalog's default.
+        active: row?.active ?? definition.defaultActive,
         wording: {
           subjectEn: row?.emailSubjectEn ?? null,
           bodyEn: row?.emailBodyEn ?? null,
@@ -108,7 +106,7 @@ function view(definition: MessageTemplateDefinition): MessageTemplateView {
     channels: definition.channels,
     delivery: definition.delivery,
     expected: definition.expected,
-    active: DEFAULT_ACTIVE,
+    active: definition.defaultActive,
     tags: definition.tags,
     wording: {
       subjectEn: null,
@@ -131,7 +129,7 @@ function assertKnown(slug: string): MessageTemplateDefinition {
  * A switch that moves and changes nothing is worse than no switch, so the one
  * case where it would change nothing is refused with the reason.
  */
-function assertSwitchable(definition: MessageTemplateDefinition): void {
+export function assertSwitchable(definition: MessageTemplateDefinition): void {
   if (definition.delivery === 'planned') {
     throw DomainException.validation(
       `“${definition.title}” isn’t being sent yet, so there is nothing to switch off.`,

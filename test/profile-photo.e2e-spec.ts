@@ -12,6 +12,7 @@ import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
 import { ObjectStoragePort } from '../src/modules/profile-photo/ports/object-storage.port';
 import { MemoryObjectStorageAdapter } from './doubles/memory-object-storage.adapter';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const RUN = Date.now();
@@ -65,7 +66,7 @@ describe('Profile photo (e2e — US-DISC-11)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
     storage = app.get(ObjectStoragePort);
   }, 30000);

@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'mtg-e2e', name: 'Meetings E2E' };
@@ -83,7 +84,7 @@ describe('Meetings (e2e — E12)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
 
     jwt = await token(ADMIN, ORG.slug);
@@ -499,8 +500,13 @@ async function seedOrg(
     [org.name, org.slug],
   );
   const orgId = Number(res.rows[0].id);
+  // `is_system` false on purpose. This Admin is the spec's own fixture rather
+  // than a role the product provisioned, and a role marked built-in is
+  // reconciled against DEFAULT_ROLES — which would quietly hand it keys this
+  // spec never granted.
   const role = await pool.query<{ id: string }>(
-    `INSERT INTO roles (organization_id, name, description) VALUES ($1, 'Admin', 'seed') RETURNING id`,
+    `INSERT INTO roles (organization_id, name, description, is_system)
+     VALUES ($1, 'Admin', 'seed', false) RETURNING id`,
     [orgId],
   );
   const user = await pool.query<{ id: string }>(
@@ -536,6 +542,10 @@ async function seedEvent(
 
 async function cleanup(pool: Pool): Promise<void> {
   const slugs = [ORG.slug, ORG2.slug];
+  // audit_events is ON DELETE RESTRICT (a failed login writes one), so every
+  // table here is cleared before the organizations delete below. Its place
+  // within this list does not matter: audit_events references only the
+  // organization and the actor, never events.
   for (const table of ['meetings', 'outbox_events', 'audit_events', 'events']) {
     await pool.query(
       `DELETE FROM ${table} WHERE organization_id IN

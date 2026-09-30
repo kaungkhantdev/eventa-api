@@ -27,6 +27,7 @@ import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
 import { PaymentProviderPort } from '../src/modules/payments/ports/payment-provider.port';
 import { StripePaymentAdapter } from '../src/modules/payments/providers/stripe-payment.adapter';
+import { listenOnLoopback } from './support/loopback';
 
 const WEBHOOK = '/api/v1/public/payments/webhook';
 /** Well-formed but belonging to no workspace — nothing is seeded here. */
@@ -44,7 +45,7 @@ describe('Stripe provider wiring (e2e — US-DISC-05)', () => {
     app = moduleRef.createNestApplication({ rawBody: true });
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
   }, 30000);
 

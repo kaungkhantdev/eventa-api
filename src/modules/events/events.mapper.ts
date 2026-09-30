@@ -26,6 +26,8 @@ export function toEventResponse(e: EventRow): EventResponseDto {
     onlineNote: e.onlineNote,
     seatingMode: e.seatingMode,
     capacity: e.capacity,
+    waitlistEnabled: e.waitlistEnabled,
+    requiresApproval: e.requiresApproval,
     coverImage: e.coverImage,
     accentColor: e.accentColor,
     contactEmail: e.contactEmail,

@@ -109,6 +109,42 @@ describe('LoginThrottleService', () => {
     });
   });
 
+  /**
+   * The forgotten-password form counts its misses on the same limit, but never
+   * in the same bucket. An identity is just a string, and sign-in builds its
+   * own from a workspace slug the caller types — so if the two shared keys, a
+   * workspace named to match the reset form's prefix would let failed sign-ins
+   * lock somebody's reset form, and reset misses lock their sign-in.
+   */
+  describe('the reset form keeps its own count', () => {
+    it('counts a reset miss under keys no sign-in attempt can reach', async () => {
+      redis.incr.mockResolvedValue(MAX);
+      await service.recordFailure(ID, 'reset');
+      expect(redis.incr).toHaveBeenCalledWith('reset:fail:' + ID);
+      expect(redis.set).toHaveBeenCalledWith(
+        'reset:lock:' + ID,
+        '1',
+        'EX',
+        LOCK,
+      );
+    });
+
+    it('checks the reset lock, not the sign-in lock, for a reset', async () => {
+      redis.ttl.mockResolvedValue(-2);
+      await service.assertNotLocked(ID, 'reset');
+      expect(redis.ttl).toHaveBeenCalledWith('reset:lock:' + ID);
+    });
+
+    it('leaves sign-in on the keys it has always used', async () => {
+      redis.incr.mockResolvedValue(1);
+      redis.ttl.mockResolvedValue(-2);
+      await service.recordFailure(ID);
+      await service.assertNotLocked(ID);
+      expect(redis.incr).toHaveBeenCalledWith('login:fail:' + ID);
+      expect(redis.ttl).toHaveBeenCalledWith('login:lock:' + ID);
+    });
+  });
+
   it('clears the counter and lock on success', async () => {
     await service.recordSuccess(ID);
     expect(redis.del).toHaveBeenCalledWith(

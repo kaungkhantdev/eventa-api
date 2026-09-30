@@ -9,11 +9,13 @@ import type {
 import { OutboxPort } from '../platform/outbox.port';
 import { AuthRepository } from './auth.repository';
 import type { PermissionsService } from '../access/permissions.service';
+import type { SystemRolesService } from '../access/system-roles.service';
 import type { UsersRepository } from '../users/users.repository';
 import type { LoginThrottleService } from './login-throttle.service';
 import type { SignupService } from '../auth-signup/auth-signup.service';
 import { PasswordService } from '../auth-password/auth-password.service';
 import { TokenService } from './token.service';
+import { outboxDouble } from '../../../test/support/outbox-double';
 
 const clock: Clock = { now: () => new Date('2026-01-01T00:00:00Z') };
 
@@ -52,6 +54,7 @@ describe('AuthService', () => {
   let repo: jest.Mocked<AuthRepository>;
   let users: jest.Mocked<UsersRepository>;
   let permissions: jest.Mocked<PermissionsService>;
+  let systemRoles: jest.Mocked<SystemRolesService>;
   let passwords: jest.Mocked<PasswordService>;
   let tokens: jest.Mocked<TokenService>;
   let outbox: jest.Mocked<OutboxPort>;
@@ -77,6 +80,9 @@ describe('AuthService', () => {
     permissions = {
       getFor: jest.fn().mockResolvedValue([]),
     } as unknown as jest.Mocked<PermissionsService>;
+    systemRoles = {
+      reconcile: jest.fn().mockResolvedValue(undefined),
+    } as unknown as jest.Mocked<SystemRolesService>;
     passwords = {
       hash: jest.fn(),
       verify: jest.fn(),
@@ -90,9 +96,7 @@ describe('AuthService', () => {
       accessTtlSeconds: 900,
       refreshTtlSeconds: 604800,
     } as unknown as jest.Mocked<TokenService>;
-    outbox = {
-      enqueue: jest.fn().mockResolvedValue(undefined),
-    };
+    outbox = outboxDouble();
     throttle = {
       assertNotLocked: jest.fn().mockResolvedValue(undefined),
       recordFailure: jest.fn().mockResolvedValue(undefined),
@@ -111,6 +115,7 @@ describe('AuthService', () => {
       outbox,
       throttle,
       signup,
+      systemRoles,
     );
   });
 
@@ -404,7 +409,13 @@ describe('AuthService', () => {
    * shown nowhere — so the password decides instead.
    */
   describe('login without a workspace', () => {
-    const noWorkspace = { email: input.email, password: input.password };
+    // No `orgSlug`: the sign-in form that does not ask which workspace.
+    const noWorkspace: LoginInput = {
+      email: input.email,
+      password: input.password,
+      device: input.device,
+      ip: input.ip,
+    };
 
     function candidate(slug: string, name: string): LoginUser {
       return { user: userRow(), org: { ...org, slug, name } };
@@ -490,6 +501,72 @@ describe('AuthService', () => {
       await service.login(input);
 
       expect(users.findLoginCandidates).not.toHaveBeenCalled();
+    });
+  });
+  /**
+   * Forward convergence of the built-in roles.
+   *
+   * `DEFAULT_ROLES` is applied once, when a workspace is created, so a
+   * permission key added to the catalog by a later migration never reaches a
+   * workspace older than it — an Admin described as "Full access" quietly
+   * cannot do the new thing. Migration 0067 repairs the workspaces that exist
+   * today; reconciling at sign-in is what keeps the NEXT such key from
+   * reopening the same gap, and sign-in is the natural moment because it is
+   * where the app holds a tenant context and is about to read the caller's keys.
+   */
+  describe('startSession \u2014 converging the built-in roles', () => {
+    const session: Omit<LoginInput, 'email' | 'password' | 'orgSlug'> = {
+      device: 'jest',
+      ip: null,
+    };
+
+    beforeEach(() => {
+      repo.createSession.mockResolvedValue('sess-1');
+    });
+
+    it('reconciles this workspace BEFORE reading the permissions it answers with', async () => {
+      const order: string[] = [];
+      systemRoles.reconcile.mockImplementation(() => {
+        order.push('reconcile');
+        return Promise.resolve();
+      });
+      permissions.getFor.mockImplementation(() => {
+        order.push('getFor');
+        return Promise.resolve([]);
+      });
+
+      await service.startSession({ user: userRow(), org }, session);
+
+      expect(systemRoles.reconcile).toHaveBeenCalledWith(org.id);
+      // Order is the point, not an implementation detail: this response IS
+      // `me.permissions`. Reconciling after the read would hand the caller the
+      // stale set and only take effect on their next sign-in.
+      expect(order).toEqual(['reconcile', 'getFor']);
+    });
+
+    /**
+     * Errors are surfaced, never swallowed. A reconcile that fails means this
+     * workspace's roles are in an unknown state, and answering with a
+     * permission set derived from it would be a silent authorization result.
+     */
+    it('fails the sign-in when the reconcile fails, rather than swallowing it', async () => {
+      systemRoles.reconcile.mockRejectedValue(new Error('deadlock detected'));
+
+      await expect(
+        service.startSession({ user: userRow(), org }, session),
+      ).rejects.toThrow('deadlock detected');
+      expect(permissions.getFor).not.toHaveBeenCalled();
+    });
+
+    // All three sign-in routes (password, social, 2FA) funnel through
+    // `startSession`, so covering that one seam covers all of them.
+    it('reconciles on a password sign-in too, through that one seam', async () => {
+      users.findLoginUser.mockResolvedValue({ user: userRow(), org });
+      passwords.verify.mockResolvedValue(true);
+
+      await service.login(input);
+
+      expect(systemRoles.reconcile).toHaveBeenCalledWith(org.id);
     });
   });
 });

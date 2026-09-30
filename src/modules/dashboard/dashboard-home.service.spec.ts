@@ -49,7 +49,11 @@ describe('DashboardHomeService (US-DASH-01/02/06)', () => {
       totalsForPeriod: jest.fn(),
       trend: jest.fn(),
     };
-    inventory = { countSellingOut: jest.fn().mockResolvedValue(0) };
+    inventory = {
+      countSellingOut: jest.fn().mockResolvedValue(0),
+      sellingFast: jest.fn(),
+      hasTicketType: jest.fn(),
+    };
     permissions = {
       getFor: jest
         .fn()
@@ -91,8 +95,8 @@ describe('DashboardHomeService (US-DASH-01/02/06)', () => {
 
     it('previews the newest sign-ups with who, what and when', async () => {
       const home = await service.load(auth, 'Anan', 'en');
-      expect(home.today.count).toBe(4);
-      expect(home.today.recent[0]).toMatchObject({
+      expect(home.today?.count).toBe(4);
+      expect(home.today?.recent[0]).toMatchObject({
         attendeeName: 'Anan Suksawat',
         eventName: 'Bangkok Tech Week',
         ticketTypeName: 'General',
@@ -103,8 +107,8 @@ describe('DashboardHomeService (US-DASH-01/02/06)', () => {
       registrations.countSince.mockResolvedValue(0);
       registrations.recent.mockResolvedValue([]);
       const home = await service.load(auth, 'Anan', 'en');
-      expect(home.today.count).toBe(0);
-      expect(home.today.emptyMessage).toMatch(/no registrations yet today/i);
+      expect(home.today?.count).toBe(0);
+      expect(home.today?.emptyMessage).toMatch(/no registrations yet today/i);
     });
 
     it('withholds the panel entirely from someone who may not see attendees', async () => {

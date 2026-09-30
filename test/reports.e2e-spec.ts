@@ -6,10 +6,13 @@ import type { Server } from 'node:http';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { hash } from '@node-rs/argon2';
+import { Workbook, type CellValue, type Worksheet } from 'exceljs';
 import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { binary } from './support/binary';
+import { listenOnLoopback } from './support/loopback';
 
 /**
  * The reporting surface against a real database (US-RPT-02/08/12).
@@ -163,7 +166,7 @@ describe('Reports (e2e — US-RPT)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
 
     adminJwt = await token(ADMIN, ORG.slug);
@@ -1780,6 +1783,168 @@ describe('Reports (e2e — US-RPT)', () => {
             '?from=2026-07-07&to=2026-07-01',
           ).expect(422);
         });
+
+        /* ── the same reports as Excel and PDF (US-RPT-11, TC-RPT-21/22) ── */
+
+        const file = (jwt: string, path: string, query = '') =>
+          download(jwt, path, query).buffer(true).parse(binary);
+
+        /** `binary` put a Buffer there; supertest types the body as `any`. */
+        const bytesOf = (res: request.Response): Buffer => res.body as Buffer;
+
+        const workbook = async (jwt: string, path: string, query = '') => {
+          const res = await file(jwt, path, query).expect(200);
+          const wb = new Workbook();
+          // exceljs declares its own `Buffer` interface, which Node's does not
+          // structurally satisfy; the bytes are the same.
+          await wb.xlsx.load(bytesOf(res) as unknown as ArrayBuffer);
+          return { res, wb };
+        };
+
+        /** A cell's value as text — exceljs cells hold rich text and errors too. */
+        const textOf = (value: CellValue): string => {
+          if (value === null || value === undefined) return '';
+          if (value instanceof Date) return value.toISOString();
+          if (typeof value === 'object') return JSON.stringify(value);
+          return String(value);
+        };
+
+        /** Every cell of a sheet, flattened, for "does it say X" checks. */
+        const saidOn = (sheet: Worksheet) => {
+          const said: string[] = [];
+          sheet.eachRow((row) => {
+            row.eachCell((cell) => said.push(textOf(cell.value)));
+          });
+          return said;
+        };
+
+        it('sends a real workbook, named after the report', async () => {
+          await seedPayment({ amountSatang: 107_000, vatSatang: 7_000 });
+          const { res, wb } = await workbook(adminJwt, 'income.xlsx');
+
+          expect(res.headers['content-type']).toContain('spreadsheetml.sheet');
+          expect(res.headers['content-disposition']).toContain('income.xlsx');
+          expect(wb.worksheets.map((sheet) => sheet.name)).toEqual([
+            'Summary',
+            'Income by event',
+          ]);
+        });
+
+        it('writes money as a number with a ฿ format, on the rows and the tiles', async () => {
+          // TC-RPT-21: money properly formatted — a figure finance can sum,
+          // not the text "฿1,070".
+          await seedPayment({ amountSatang: 107_000, vatSatang: 7_000 });
+          const { wb } = await workbook(adminJwt, 'income.xlsx');
+
+          const gross = wb.getWorksheet('Income by event')?.getCell('C2');
+          expect(gross?.value).toBe(1070);
+          expect(gross?.numFmt).toContain('฿');
+
+          const said = saidOn(wb.getWorksheet('Summary') as Worksheet);
+          expect(said).toContain('Gross revenue');
+          expect(said).toContain('1070');
+        });
+
+        it('holds only the filtered event’s rows, and says which event', async () => {
+          // TC-RPT-21: only that event's rows plus the summary — nothing more.
+          await seedOrder({ event: summitId, seats: 2 });
+          await seedOrder({ event: galaId, seats: 5 });
+          const { wb } = await workbook(
+            adminJwt,
+            'registrations.xlsx',
+            `?eventId=${galaId}`,
+          );
+
+          const rows = saidOn(wb.getWorksheet('Registrations') as Worksheet);
+          expect(rows).toContain('Charity Gala');
+          expect(rows).not.toContain('Tech Summit 2026');
+          expect(saidOn(wb.getWorksheet('Summary') as Worksheet)).toContain(
+            'Charity Gala',
+          );
+        });
+
+        it('leaves revenue the reader may not see as an EMPTY cell', async () => {
+          // Never 0, which would say the event earned nothing (US-RPT-12).
+          const one = await seedEventAt(
+            'rpt-xl-mask',
+            'Masked View',
+            '-2 days',
+          );
+          await seedPayment({ event: one, amountSatang: 50_000 });
+          const { wb } = await workbook(staffJwt, 'events.xlsx');
+
+          const sheet = wb.getWorksheet('Event performance');
+          let checked = false;
+          sheet?.eachRow((row, number) => {
+            if (number === 1 || row.getCell(1).value !== 'Masked View') return;
+            expect(row.getCell(7).value).toBeNull();
+            checked = true;
+          });
+          expect(checked).toBe(true);
+        });
+
+        it('keeps a Thai event name intact through the workbook', async () => {
+          // TC-RPT-22: Thai reads correctly, with no mojibake.
+          const thai = 'มหกรรมเทคโนโลยีกรุงเทพ';
+          await seedEventAt('rpt-xl-thai', thai, '-2 days');
+          const { wb } = await workbook(adminJwt, 'events.xlsx');
+          expect(
+            saidOn(wb.getWorksheet('Event performance') as Worksheet),
+          ).toContain(thai);
+        });
+
+        it('never names another workspace’s event in the filters', async () => {
+          const { wb } = await workbook(
+            adminJwt,
+            'registrations.xlsx',
+            `?eventId=${otherEventId}`,
+          );
+          const said = saidOn(wb.getWorksheet('Summary') as Worksheet);
+          expect(said).not.toContain('Other Org Event');
+          expect(said).toContain('Selected event');
+        });
+
+        it('sends a real PDF, named after the report', async () => {
+          await seedOrder({ seats: 3 });
+          const res = await file(adminJwt, 'registrations.pdf').expect(200);
+
+          expect(res.headers['content-type']).toContain('application/pdf');
+          expect(res.headers['content-disposition']).toContain(
+            'registrations.pdf',
+          );
+          expect(bytesOf(res).subarray(0, 5).toString('latin1')).toBe('%PDF-');
+        });
+
+        it('keeps every format behind the same gate as its report', async () => {
+          // US-RPT-12: choosing a different file does not open a door.
+          await file(staffJwt, 'income.xlsx').expect(403);
+          await file(staffJwt, 'transactions.pdf').expect(403);
+          await file(staffJwt, 'discounts.xlsx').expect(403);
+          await file(staffJwt, 'attendance.pdf').expect(200);
+          await file(staffJwt, 'events.xlsx').expect(200);
+        });
+
+        it('refuses in JSON, never as a corrupt spreadsheet', async () => {
+          const res = await file(staffJwt, 'income.xlsx').expect(403);
+          expect(res.headers['content-type']).toContain('application/json');
+          const envelope = JSON.parse(bytesOf(res).toString('utf8')) as {
+            success: boolean;
+          };
+          expect(envelope.success).toBe(false);
+        });
+
+        it('refuses a backwards window whichever file was asked for', async () => {
+          const res = await file(
+            adminJwt,
+            'registrations.xlsx',
+            '?from=2026-07-07&to=2026-07-01',
+          ).expect(422);
+          expect(res.headers['content-type']).toContain('application/json');
+        });
+
+        it('has no such thing as a format it does not offer', async () => {
+          await download(adminJwt, 'registrations.json').expect(404);
+        });
       });
 
       describe('who may read it (US-RPT-12)', () => {
@@ -1866,8 +2031,13 @@ async function seedOrg(
         [key, PERM_GROUP[key], key],
       );
     }
+    // `is_system` false: these are the spec's own roles, each cut down to the
+    // keys its case needs — Staff holds regView alone, so that the finance
+    // reports are refused it. A built-in role is reconciled against
+    // DEFAULT_ROLES at sign-in, which would widen them past what is asserted.
     const role = await pool.query<{ id: string }>(
-      `INSERT INTO roles (organization_id, name, description) VALUES ($1, $2, 'seed') RETURNING id`,
+      `INSERT INTO roles (organization_id, name, description, is_system)
+       VALUES ($1, $2, 'seed', false) RETURNING id`,
       [orgId, p.roleName],
     );
     const roleId = Number(role.rows[0].id);
@@ -1911,6 +2081,7 @@ async function seedEvent(
 
 async function cleanup(pool: Pool): Promise<void> {
   const slugs = [ORG.slug, ORG2.slug];
+  // audit_events is ON DELETE RESTRICT (a sign-in writes one), so it is cleared first.
   for (const table of [
     'audit_events',
     'outbox_events',

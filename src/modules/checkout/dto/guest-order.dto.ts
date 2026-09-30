@@ -75,8 +75,19 @@ export class GuestOrderDto {
   })
   tickets!: IssuedTicketDto[];
 
-  @ApiProperty({ description: 'True while the order still awaits payment' })
+  @ApiProperty({
+    description:
+      'True while the order still awaits payment. False while it awaits ' +
+      'approval — the money, if any, has already arrived.',
+  })
   paymentRequired!: boolean;
+
+  @ApiProperty({
+    description:
+      'True while the registration waits for the organizer to approve it ' +
+      '(US-REG-02): paid for if it cost anything, ticketed only on approval.',
+  })
+  awaitingApproval!: boolean;
 
   @ApiProperty({ format: 'date-time' })
   placedAt!: string;
@@ -88,7 +99,8 @@ export class GuestOrderDto {
     description:
       'When the seats stop being reserved — the deadline to pay. `null` once ' +
       'no hold is live, which is either a settled order or one that already ' +
-      'ran out; `status` says which.',
+      'ran out; `status` says which. Also `null` while awaiting approval: ' +
+      'a decision, not a clock, ends that wait.',
   })
   holdExpiresAt!: string | null;
 }

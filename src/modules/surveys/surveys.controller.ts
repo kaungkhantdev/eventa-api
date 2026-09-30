@@ -23,6 +23,7 @@ import { AdminGuard } from '../../common/guards/admin.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { ApiData, ApiList } from '../../common/http/api-data.decorator';
 import type { AuthContext } from '../auth/auth.types';
+import { FeedbackSummaryQueryDto } from './dto/feedback-summary.query.dto';
 import { FeedbackResponseDto, FeedbackSummaryDto } from './dto/response.dto';
 import { SurveyDto } from './dto/survey.dto';
 import {
@@ -69,17 +70,20 @@ export class SurveysController {
   }
 
   /**
-   * What the answers add up to (US-MSG-08) — for one event, or the whole
-   * workspace when no event is named.
+   * What the answers add up to (US-MSG-08) — for one event, one survey, or the
+   * whole workspace when neither is named.
    */
   @Get('summary')
   @ResponseMessage('Feedback summary retrieved.')
   @ApiData(FeedbackSummaryDto)
   summary(
     @CurrentAuth() auth: AuthContext,
-    @Query('eventId') eventId?: string,
+    @Query() query: FeedbackSummaryQueryDto,
   ): Promise<FeedbackSummaryDto> {
-    return this.responses.summary(auth, eventId);
+    return this.responses.summary(auth, {
+      eventId: query.eventId,
+      surveyId: query.surveyId,
+    });
   }
 
   /** How many people answered, per event — what the event cards show. */

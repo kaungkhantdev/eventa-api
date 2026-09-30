@@ -25,6 +25,20 @@ export interface RegistrationRow {
   confirmedAt: Date | null;
   rejectedAt: Date | null;
   cancelledAt: Date | null;
+  /** Place in line for its ticket, 1 = next; null unless waitlisted (US-REG-04). */
+  waitlistPosition: number | null;
+  /** When a waitlist offer lapses; set once a seat has been offered. */
+  offerExpiresAt: Date | null;
+  /** When it started waiting for the organizer's approval (US-REG-02). */
+  approvalRequestedAt: Date | null;
+}
+
+/** What the caller may see and do, resolved once per request. */
+export interface QueueAccess {
+  /** Holds finance access — amounts are masked otherwise (US-REG-01). */
+  canViewMoney: boolean;
+  /** Holds the refund permission — a rejection that refunds needs it. */
+  canRefund: boolean;
 }
 
 export interface RegistrationFilters {

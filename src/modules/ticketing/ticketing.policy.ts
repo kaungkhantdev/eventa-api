@@ -112,6 +112,20 @@ export class TicketingPolicy {
   }
 
   /**
+   * The allocation grew, so there are new places to offer the waitlist
+   * (US-REG-04). Leaving unlimited for a number is a cut, not new places; and
+   * becoming unlimited offers nothing, because the seat-hold engine counts
+   * what is free as `total - sold - held` and cannot hold against a 0.
+   *
+   * Deliberately not gated on the stored `soldout` status: that column is only
+   * re-derived on an organizer's edit, not on a sale, so it goes stale. The
+   * people waiting in line are the evidence the ticket sold out.
+   */
+  raisesAllocation(before: number, after: number): boolean {
+    return before !== UNLIMITED && after > before;
+  }
+
+  /**
    * Availability derived from the window and the inventory (US-TKT-03), so a
    * tier opens and sells out on its own. `paused` is the one state a human owns:
    * it survives until Resume, and nothing here derives it away.

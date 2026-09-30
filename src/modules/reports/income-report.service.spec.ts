@@ -51,6 +51,7 @@ function portReturning(
       return Promise.resolve({ ...NO_MONEY, ...before });
     },
     netByDay: () => Promise.resolve([]),
+    netByEvents: () => Promise.resolve([]),
     incomeByEvent: (_org: number, query: IncomeQuery) => {
       asked.push(query);
       return Promise.resolve({

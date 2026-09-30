@@ -42,6 +42,11 @@ export const envSchema = z.object({
   // inventory (seconds). The attendee must complete checkout within this window.
   HOLD_TTL_SECONDS: z.coerce.number().int().positive().default(600), // 10m
 
+  // Waitlist (US-REG-04): how long someone offered a freed seat has to pay for
+  // it before it passes to the next person in line. eventa-worker reads the
+  // same name for the offers it makes when it passes a lapsed one on.
+  WAITLIST_OFFER_HOURS: z.coerce.number().int().positive().default(24),
+
   // Sign-in brute-force protection: after this many consecutive failures the
   // account is locked out for LOGIN_LOCK_SECONDS (a cool-off).
   LOGIN_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),

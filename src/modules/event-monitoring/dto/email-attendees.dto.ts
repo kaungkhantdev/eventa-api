@@ -1,6 +1,18 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { Equals, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  Equals,
+  IsISO8601,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
+import {
+  INSTANT_WITH_ZONE,
+  INSTANT_WITH_ZONE_MESSAGE,
+} from '../../announcements/announcement-schedule';
 
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
@@ -28,4 +40,15 @@ export class EmailAttendeesDto {
   })
   @Equals(true)
   confirm!: boolean;
+
+  @ApiPropertyOptional({
+    format: 'date-time',
+    example: '2026-08-05T03:00:00.000Z',
+    description:
+      'When to send it, as a UTC instant (US-MSG-04). Omit to send now. At least 5 minutes and at most a year ahead; the audience is resolved when it goes, not now.',
+  })
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  @Matches(INSTANT_WITH_ZONE, { message: INSTANT_WITH_ZONE_MESSAGE })
+  sendAt?: string;
 }

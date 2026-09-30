@@ -16,8 +16,10 @@ import { ApiData } from '../../common/http/api-data.decorator';
 import { CheckoutOrderService } from './checkout-order.service';
 import { CheckoutService } from './checkout.service';
 import { CheckoutViewService } from './checkout-view.service';
+import { CheckoutWaitlistService } from './checkout-waitlist.service';
 import { CheckoutViewDto } from './dto/checkout-view.dto';
 import { ConfirmOrderDto } from './dto/confirm-order.dto';
+import { JoinWaitlistDto, WaitlistJoinedDto } from './dto/join-waitlist.dto';
 import { GuestOrderDto } from './dto/guest-order.dto';
 import { OrderPlacedDto } from './dto/order-placed.dto';
 import { CheckoutHoldDto, OrderSummaryDto } from './dto/order-summary.dto';
@@ -43,6 +45,7 @@ export class CheckoutController {
     private readonly view: CheckoutViewService,
     private readonly checkout: CheckoutService,
     private readonly orders: CheckoutOrderService,
+    private readonly waitlist: CheckoutWaitlistService,
   ) {}
 
   @Public()
@@ -83,6 +86,19 @@ export class CheckoutController {
   @ApiData(OrderPlacedDto, HttpStatus.CREATED)
   confirm(@Body() dto: ConfirmOrderDto): Promise<OrderPlacedDto> {
     return this.orders.confirm(dto);
+  }
+
+  /**
+   * Join a sold-out ticket's waitlist (US-REG-04). Idempotent by the client's
+   * key, and a buyer already in line gets their place back, not a second one.
+   */
+  @Public()
+  @Post('waitlist')
+  @HttpCode(HttpStatus.CREATED)
+  @ResponseMessage("You're on the waitlist.")
+  @ApiData(WaitlistJoinedDto, HttpStatus.CREATED)
+  joinWaitlist(@Body() dto: JoinWaitlistDto): Promise<WaitlistJoinedDto> {
+    return this.waitlist.join(dto);
   }
 
   @Public()

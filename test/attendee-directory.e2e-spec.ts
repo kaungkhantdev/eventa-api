@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'dir-e2e', name: 'Directory E2E' };
@@ -56,7 +57,7 @@ describe('Attendee directory (e2e — US-REG-05)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
     jwt = await token(ADMIN, ORG.slug);
   }, 30000);
@@ -80,7 +81,9 @@ describe('Attendee directory (e2e — US-REG-05)', () => {
       .set('Authorization', `Bearer ${jwt}`);
 
   const body = (res: { body: unknown }) =>
-    res.body as Success<Attendee[]> & { meta: { counts: Counts } };
+    res.body as Success<Attendee[]> & {
+      meta: { counts: Counts; total: number };
+    };
 
   it('lists attendees with their event, ticket and check-in counts', async () => {
     const res = await list();
@@ -247,8 +250,12 @@ async function seedOrg(
     `INSERT INTO permissions (key, "group", label) VALUES ('regView','Registrations','regView')
      ON CONFLICT (key) DO NOTHING`,
   );
+  // `is_system` defaults to TRUE, so a bare INSERT would have this fixture claim
+  // to be a built-in role — and sign-in reconciles a built-in named Admin,
+  // Organizer or Staff up to the full grant set its name carries, widening the
+  // narrow grants this seed holds on purpose. This role is the spec's own.
   const role = await pool.query<{ id: string }>(
-    `INSERT INTO roles (organization_id, name, description) VALUES ($1,'Admin','seed') RETURNING id`,
+    `INSERT INTO roles (organization_id, name, description, is_system) VALUES ($1,'Admin','seed',false) RETURNING id`,
     [orgId],
   );
   await pool.query(
@@ -274,6 +281,8 @@ async function cleanup(pool: Pool): Promise<void> {
        (SELECT id FROM organizations WHERE slug = ANY($1))`;
   // Order matters: check_ins and tickets hold ON DELETE RESTRICT references to
   // events, deliberately — admission history outlives the event it belongs to.
+  // audit_events leads for the same reason (a failed login writes one): the
+  // organizations delete below fails unless it is cleared first.
   for (const table of [
     'audit_events',
     'check_ins',

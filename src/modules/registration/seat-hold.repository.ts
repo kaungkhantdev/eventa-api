@@ -316,6 +316,32 @@ export class SeatHoldRepository {
     });
   }
 
+  /**
+   * Release active holds that no order has taken over (US-REG-02). A hold an
+   * order is keeping — a paid seat waiting for the organizer's decision, or an
+   * order mid-payment — is that order's to give up, never an anonymous
+   * caller's: hold ids are sequential, so anyone could name one.
+   */
+  async releaseUnattached(
+    organizationId: number,
+    holdIds: number[],
+  ): Promise<void> {
+    if (holdIds.length === 0) return;
+    await withTenant(this.db, organizationId, async (tx) => {
+      await tx
+        .update(seatHolds)
+        .set({ status: 'released' })
+        .where(
+          and(
+            eq(seatHolds.organizationId, organizationId),
+            inArray(seatHolds.id, holdIds),
+            eq(seatHolds.status, ACTIVE),
+            isNull(seatHolds.orderId),
+          ),
+        );
+    });
+  }
+
   /** Flip this tenant's lapsed active holds to `expired`; returns how many. */
   async expireStale(organizationId: number, now: Date): Promise<number> {
     return withTenant(this.db, organizationId, async (tx) => {

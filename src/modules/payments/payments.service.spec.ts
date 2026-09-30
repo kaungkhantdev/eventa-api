@@ -19,6 +19,7 @@ import type {
 } from './ports/payment-provider.port';
 import type { PaymentRow, PaymentsRepository } from './payments.repository';
 import { PaymentsService } from './payments.service';
+import type { RefundsService } from './refunds.service';
 
 const NOW = new Date('2026-06-01T00:00:00Z');
 const ORDER_ID = 'o-1';
@@ -32,6 +33,7 @@ function payable(o: Partial<PayableOrder> = {}): PayableOrder {
     organizationId: ORG,
     reference: 'ORD-7K2M9QX4',
     eventId: 'e-1',
+    eventName: 'Bangkok Tech Week',
     buyerName: 'Anan Suksawat',
     buyerEmail: 'anan@example.test',
     status: 'pending',
@@ -46,6 +48,7 @@ function started(o: Partial<StartedPayment> = {}): StartedPayment {
   return {
     gatewayRef: 'fake_pi_abc',
     status: 'requires_action',
+    checkoutUrl: null,
     clientSecret: 'fake_pi_abc_secret',
     promptPayQr: null,
     expiresAt: null,
@@ -105,12 +108,20 @@ function credentialsPort(): jest.Mocked<GatewayCredentialsPort> {
 
 const message = (e: unknown) => (e as DomainException).message;
 
+/** Finishing a pending refund is RefundsService's job; this double stands in. */
+function refundsDouble(): jest.Mocked<RefundsService> {
+  return {
+    completePending: jest.fn().mockResolvedValue('settled'),
+  } as unknown as jest.Mocked<RefundsService>;
+}
+
 describe('PaymentsService (US-DISC-05)', () => {
   let repo: jest.Mocked<PaymentsRepository>;
   let provider: jest.Mocked<PaymentProviderPort>;
   let orders: jest.Mocked<OrderPaymentPort>;
   let merchants: jest.Mocked<MerchantAccountPort>;
   let credentials: jest.Mocked<GatewayCredentialsPort>;
+  let refunds: jest.Mocked<RefundsService>;
   let service: PaymentsService;
 
   beforeEach(() => {
@@ -128,6 +139,11 @@ describe('PaymentsService (US-DISC-05)', () => {
     provider = {
       start: jest.fn().mockResolvedValue(started()),
       verifyWebhook: jest.fn().mockReturnValue(verified()),
+      // Refunds and payouts are other services' business; declared so the
+      // double is the whole port, not the half this spec happens to call.
+      refund: jest.fn(),
+      payoutSettingsLink: jest.fn(),
+      retryPayout: jest.fn(),
     };
     orders = {
       findPayable: jest.fn().mockResolvedValue(payable()),
@@ -138,9 +154,11 @@ describe('PaymentsService (US-DISC-05)', () => {
       }),
       releaseHolds: jest.fn().mockResolvedValue(undefined),
       queueRefund: jest.fn().mockResolvedValue(undefined),
+      refundOrder: jest.fn(),
     };
     merchants = merchantPort();
     credentials = credentialsPort();
+    refunds = refundsDouble();
     const clock: Clock = { now: () => NOW };
     const config = {
       getOrThrow: () => 'fake',
@@ -151,6 +169,7 @@ describe('PaymentsService (US-DISC-05)', () => {
       orders,
       merchants,
       credentials,
+      refunds,
       clock,
       config,
     );
@@ -350,29 +369,50 @@ describe('PaymentsService (US-DISC-05)', () => {
       provider.verifyWebhook.mockImplementation(() => {
         throw DomainException.forbidden('Invalid webhook signature.');
       });
-      await expect(service.handleWebhook(raw, 'bad')).rejects.toThrow(
-        /signature/i,
-      );
+      await expect(
+        service.handleWebhook(WEBHOOK_TOKEN, raw, 'bad'),
+      ).rejects.toThrow(/signature/i);
       expect(repo.recordWebhook).not.toHaveBeenCalled();
+    });
+
+    it('checks the signature with the secret of the workspace its URL names', async () => {
+      // The token in the callback URL is the only thing that says which
+      // workspace's signing secret applies — the body cannot be trusted
+      // until it has been checked.
+      await service.handleWebhook(WEBHOOK_TOKEN, raw, 'sig');
+      expect(credentials.webhookIdentityFor).toHaveBeenCalledWith(
+        WEBHOOK_TOKEN,
+      );
+      expect(provider.verifyWebhook).toHaveBeenCalledWith(raw, 'sig', [
+        'whsec_x',
+      ]);
+    });
+
+    it('refuses a callback whose URL names no workspace', async () => {
+      credentials.webhookIdentityFor.mockResolvedValue(null);
+      await expect(
+        service.handleWebhook('tok_unknown', raw, 'sig'),
+      ).rejects.toThrow(/signature/i);
+      expect(provider.verifyWebhook).not.toHaveBeenCalled();
     });
 
     it('acknowledges an event type it does not care about', async () => {
       provider.verifyWebhook.mockReturnValue(verified({ type: 'ignored' }));
-      const res = await service.handleWebhook(raw, 'sig');
+      const res = await service.handleWebhook(WEBHOOK_TOKEN, raw, 'sig');
       expect(res).toEqual({ received: true });
       expect(orders.settle).not.toHaveBeenCalled();
     });
 
     it('processes a given provider event exactly once', async () => {
       repo.recordWebhook.mockResolvedValue(false); // seen before
-      await service.handleWebhook(raw, 'sig');
+      await service.handleWebhook(WEBHOOK_TOKEN, raw, 'sig');
       expect(orders.settle).not.toHaveBeenCalled();
       expect(repo.markPaidIn).not.toHaveBeenCalled();
     });
 
     it('shrugs off a callback for a payment it does not know', async () => {
       repo.findByGatewayRef.mockResolvedValue(null);
-      const res = await service.handleWebhook(raw, 'sig');
+      const res = await service.handleWebhook(WEBHOOK_TOKEN, raw, 'sig');
       expect(res).toEqual({ received: true });
       expect(orders.settle).not.toHaveBeenCalled();
     });
@@ -381,7 +421,7 @@ describe('PaymentsService (US-DISC-05)', () => {
       provider.verifyWebhook.mockReturnValue(
         verified({ amountSatang: 1 * BAHT }),
       );
-      await service.handleWebhook(raw, 'sig');
+      await service.handleWebhook(WEBHOOK_TOKEN, raw, 'sig');
       expect(orders.settle).not.toHaveBeenCalled();
       expect(repo.markWebhookProcessed).toHaveBeenCalledWith(
         'evt_1',
@@ -396,7 +436,7 @@ describe('PaymentsService (US-DISC-05)', () => {
         await record(tx);
         return { outcome: 'settled', reference: 'ORD-1', ticketCount: 2 };
       });
-      await service.handleWebhook(raw, 'sig');
+      await service.handleWebhook(WEBHOOK_TOKEN, raw, 'sig');
       expect(orders.settle).toHaveBeenCalledWith(
         ORG,
         ORDER_ID,
@@ -412,13 +452,13 @@ describe('PaymentsService (US-DISC-05)', () => {
 
     it('does not settle twice for a payment already marked paid', async () => {
       repo.findByGatewayRef.mockResolvedValue(paymentRow({ status: 'paid' }));
-      await service.handleWebhook(raw, 'sig');
+      await service.handleWebhook(WEBHOOK_TOKEN, raw, 'sig');
       expect(orders.settle).not.toHaveBeenCalled();
     });
 
     it('marks a failed payment failed and keeps the seats for a retry', async () => {
       provider.verifyWebhook.mockReturnValue(verified({ type: 'failed' }));
-      await service.handleWebhook(raw, 'sig');
+      await service.handleWebhook(WEBHOOK_TOKEN, raw, 'sig');
       expect(repo.markFailed).toHaveBeenCalledWith('p-1');
       expect(orders.releaseHolds).not.toHaveBeenCalled();
       expect(orders.settle).not.toHaveBeenCalled();
@@ -426,9 +466,115 @@ describe('PaymentsService (US-DISC-05)', () => {
 
     it('releases the held seats when a PromptPay code expires', async () => {
       provider.verifyWebhook.mockReturnValue(verified({ type: 'expired' }));
-      await service.handleWebhook(raw, 'sig');
+      await service.handleWebhook(WEBHOOK_TOKEN, raw, 'sig');
       expect(repo.markFailed).toHaveBeenCalledWith('p-1');
       expect(orders.releaseHolds).toHaveBeenCalledWith(ORG, ORDER_ID);
+    });
+
+    /**
+     * A refund that did not settle when issued (PromptPay) is finished by the
+     * provider's refund callback. Its reference is the REFUND's, so it goes to
+     * the refunds side and never through the payment lookup.
+     */
+    describe('a refund the provider settles later (US-FIN-02)', () => {
+      const refundWebhook = (o: Partial<VerifiedWebhook> = {}) =>
+        verified({
+          type: 'refund_succeeded',
+          gatewayRef: 're_1',
+          amountSatang: TOTAL,
+          ...o,
+        });
+
+      it('hands a completed refund over for the workspace the URL named', async () => {
+        provider.verifyWebhook.mockReturnValue(refundWebhook());
+        const res = await service.handleWebhook(WEBHOOK_TOKEN, raw, 'sig');
+        expect(res).toEqual({ received: true });
+        expect(refunds.completePending).toHaveBeenCalledWith({
+          organizationId: ORG,
+          refundRef: 're_1',
+          outcome: 'succeeded',
+          amountSatang: TOTAL,
+          failureReason: null,
+        });
+        expect(repo.markWebhookProcessed).toHaveBeenCalledWith(
+          'evt_1',
+          ORG,
+          'processed',
+        );
+      });
+
+      it('hands a failed refund over with the provider’s reason', async () => {
+        refunds.completePending.mockResolvedValue('failed');
+        provider.verifyWebhook.mockReturnValue(
+          refundWebhook({
+            type: 'refund_failed',
+            declineReason: 'insufficient_funds',
+          }),
+        );
+        await service.handleWebhook(WEBHOOK_TOKEN, raw, 'sig');
+        expect(refunds.completePending).toHaveBeenCalledWith(
+          expect.objectContaining({
+            outcome: 'failed',
+            failureReason: 'insufficient_funds',
+          }),
+        );
+        expect(repo.markWebhookProcessed).toHaveBeenCalledWith(
+          'evt_1',
+          ORG,
+          'processed',
+        );
+      });
+
+      it('never reads a refund’s reference as a payment’s', async () => {
+        provider.verifyWebhook.mockReturnValue(refundWebhook());
+        await service.handleWebhook(WEBHOOK_TOKEN, raw, 'sig');
+        expect(repo.findByGatewayRef).not.toHaveBeenCalled();
+        expect(repo.markFailed).not.toHaveBeenCalled();
+        expect(orders.settle).not.toHaveBeenCalled();
+        expect(orders.releaseHolds).not.toHaveBeenCalled();
+      });
+
+      it('processes a given refund event exactly once', async () => {
+        provider.verifyWebhook.mockReturnValue(refundWebhook());
+        repo.recordWebhook.mockResolvedValue(false);
+        await service.handleWebhook(WEBHOOK_TOKEN, raw, 'sig');
+        expect(refunds.completePending).not.toHaveBeenCalled();
+      });
+
+      it('acknowledges a refund it has no record of, tied to no workspace', async () => {
+        refunds.completePending.mockResolvedValue('unknown');
+        provider.verifyWebhook.mockReturnValue(refundWebhook());
+        const res = await service.handleWebhook(WEBHOOK_TOKEN, raw, 'sig');
+        expect(res).toEqual({ received: true });
+        expect(repo.markWebhookProcessed).toHaveBeenCalledWith(
+          'evt_1',
+          null,
+          'processed',
+        );
+      });
+
+      it.each(['amount_mismatch', 'failed_after_settled'] as const)(
+        'records %s as a failed webhook, for a person to look at',
+        async (completion) => {
+          refunds.completePending.mockResolvedValue(completion);
+          provider.verifyWebhook.mockReturnValue(refundWebhook());
+          await service.handleWebhook(WEBHOOK_TOKEN, raw, 'sig');
+          expect(repo.markWebhookProcessed).toHaveBeenCalledWith(
+            'evt_1',
+            ORG,
+            'failed',
+          );
+        },
+      );
+
+      it('leaves the event unprocessed when finishing it throws, so the retry can', async () => {
+        refunds.completePending.mockRejectedValue(new Error('deadlock'));
+        provider.verifyWebhook.mockReturnValue(refundWebhook());
+        await expect(
+          service.handleWebhook(WEBHOOK_TOKEN, raw, 'sig'),
+        ).rejects.toThrow('deadlock');
+        expect(repo.markWebhookProcessed).not.toHaveBeenCalled();
+      });
     });
   });
 });
@@ -454,6 +600,11 @@ describe('PaymentsService — money-path defences', () => {
     provider = {
       start: jest.fn().mockResolvedValue(started()),
       verifyWebhook: jest.fn().mockReturnValue(verified()),
+      // Refunds and payouts are other services' business; declared so the
+      // double is the whole port, not the half this spec happens to call.
+      refund: jest.fn(),
+      payoutSettingsLink: jest.fn(),
+      retryPayout: jest.fn(),
     };
     orders = {
       findPayable: jest.fn().mockResolvedValue(payable()),
@@ -464,6 +615,7 @@ describe('PaymentsService — money-path defences', () => {
       }),
       releaseHolds: jest.fn().mockResolvedValue(undefined),
       queueRefund: jest.fn().mockResolvedValue(undefined),
+      refundOrder: jest.fn(),
     };
     const clock: Clock = { now: () => NOW };
     service = new PaymentsService(
@@ -472,6 +624,7 @@ describe('PaymentsService — money-path defences', () => {
       orders,
       merchantPort(),
       credentialsPort(),
+      refundsDouble(),
       clock,
       {
         getOrThrow: () => 'fake',

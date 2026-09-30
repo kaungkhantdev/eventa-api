@@ -9,6 +9,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { CORRELATION_ID_HEADER } from '../src/common/context/correlation-id.middleware';
+import { listenOnLoopback } from './support/loopback';
 
 describe('Health (e2e)', () => {
   let app: INestApplication;
@@ -24,7 +25,7 @@ describe('Health (e2e)', () => {
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
   });
 

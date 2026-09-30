@@ -73,6 +73,11 @@ export const events = pgTable(
      * (US-REG-02); when false checkout confirms it outright.
      */
     requiresApproval: boolean().notNull().default(false),
+    /**
+     * When true, attendees may join a waitlist for a general-admission ticket
+     * once it sells out (US-REG-04); when false it simply shows "sold out".
+     */
+    waitlistEnabled: boolean().notNull().default(false),
     bucket: eventBucketEnum().notNull(),
     visibility: visibilityEnum().notNull().default('private'),
     categoryId: bigint({ mode: 'number' }).references(() => categories.id, {

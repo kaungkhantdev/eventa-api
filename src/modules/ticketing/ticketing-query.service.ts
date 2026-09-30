@@ -97,7 +97,9 @@ function toInventoryItem(
     status: t.status,
     sold: t.sold,
     total: t.total,
+    maxPerOrder: t.maxPerOrder,
     salesStartAt: t.salesStartAt?.toISOString() ?? null,
     salesEndAt: t.salesEndAt?.toISOString() ?? null,
+    version: t.version,
   };
 }

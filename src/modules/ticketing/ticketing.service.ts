@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { MAX_SEATS_PER_BOOKING } from '../../common/booking/booking.limits';
 import { DomainException } from '../../common/errors/domain.exception';
 import { Clock } from '../../common/time/clock';
@@ -6,8 +6,13 @@ import { pickDefined } from '../../common/util/pick-defined';
 import type { EventActor } from '../events/events.types';
 import { EventsService } from '../events/events.service';
 import { TicketResponseDto } from './dto/ticket-response.dto';
+import type { UpdatedTicketResponseDto } from './dto/updated-ticket-response.dto';
 import { CheckoutActivityPort } from './ports/checkout-activity.port';
-import { toTicketResponse } from './ticketing.mapper';
+import {
+  type WaitlistOfferOutcome,
+  WaitlistOffersPort,
+} from './ports/waitlist-offers.port';
+import { toTicketResponse, toUpdatedTicketResponse } from './ticketing.mapper';
 import { TicketingPolicy } from './ticketing.policy';
 import { TicketingRepository } from './ticketing.repository';
 import type {
@@ -31,15 +36,26 @@ const UPDATABLE_KEYS: (keyof NewTicketValues & keyof UpdateTicketInput)[] = [
   'salesEndAt',
 ];
 
+const WAITLIST_OFFER_FAILED =
+  'Raised a ticket allocation, but offering the new places to its waitlist failed';
+/** No new places, so nothing was offered and nothing went wrong. */
+const NOTHING_TO_OFFER: WaitlistOfferOutcome = {
+  offered: 0,
+  interrupted: false,
+};
+
 /** Manage an event's sellable ticket tiers (the Ticketing bounded context). */
 @Injectable()
 export class TicketingService {
+  private readonly logger = new Logger(TicketingService.name);
+
   constructor(
     private readonly repo: TicketingRepository,
     private readonly events: EventsService,
     private readonly policy: TicketingPolicy,
     private readonly clock: Clock,
     private readonly checkout: CheckoutActivityPort,
+    private readonly waitlist: WaitlistOffersPort,
   ) {}
 
   async createTicket(
@@ -99,7 +115,7 @@ export class TicketingService {
     eventId: string,
     ticketId: string,
     input: UpdateTicketInput,
-  ): Promise<TicketResponseDto> {
+  ): Promise<UpdatedTicketResponseDto> {
     const ticket = await this.load(actor.organizationId, eventId, ticketId);
     if (input.version !== undefined && input.version !== ticket.version) {
       throw this.stale();
@@ -133,7 +149,56 @@ export class TicketingService {
       ticket.version,
     );
     if (!updated) throw this.stale();
-    return this.respond(actor.organizationId, updated);
+    return this.respondToUpdate(actor.organizationId, ticket, updated);
+  }
+
+  /**
+   * The saved tier, and what its new places did for the waitlist (US-REG-04).
+   * Read again only when somebody got a place, because a free registration
+   * confirmed off the line is counted in `sold`.
+   */
+  private async respondToUpdate(
+    organizationId: number,
+    before: TicketRow,
+    after: TicketRow,
+  ): Promise<UpdatedTicketResponseDto> {
+    const outcome = await this.offerRaisedPlaces(organizationId, before, after);
+    const current =
+      outcome.offered > 0
+        ? await this.load(organizationId, after.eventId, after.id)
+        : after;
+    const rate = await this.repo.orgVatRate(organizationId);
+    return toUpdatedTicketResponse(current, rate, outcome);
+  }
+
+  /**
+   * Offer a raised allocation's new places to the people waiting for them.
+   * Runs after the save has committed; a failure is reported as the offers
+   * being cut short, never thrown — the organizer's capacity change stands
+   * whatever happens to an offer, and they can still offer by hand.
+   */
+  private async offerRaisedPlaces(
+    organizationId: number,
+    before: TicketRow,
+    after: TicketRow,
+  ): Promise<WaitlistOfferOutcome> {
+    if (!this.policy.raisesAllocation(before.total, after.total)) {
+      return NOTHING_TO_OFFER;
+    }
+    try {
+      return await this.waitlist.offerNewPlaces(
+        organizationId,
+        after.eventId,
+        after.id,
+      );
+    } catch (err) {
+      // The port promises not to reject, and its adapter keeps that promise.
+      // This guards the promise, not the adapter: the save above has
+      // committed, so a rejection must not reach the organizer as a 500 for
+      // a change that stands. How many were offered is then unknown.
+      this.logger.error({ err, ticketTypeId: after.id }, WAITLIST_OFFER_FAILED);
+      return { offered: 0, interrupted: true };
+    }
   }
 
   /** Pause selling on demand — it stops even inside its sales window (US-TKT-03). */

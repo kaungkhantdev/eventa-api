@@ -1,5 +1,22 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiForbiddenResponse, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseIntPipe,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiConflictResponse,
+  ApiForbiddenResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { CurrentAuth } from '../../common/decorators/current-auth.decorator';
 import {
   Permission,
@@ -9,24 +26,29 @@ import { ResponseMessage } from '../../common/decorators/response-message.decora
 import { ApiErrorDto } from '../../common/errors/error-envelope';
 import { AdminGuard } from '../../common/guards/admin.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
-import { ApiPage } from '../../common/http/api-data.decorator';
+import { ApiData, ApiPage } from '../../common/http/api-data.decorator';
 import type { Paginated } from '../../common/http/paginated';
 import type { AuthContext } from '../auth/auth.types';
 import { AnnouncementsService } from './announcements.service';
 import type { AnnouncementListRow } from './announcements.repository';
 import { AnnouncementDto } from './dto/announcement.dto';
 import { AnnouncementsQueryDto } from './dto/announcements.query.dto';
+import { RescheduleAnnouncementDto } from './dto/reschedule-announcement.dto';
 
 /**
- * The broadcasts a workspace has sent (US-MSG-04).
+ * The broadcasts a workspace has sent or scheduled (US-MSG-04/05).
  *
- * Read-only. Sending one is `POST /events/:id/attendees/email` (US-EVT-14) and
- * stays there: a broadcast is something you do to an event's attendees, and
- * splitting the send away from the event it belongs to would leave two places
- * that can start the same thing.
+ * Sending one — now or at a time — is `POST /events/:id/attendees/email`
+ * (US-EVT-14) and stays there: a broadcast is something you do to an event's
+ * attendees, and splitting the send away from the event it belongs to would
+ * leave two places that can start the same thing. What lives here is the
+ * history, and changing your mind about one that has not gone yet.
  *
- * Gated on `regView`, the same permission as the send — both are about who you
- * are allowed to write to.
+ * Reading the history is gated on `regView`, the same permission as the send —
+ * both are about who you are allowed to see and write to. Calling one off or
+ * moving it is `regManage`: it revokes somebody else's decision, and Staff hold
+ * `regView` by default, so `regView` there would let the door team silence an
+ * organizer's broadcast. Same line the registrations queue draws (US-REG-02).
  */
 @ApiTags('announcements')
 @ApiBearerAuth()
@@ -34,7 +56,8 @@ import { AnnouncementsQueryDto } from './dto/announcements.query.dto';
 @RequirePermissions(Permission.regView)
 @ApiForbiddenResponse({
   type: ApiErrorDto,
-  description: 'Seeing who was written to is an attendee-data permission.',
+  description:
+    'Attendee-data permissions: `regView` to see who was written to, `regManage` to call one off or move it.',
 })
 @Controller('announcements')
 export class AnnouncementsController {
@@ -48,5 +71,39 @@ export class AnnouncementsController {
     @Query() query: AnnouncementsQueryDto,
   ): Promise<Paginated<AnnouncementListRow>> {
     return this.announcements.list(auth, query);
+  }
+
+  @Post(':id/cancel')
+  @RequirePermissions(Permission.regManage)
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Announcement cancelled.')
+  @ApiData(AnnouncementDto)
+  @ApiConflictResponse({
+    type: ApiErrorDto,
+    description:
+      'It has already started sending, or was already cancelled. The message says which, for the organizer.',
+  })
+  cancel(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<AnnouncementListRow> {
+    return this.announcements.cancel(auth, id);
+  }
+
+  @Patch(':id')
+  @RequirePermissions(Permission.regManage)
+  @ResponseMessage('Announcement rescheduled.')
+  @ApiData(AnnouncementDto)
+  @ApiConflictResponse({
+    type: ApiErrorDto,
+    description:
+      'It has already started sending, or was cancelled. The message says which, for the organizer.',
+  })
+  reschedule(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RescheduleAnnouncementDto,
+  ): Promise<AnnouncementListRow> {
+    return this.announcements.reschedule(auth, id, new Date(dto.sendAt));
   }
 }

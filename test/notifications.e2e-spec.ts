@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 /**
  * The notification feed against a real database (US-MSG-03).
@@ -34,6 +35,10 @@ const PERM_GROUP: Record<string, string> = {
   finView: 'Finance',
   evCreate: 'Events',
 };
+
+/** Plainly before, or plainly after, a "mark all read" made during the test. */
+const BEFORE_READ = "now() - interval '5 seconds'";
+const AFTER_READ = "now() + interval '5 seconds'";
 
 interface Success<T> {
   data: T;
@@ -95,7 +100,7 @@ describe('Notifications (e2e — US-MSG-03)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
 
     adminJwt = await token(ADMIN, ORG.slug);
@@ -322,6 +327,11 @@ describe('Notifications (e2e — US-MSG-03)', () => {
   });
 
   describe('unread and marking read', () => {
+    // "Mark all read" stamps the API's clock; an order is stamped by the
+    // database's. A few milliseconds between the two made "just before" and
+    // "just after" the click flip on some runs, so each seeded order sits
+    // plainly on one side of it.
+
     it('counts everything as unread for a member who has never looked', async () => {
       await seedOrder({});
       await seedPayment({ amountSatang: 10_000 });
@@ -333,7 +343,7 @@ describe('Notifications (e2e — US-MSG-03)', () => {
 
     it('drops the unread count to zero and keeps it there after a reload', async () => {
       // TC-MSG-07: the persistence the whole watermark exists for.
-      await seedOrder({});
+      await seedOrder({ at: BEFORE_READ });
       expect(feed(await get(adminJwt).expect(200)).counts.unread).toBe(1);
 
       const marked = await markRead(adminJwt).expect(200);
@@ -345,9 +355,9 @@ describe('Notifications (e2e — US-MSG-03)', () => {
     });
 
     it('makes something that happens afterwards unread again', async () => {
-      await seedOrder({});
+      await seedOrder({ at: BEFORE_READ });
       await markRead(adminJwt).expect(200);
-      await seedOrder({ buyer: 'Somchai Wong' });
+      await seedOrder({ buyer: 'Somchai Wong', at: AFTER_READ });
 
       const f = feed(await get(adminJwt).expect(200));
       expect(f.counts).toEqual({ all: 2, unread: 1 });
@@ -355,7 +365,7 @@ describe('Notifications (e2e — US-MSG-03)', () => {
     });
 
     it('clears one member’s feed without touching another’s', async () => {
-      await seedOrder({});
+      await seedOrder({ at: BEFORE_READ });
       await markRead(adminJwt).expect(200);
 
       expect(feed(await get(adminJwt).expect(200)).counts.unread).toBe(0);
@@ -364,7 +374,7 @@ describe('Notifications (e2e — US-MSG-03)', () => {
 
     it('can be marked read twice without complaint', async () => {
       // Two tabs, or a double click: the upsert must not collide on its key.
-      await seedOrder({});
+      await seedOrder({ at: BEFORE_READ });
       await markRead(adminJwt).expect(200);
       await markRead(adminJwt).expect(200);
       expect(feed(await get(adminJwt).expect(200)).counts.unread).toBe(0);
@@ -373,9 +383,9 @@ describe('Notifications (e2e — US-MSG-03)', () => {
 
   describe('the unread filter', () => {
     it('shows only unread items while both counts stay whole', async () => {
-      await seedOrder({ buyer: 'Read Already' });
+      await seedOrder({ buyer: 'Read Already', at: BEFORE_READ });
       await markRead(adminJwt).expect(200);
-      await seedOrder({ buyer: 'Brand New' });
+      await seedOrder({ buyer: 'Brand New', at: AFTER_READ });
 
       const f = feed(await get(adminJwt, '?unreadOnly=true').expect(200));
       expect(itemsOf(f).map((i) => i.personName)).toEqual(['Brand New']);
@@ -385,7 +395,7 @@ describe('Notifications (e2e — US-MSG-03)', () => {
 
     it('returns nothing to show once everything is read', async () => {
       // What "you’re all caught up" is rendered from.
-      await seedOrder({});
+      await seedOrder({ at: BEFORE_READ });
       await markRead(adminJwt).expect(200);
 
       const f = feed(await get(adminJwt, '?unreadOnly=true').expect(200));
@@ -472,8 +482,14 @@ async function seedOrg(
         [key, PERM_GROUP[key], key],
       );
     }
+    // `is_system` false on purpose. The role below is this spec's own fixture,
+    // wearing a built-in's name only so the membership reads plausibly. A role
+    // marked built-in is reconciled against DEFAULT_ROLES, which would top the
+    // deliberately narrow grants back up and leave the refusal cases with
+    // nothing left to refuse.
     const role = await pool.query<{ id: string }>(
-      `INSERT INTO roles (organization_id, name, description) VALUES ($1, $2, 'seed') RETURNING id`,
+      `INSERT INTO roles (organization_id, name, description, is_system)
+       VALUES ($1, $2, 'seed', false) RETURNING id`,
       [orgId, p.roleName],
     );
     const roleId = Number(role.rows[0].id);
@@ -517,6 +533,8 @@ async function seedEvent(
 
 async function cleanup(pool: Pool): Promise<void> {
   const slugs = [ORG.slug, ORG2.slug];
+  // audit_events is ON DELETE RESTRICT (a sign-in writes one), so it leads the
+  // list — the organization below cannot be deleted while a row remains.
   for (const table of [
     'audit_events',
     'outbox_events',

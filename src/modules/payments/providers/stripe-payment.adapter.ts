@@ -12,6 +12,7 @@ import {
   type StartPaymentInput,
   type RefundPaymentInput,
   type RefundedPayment,
+  type RefundWebhookType,
   type RetriedPayout,
   type RetryPayoutInput,
   type StartedPayment,
@@ -34,6 +35,28 @@ const NON_LATIN = /[^A-Za-z0-9 ]/g;
 
 /** Stripe's code for "the buyer never completed it in time" (PromptPay lapse). */
 const ATTEMPT_EXPIRED = 'payment_intent_payment_attempt_expired';
+
+/**
+ * Refund statuses that mean "live at Stripe, not settled yet". A PromptPay
+ * refund STARTS in `requires_action` — Stripe's documented flow for refunds
+ * that require action — while it emails the buyer for a bank account, then
+ * moves to `pending` and on to `succeeded`. Reading `requires_action` as failed
+ * would leave the buyer with the money back AND valid tickets.
+ */
+const REFUND_IN_FLIGHT: ReadonlySet<string> = new Set([
+  'pending',
+  'requires_action',
+]);
+
+/**
+ * The refund states a webhook finishes a pending refund on. Anything else —
+ * still in flight — is ignored until it lands on one of these.
+ */
+const REFUND_WEBHOOK_OUTCOME: ReadonlyMap<string, RefundWebhookType> = new Map([
+  ['succeeded', 'refund_succeeded'],
+  ['failed', 'refund_failed'],
+  ['canceled', 'refund_failed'],
+]);
 
 /** How a Stripe client is made from a key. Injected so a test can supply its own. */
 export type StripeClientFactory = (secretKey: string) => Stripe;
@@ -94,7 +117,7 @@ const IGNORED: VerifiedWebhook = {
  * a `client_secret` that authorises Stripe's OWN hosted fields, and PromptPay
  * returns a bank-scannable payload for an amount.
  *
- * Three Stripe specifics worth knowing, each verified against the installed SDK
+ * Four Stripe specifics worth knowing, each verified against the installed SDK
  * and the published docs rather than assumed:
  *
  * - **PromptPay has no provider-side expiry.** Unlike PayNow or Pix, Stripe
@@ -108,6 +131,12 @@ const IGNORED: VerifiedWebhook = {
  * - **Cards take `statement_descriptor_suffix`, PromptPay takes nothing.**
  *   Stripe rejects a full descriptor on cards and documents that PromptPay
  *   ignores the value outright (buyers see Stripe's Thai entity instead).
+ * - **No `receipt_email`, on any path.** Eventa's itemized VAT receipt, sent by
+ *   eventa-worker behind the organizer's message switch and `email_receipts`,
+ *   is the only receipt. `receipt_email` makes Stripe send its own in live mode
+ *   regardless of the account's email settings — a second receipt that ignores
+ *   both switches. `customer_email` only prefills the hosted page and
+ *   PromptPay's billing email is what a refund needs, so both stay.
  */
 @Injectable()
 export class StripePaymentAdapter extends PaymentProviderPort {
@@ -214,7 +243,6 @@ export class StripePaymentAdapter extends PaymentProviderPort {
       metadata,
       payment_intent_data: {
         metadata,
-        receipt_email: input.buyerEmail,
         // A SUFFIX, and Latin-only — the same rule the intent path follows,
         // because cards reject the full form and reject Thai script outright.
         ...(suffix ? { statement_descriptor_suffix: suffix } : {}),
@@ -224,8 +252,9 @@ export class StripePaymentAdapter extends PaymentProviderPort {
 
   /**
    * Full refund to the original method. `pending` is a real outcome rather than
-   * a failure — a PromptPay refund waits on the buyer's bank details, which
-   * Stripe collects by email, so the ledger records it and the webhook confirms.
+   * a failure — a PromptPay refund comes back `requires_action` while Stripe
+   * emails the buyer for their bank details, so the ledger records it and a
+   * `refund.updated` / `refund.failed` webhook finishes it.
    */
   async refund(input: RefundPaymentInput): Promise<RefundedPayment> {
     const stripe = await this.as(input.organizationId);
@@ -345,7 +374,6 @@ function cardParams(
   const suffix = statementDescriptorSuffix(input.statementDescriptor);
   return {
     payment_method_types: ['card'],
-    receipt_email: input.buyerEmail,
     ...(suffix ? { statement_descriptor_suffix: suffix } : {}),
   };
 }
@@ -417,7 +445,7 @@ function statementDescriptorSuffix(descriptor: string | null): string | null {
  */
 function toRefundStatus(status: string | null): RefundedPayment['status'] {
   if (status === 'succeeded') return 'succeeded';
-  if (status === 'pending') return 'pending';
+  if (status && REFUND_IN_FLIGHT.has(status)) return 'pending';
   return 'failed';
 }
 
@@ -455,9 +483,40 @@ function toVerifiedWebhook(event: Stripe.Event): VerifiedWebhook {
       return failure(event, intentOf(event));
     case 'payment_intent.canceled':
       return settled(event, intentOf(event), 'expired');
+    // A refund that did not settle when issued (PromptPay) finishes here.
+    // `refund.created` is left out because `refunds.create` already answered
+    // for it, and `charge.refund.updated` because Stripe deprecates it in
+    // favour of `refund.updated`.
+    case 'refund.updated':
+    case 'refund.failed':
+      return fromRefund(event, refundOf(event));
     default:
       return IGNORED;
   }
+}
+
+function refundOf(event: Stripe.Event): Stripe.Refund {
+  return event.data.object as Stripe.Refund;
+}
+
+/**
+ * A refund that reached an end state, under the refund's OWN reference — the
+ * `re_…` the refund row stored — never the charge's. Still in flight is
+ * ignored: only the end state moves tickets or the ledger.
+ */
+function fromRefund(
+  event: Stripe.Event,
+  refund: Stripe.Refund,
+): VerifiedWebhook {
+  const type = REFUND_WEBHOOK_OUTCOME.get(refund.status ?? '');
+  if (!type) return IGNORED;
+  return {
+    eventId: event.id,
+    type,
+    gatewayRef: refund.id,
+    amountSatang: refund.amount,
+    declineReason: refund.failure_reason ?? null,
+  };
 }
 
 /**

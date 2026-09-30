@@ -11,6 +11,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { MAX_NPS_SCORE, MIN_NPS_SCORE } from '../nps-rules';
 import { MAX_RATING, MIN_RATING } from '../response-rules';
 import { SurveyQuestionDto } from './survey.dto';
 
@@ -61,6 +62,19 @@ export class SubmitAnswerDto {
   @IsString()
   @MaxLength(120)
   choice?: string;
+
+  @ApiPropertyOptional({
+    minimum: MIN_NPS_SCORE,
+    maximum: MAX_NPS_SCORE,
+    description:
+      'How likely they are to recommend it, answering an `nps` question. 0 is an answer.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(MIN_NPS_SCORE)
+  @Max(MAX_NPS_SCORE)
+  score?: number;
 }
 
 export class SubmitResponseDto {
@@ -72,9 +86,37 @@ export class SubmitResponseDto {
   answers!: SubmitAnswerDto[];
 }
 
+/** The net promoter score of the recommendation answers in scope (US-MSG-08). */
+export class NpsSummaryDto {
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 25,
+    description:
+      'Promoters (9–10) less detractors (0–6), as whole percentage points from −100 to 100. Null when nobody has answered a recommendation question — never 0, which is a real score.',
+  })
+  score!: number | null;
+
+  @ApiProperty({ example: 4, description: 'Recommendation answers counted.' })
+  answers!: number;
+
+  @ApiProperty({ example: 2, description: 'Answered 9 or 10.' })
+  promoters!: number;
+
+  @ApiProperty({ example: 1, description: 'Answered 7 or 8.' })
+  passives!: number;
+
+  @ApiProperty({ example: 1, description: 'Answered 0 to 6.' })
+  detractors!: number;
+}
+
 /** What a workspace's feedback adds up to (US-MSG-08). */
 export class FeedbackSummaryDto {
-  @ApiProperty({ example: 42 })
+  @ApiProperty({
+    example: 42,
+    description:
+      'People who answered in scope, one per response — not the star ratings given. A survey asking only the recommendation question still counts here; `distribution` sums to the ratings.',
+  })
   responses!: number;
 
   @ApiProperty({
@@ -91,6 +133,29 @@ export class FeedbackSummaryDto {
     example: { 1: 0, 2: 1, 3: 4, 4: 12, 5: 25 },
   })
   distribution!: Record<number, number>;
+
+  @ApiProperty({
+    example: 120,
+    description:
+      'People the post-event thank-you (with the survey link) reached, counted once per event. A failed send asked nobody.',
+  })
+  asked!: number;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 38,
+    description:
+      'Whole percent of the people ASKED who answered. Answers from people who were never emailed count in `responses` but not here, so this never exceeds 100. Across the workspace it pools every event by how many were asked. Null when nobody was asked — never 0.',
+  })
+  completionRate!: number | null;
+
+  @ApiProperty({
+    type: NpsSummaryDto,
+    description:
+      'Across the workspace it pools every answer, so each event weighs by how many answered it.',
+  })
+  nps!: NpsSummaryDto;
 }
 
 /** One person's response (US-MSG-10). */

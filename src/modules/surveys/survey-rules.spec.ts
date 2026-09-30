@@ -8,6 +8,12 @@ const choice = {
   options: ['Keynote', 'Panel'],
 };
 
+const nps = {
+  type: 'nps' as const,
+  prompt: 'How likely are you to recommend us?',
+  options: [],
+};
+
 describe('what makes a survey answerable (US-MSG-09)', () => {
   it('accepts a survey with a title and one question', () => {
     expect(() =>
@@ -62,6 +68,22 @@ describe('what makes a survey answerable (US-MSG-09)', () => {
     expect(() =>
       assertAnswerable({ title: 'Post-event', questions: [rating, choice] }),
     ).not.toThrow();
+  });
+
+  it('accepts a recommendation question, which needs no options', () => {
+    expect(() =>
+      assertAnswerable({ title: 'Post-event', questions: [rating, nps] }),
+    ).not.toThrow();
+  });
+
+  it('asks for a recommendation once per survey', () => {
+    // Two would count one person twice in that survey's NPS.
+    expect(() =>
+      assertAnswerable({
+        title: 'Post-event',
+        questions: [nps, rating, { ...nps, prompt: 'And a friend?' }],
+      }),
+    ).toThrow(/Question 3/);
   });
 
   it('names WHICH question is wrong', () => {

@@ -86,6 +86,20 @@ export const messageChannelEnum = pgEnum('message_channel', ['email', 'sms']);
 export const deliveryStatusEnum = pgEnum('delivery_status', ['sent', 'failed']);
 
 /**
+ * Where a broadcast is in its life (US-MSG-04/05).
+ *
+ * `scheduled` waits for its time and is the only state an organizer can still
+ * change; eventa-worker moves it to `sent` in the same transaction as the
+ * outbox row that delivers it. `cancelled` never goes, and stays listed: the
+ * organizer changing their mind is part of the history too.
+ */
+export const announcementStatusEnum = pgEnum('announcement_status', [
+  'scheduled',
+  'sent',
+  'cancelled',
+]);
+
+/**
  * Where a survey is in its life (US-MSG-09).
  *
  * `draft` collects nothing — it exists so a survey can be written before it is
@@ -101,12 +115,15 @@ export const surveyStatusEnum = pgEnum('survey_status', [
 /**
  * What a survey question asks for (US-MSG-09). `choice` is the only one that
  * carries options, and it is invalid with fewer than two of them — a choice
- * between one thing is not a choice.
+ * between one thing is not a choice. `nps` is a 0–10 "how likely are you to
+ * recommend…", the answer an NPS is built from (US-MSG-08); like a rating, it
+ * has no options.
  */
 export const surveyQuestionTypeEnum = pgEnum('survey_question_type', [
   'rating',
   'text',
   'choice',
+  'nps',
 ]);
 
 export const notificationKindEnum = pgEnum('notification_kind', [

@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, ilike, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, ne, or, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
   events,
@@ -67,6 +67,21 @@ export interface MarkRefundedInput {
   now: Date;
 }
 
+/** A refund to settle on its own ledger lines, if the order does not need it. */
+export interface SettleDuplicateRefundInput extends MarkRefundedInput {
+  organizationId: number;
+  orderId: string;
+}
+
+/**
+ * `settled` — another payment still covers the order, so only the ledger
+ * flipped. `sole_payment` — this is the order's only paid payment; nothing was
+ * written, and the caller voids the order. `not_pending` — another event
+ * finished this refund first; nothing was written.
+ */
+export type DuplicateRefundSettlement =
+  'settled' | 'sole_payment' | 'not_pending';
+
 /** Everything one payment attempt writes. Money is the order's, never the caller's. */
 export interface RecordAttemptInput {
   organizationId: number;
@@ -131,6 +146,11 @@ export class PaymentsRepository {
    * MOVED in, not the month of the sale. A June ticket refunded in July belongs
    * to July's return, because June's has already gone to the Revenue
    * Department.
+   *
+   * The same holds for the refund itself: a PromptPay refund issued in June
+   * and settled in July (once the buyer gave a bank account) is July's. June
+   * was filed without it while it was pending, and a filed month is frozen.
+   * Refunds from before `settled_at` existed settled when issued.
    */
   async takingsByMonth(
     organizationId: number,
@@ -147,12 +167,12 @@ export class PaymentsRepository {
              AND paid_at IS NOT NULL
              AND date_part('year', paid_at AT TIME ZONE ${BANGKOK})::int = ${year}
           UNION ALL
-          SELECT date_part('month', issued_at AT TIME ZONE ${BANGKOK})::int AS month,
+          SELECT date_part('month', coalesce(settled_at, issued_at) AT TIME ZONE ${BANGKOK})::int AS month,
                  -amount_satang AS gross
             FROM refunds
            WHERE organization_id = ${organizationId}
              AND status = 'succeeded'
-             AND date_part('year', issued_at AT TIME ZONE ${BANGKOK})::int = ${year}
+             AND date_part('year', coalesce(settled_at, issued_at) AT TIME ZONE ${BANGKOK})::int = ${year}
         ) movements
         GROUP BY month
       `);
@@ -342,6 +362,31 @@ export class PaymentsRepository {
       .where(eq(payments.id, paymentId));
   }
 
+  /**
+   * Every payment whose money reached the order, for refunding it (US-REG-02):
+   * paid, or already refunded — which says that money has gone back. Oldest
+   * first, so the one that paid for the registration leads and a duplicate
+   * follows. Never a pending or failed attempt: no money moved.
+   */
+  async findSettledPaymentsForOrder(
+    organizationId: number,
+    orderId: string,
+  ): Promise<PaymentRow[]> {
+    return withTenant(this.db, organizationId, (tx) =>
+      tx
+        .select()
+        .from(payments)
+        .where(
+          and(
+            eq(payments.organizationId, organizationId),
+            eq(payments.orderId, orderId),
+            inArray(payments.status, ['paid', 'refunded']),
+          ),
+        )
+        .orderBy(asc(payments.paidAt), asc(payments.createdAt)),
+    );
+  }
+
   /** The payment an admin may refund — tenant-scoped, so another org's is invisible. */
   async findPaymentForRefund(
     organizationId: number,
@@ -401,34 +446,122 @@ export class PaymentsRepository {
     });
   }
 
-  /** The money did not move — record why, and leave the ticket valid. */
-  async markRefundFailed(
+  /**
+   * Keep the provider's reference on a refund that has not settled yet — the
+   * only thing its later webhook carries to find this row by. Only a pending
+   * row takes it: a refund already finished has its reference already.
+   */
+  async markRefundPending(
     refundId: string,
-    reason: string | null,
+    gatewayRef: string,
+    now: Date,
   ): Promise<void> {
     await this.db
       .update(refunds)
+      .set({ gatewayRef, updatedAt: now })
+      .where(and(eq(refunds.id, refundId), eq(refunds.status, 'pending')));
+  }
+
+  /**
+   * The refund a provider callback names, by the provider's refund reference.
+   *
+   * Tenant-scoped on purpose, unlike `findByGatewayRef`: the webhook's URL
+   * token has already said whose callback this is, so one workspace's signed
+   * callback can never finish — or fail — another workspace's refund.
+   */
+  async findRefundByGatewayRef(
+    organizationId: number,
+    gatewayRef: string,
+  ): Promise<RefundRow | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(refunds)
+        .where(
+          and(
+            eq(refunds.organizationId, organizationId),
+            eq(refunds.gatewayRef, gatewayRef),
+          ),
+        )
+        .limit(1);
+      return row ?? null;
+    });
+  }
+
+  /**
+   * The money did not move — record why, and leave the ticket valid. False
+   * when the refund was no longer pending: only a pending refund can fail, so
+   * a failure racing a settlement cannot overwrite it.
+   */
+  async markRefundFailed(
+    refundId: string,
+    reason: string | null,
+  ): Promise<boolean> {
+    const moved = await this.db
+      .update(refunds)
       .set({ status: 'failed', reason, updatedAt: new Date() })
-      .where(eq(refunds.id, refundId));
+      .where(and(eq(refunds.id, refundId), eq(refunds.status, 'pending')))
+      .returning({ id: refunds.id });
+    return moved.length > 0;
   }
 
   /**
    * Flip refund AND payment inside the transaction that voids the tickets, so
    * a refunded payment and a freed seat commit together or not at all.
+   *
+   * Only a pending refund moves, and the answer says whether it did — the
+   * status read before the transaction may be stale by now. On false nothing
+   * is written here, and the caller must roll back whatever it did before.
    */
-  async markRefundedIn(tx: Tx, input: MarkRefundedInput): Promise<void> {
-    await tx
+  async markRefundedIn(tx: Tx, input: MarkRefundedInput): Promise<boolean> {
+    const moved = await tx
       .update(refunds)
       .set({
         status: 'succeeded',
         gatewayRef: input.gatewayRef,
+        settledAt: input.now,
         updatedAt: input.now,
       })
-      .where(eq(refunds.id, input.refundId));
+      .where(and(eq(refunds.id, input.refundId), eq(refunds.status, 'pending')))
+      .returning({ id: refunds.id });
+    if (moved.length === 0) return false;
     await tx
       .update(payments)
       .set({ status: 'refunded', updatedAt: input.now })
       .where(eq(payments.id, input.paymentId));
+    return true;
+  }
+
+  /**
+   * Settle the refund of a payment the order does not depend on (US-FIN-02) —
+   * a duplicate, such as the old PromptPay QR scanned after the card had paid.
+   * When another payment still covers the order, only this payment and its
+   * refund flip: the buyer paid once and keeps what that payment bought.
+   *
+   * The order's payments are locked first, so two of its payments refunded at
+   * the same moment cannot each see the other as the one still covering it —
+   * the second waits, then finds the first refunded and voids the order.
+   */
+  async settleDuplicateRefund(
+    input: SettleDuplicateRefundInput,
+  ): Promise<DuplicateRefundSettlement> {
+    return withTenant(this.db, input.organizationId, async (tx) => {
+      const orderPayments = await tx
+        .select({ id: payments.id, status: payments.status })
+        .from(payments)
+        .where(
+          and(
+            eq(payments.organizationId, input.organizationId),
+            eq(payments.orderId, input.orderId),
+          ),
+        )
+        .for('update');
+      const coveredElsewhere = orderPayments.some(
+        (p) => p.id !== input.paymentId && p.status === 'paid',
+      );
+      if (!coveredElsewhere) return 'sole_payment';
+      return (await this.markRefundedIn(tx, input)) ? 'settled' : 'not_pending';
+    });
   }
 
   /** One page of the ledger, newest first (US-FIN-01). */

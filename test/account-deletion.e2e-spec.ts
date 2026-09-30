@@ -12,6 +12,7 @@ import { AppModule } from '../src/app.module';
 import { generateTotp } from '../src/common/crypto/totp';
 import { buildValidationPipe } from '../src/common/http/validation';
 import { OutboxPort } from '../src/modules/platform/outbox.port';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 /** Unique per run — deliberate failures leave throttle strikes in Redis. */
@@ -51,7 +52,7 @@ describe('Delete my account (e2e — US-DISC-14)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
   }, 30000);
 
@@ -413,5 +414,10 @@ async function cleanup(pool: Pool): Promise<void> {
        (SELECT id FROM organizations WHERE slug LIKE 'delacct-%')`,
   );
   await pool.query(`DELETE FROM users WHERE email LIKE '%@delacct.test'`);
+  // audit_events is ON DELETE RESTRICT (a failed login writes one), so clear it first.
+  await pool.query(
+    `DELETE FROM audit_events WHERE organization_id IN
+       (SELECT id FROM organizations WHERE slug LIKE 'delacct-%')`,
+  );
   await pool.query(`DELETE FROM organizations WHERE slug LIKE 'delacct-%'`);
 }

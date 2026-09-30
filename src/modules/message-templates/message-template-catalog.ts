@@ -33,6 +33,18 @@ export interface MessageTemplateDefinition {
    */
   expected: boolean;
   /**
+   * What an ABSENT `message_templates` row means for this message: whether a
+   * workspace that has never touched it sends it.
+   *
+   * Never false for an `expected` message — a new workspace must confirm its
+   * registrations without anybody first finding this page. eventa-worker
+   * decides what is actually SENT from its own copy of the false ones,
+   * `OFF_UNTIL_SWITCHED_ON_SLUGS` in its src/db/schema/messaging.ts, so change
+   * both together: if they disagree, the page says "Inactive" while attendees
+   * are mailed, or "Active" while nobody is.
+   */
+  defaultActive: boolean;
+  /**
    * Merge fields this message can actually fill (US-MSG-02).
    *
    * These must agree with what eventa-worker substitutes for this slug — see
@@ -47,51 +59,96 @@ export interface MessageTemplateDefinition {
 }
 
 /**
+ * The thank-you that carries the survey link. Named because feedback reads the
+ * delivery log by it to know who was asked (US-MSG-08): it must equal
+ * eventa-worker's `POST_EVENT_THANKYOU_SLUG`, the kind the worker logs, and a
+ * rename on either side alone would quietly report that nobody was asked.
+ */
+export const POST_EVENT_THANKYOU_SLUG = 'post-event-thankyou';
+
+/**
  * Every automated message Eventa knows about (US-MSG-01/02).
  *
  * This is a CATALOG, not a table. A template is a trigger the platform owns,
  * not something an organizer authors — a message with nothing to fire it would
  * never be sent, which is why there is no "new template". `message_templates`
- * rows carry only a workspace's DEVIATIONS from this list, and that is what
- * makes an absent row mean active: a workspace that has never opened these
- * settings still gets its confirmations.
+ * rows carry only a workspace's DEVIATIONS from this list, so an absent row
+ * means the entry's `defaultActive`: on for everything a workspace would be
+ * surprised NOT to send — a workspace that has never opened these settings
+ * still gets its confirmations — and off for the event reminder, which is mail
+ * a workspace must choose to send.
  *
  * `delivery` is a statement about eventa-worker, which owns the sending. Keep
  * it honest: a slug becomes `controlled` on the day a handler both sends it and
  * checks `message_templates.active`, and not before.
  *
- * Email only, throughout. There is no SMS provider in the product yet, so an
- * SMS badge would promise a channel nothing can deliver on.
+ * `channels` is a promise that something sends on it, and it is kept the same
+ * way `delivery` is: a channel appears here only once eventa-worker actually
+ * sends on it. Today that is the registration confirmation and nothing else —
+ * its handler texts an attendee who gave a Thai mobile (US-DISC-06 AC5) — so
+ * every other message stays email-only.
+ *
+ * Two things follow that are easy to get wrong:
+ *
+ * - **The organizer's wording reaches the email only, for now.** The table has
+ *   `sms_body_en`/`sms_body_th` beside `email_subject_*`/`email_body_*` — they
+ *   have existed since migration 0028 — but no endpoint writes them and
+ *   eventa-worker does not read them, so a text goes in Eventa's own words
+ *   today. US-MSG-02 asks for an SMS editor with a segment counter; that is a
+ *   wiring job on columns already there, NOT a migration. The confirmation's
+ *   description states today's behaviour, because an organizer who rewrites
+ *   the message and then reads their attendee's text deserves to have been
+ *   told.
+ * - **eventa-worker reads `message_templates.channels`, not this list**, and
+ *   that column is a COPY of these channels taken when a workspace first
+ *   touched the message. Rows written before the confirmation gained SMS hold
+ *   `{email}`; migration 0066 backfills them. Nothing NARROWS the column
+ *   today, which is the only reason the list view can keep returning the
+ *   catalog's channels rather than the row's — the day an endpoint lets an
+ *   organizer switch a channel off, `MessageTemplatesService.list` has to read
+ *   the stored value too.
  */
 export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
   {
     slug: 'registration-confirmation',
     title: 'Registration confirmation',
+    // The only message that is texted. The SMS carries the reference and the
+    // ticket link in Eventa's own wording for now — the tags below reword the
+    // EMAIL.
     description:
-      'Sent the moment a registration is paid for, carrying the attendee’s ticket and order summary.',
-    channels: ['email'],
+      'Sent the moment a registration is confirmed — paid for, or approved on an event that requires approval — carrying the attendee’s ticket and order summary. Attendees who gave a Thai mobile number also get a short text with their reference and ticket link, in Eventa’s wording.',
+    channels: ['email', 'sms'],
     delivery: 'controlled',
     expected: true,
+    defaultActive: true,
     tags: ['{{first_name}}', '{{event_name}}'],
   },
   {
     slug: 'cancellation-notice',
     title: 'Cancellation notice',
+    // eventa-worker's `cancellationRecipients`: a registration still waiting
+    // for approval may have paid, and is told too — with its own refund line.
     description:
-      'Sent to every confirmed attendee when an event is cancelled, with the organizer’s reason.',
+      'Sent to every confirmed attendee — and everyone whose registration is still awaiting approval — when an event is cancelled, with the organizer’s reason.',
     channels: ['email'],
     delivery: 'controlled',
     expected: true,
+    defaultActive: true,
     tags: ['{{first_name}}', '{{event_name}}', '{{reason}}'],
   },
   {
     slug: 'payment-receipt',
     title: 'Payment receipt',
-    description: 'An itemized receipt for a successful payment, VAT included.',
+    // Two switches govern it — this one, and "Email receipts" in the payment
+    // settings (US-SET-10) — and eventa-worker sends only when both are on.
+    // Saying so here is what stops one of them looking broken.
+    description:
+      'An itemized receipt, VAT included, sent when a paid registration is confirmed — at payment, or at approval on an event that requires approval. Also needs “Email receipts” on in payment settings.',
     channels: ['email'],
-    delivery: 'planned',
+    delivery: 'controlled',
     expected: true,
-    tags: [],
+    defaultActive: true,
+    tags: ['{{first_name}}', '{{event_name}}'],
   },
   {
     slug: 'event-reminder',
@@ -101,20 +158,27 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     channels: ['email'],
     delivery: 'controlled',
     expected: false,
+    // Off until a workspace switches it on: once PUBLIC_WEB_URL is set, a
+    // default of on would start mailing every workspace's attendees about
+    // every event, unasked.
+    defaultActive: false,
     tags: ['{{first_name}}', '{{event_name}}', '{{event_venue}}'],
   },
   {
     slug: 'waitlist-offer',
     title: 'Waitlist offer',
+    // Governs the notice that an offer lapsed as well: somebody who was never
+    // told of an offer should not be told it expired.
     description:
-      'Sent when a seat frees up, offering it to the next person on the waitlist.',
+      'Sent when a seat is offered to someone on the waitlist, with the deadline to pay for it — and again if that deadline passes.',
     channels: ['email'],
-    delivery: 'planned',
+    delivery: 'controlled',
     expected: false,
-    tags: [],
+    defaultActive: true,
+    tags: ['{{first_name}}', '{{event_name}}', '{{ticket_type}}'],
   },
   {
-    slug: 'post-event-thankyou',
+    slug: POST_EVENT_THANKYOU_SLUG,
     title: 'Post-event thank-you',
     // Only when there is a LIVE survey: a link to "no survey to answer" is a
     // worse message than none, so an event without one is simply not thanked.
@@ -123,6 +187,7 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     channels: ['email'],
     delivery: 'controlled',
     expected: false,
+    defaultActive: true,
     tags: ['{{first_name}}', '{{event_name}}', '{{survey_url}}'],
   },
 ];

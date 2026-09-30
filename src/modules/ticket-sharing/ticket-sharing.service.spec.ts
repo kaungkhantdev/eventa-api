@@ -1,5 +1,7 @@
 import type { ConfigService } from '@nestjs/config';
 import { DomainException } from '../../common/errors/domain.exception';
+import type { Env } from '../../config/env.validation';
+import type { EventResponseDto } from '../events/dto/event-response.dto';
 import type { EventsService } from '../events/events.service';
 import type { TicketingService } from '../ticketing/ticketing.service';
 import { TicketSharingService } from './ticket-sharing.service';
@@ -10,16 +12,18 @@ const TICKET_ID = 't1';
 
 const config = {
   getOrThrow: () => 'https://eventa.test',
-} as unknown as ConfigService;
+} as unknown as ConfigService<Env, true>;
 
-const event = (o: Record<string, unknown> = {}) => ({
-  id: EVENT_ID,
-  slug: 'bangkok-summit',
-  name: 'Bangkok Summit',
-  status: 'upcoming',
-  visibility: 'public',
-  ...o,
-});
+/** Only what sharing reads — the link, the name, and whether it is public. */
+const event = (o: Partial<EventResponseDto> = {}) =>
+  ({
+    id: EVENT_ID,
+    slug: 'bangkok-summit',
+    name: 'Bangkok Summit',
+    status: 'upcoming',
+    visibility: 'public',
+    ...o,
+  }) as EventResponseDto;
 
 describe('TicketSharingService (US-TKT-06)', () => {
   let events: jest.Mocked<EventsService>;

@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'social-e2e', name: 'Social E2E' };
@@ -45,7 +46,7 @@ describe('Social sign-in (e2e — US-ACC-06)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
   }, 30000);
 
@@ -213,11 +214,25 @@ async function cleanup(pool: Pool): Promise<void> {
     'new-comers-workspace',
     'newcomers-workspace',
   ]) {
+    // audit_events is ON DELETE RESTRICT (a sign-in writes one), so clear it first.
+    await pool.query(
+      `DELETE FROM audit_events WHERE organization_id IN
+         (SELECT id FROM organizations WHERE slug = $1 OR slug LIKE $2)`,
+      [slug, `${slug}%`],
+    );
     await pool.query(
       `DELETE FROM organizations WHERE slug = $1 OR slug LIKE $2`,
       [slug, `${slug}%`],
     );
   }
+  // The signup flow names a newcomer's workspace itself, so these organizations
+  // are found through their users rather than by a slug this spec can predict —
+  // and audit_events is ON DELETE RESTRICT, so clear it first here too.
+  await pool.query(
+    `DELETE FROM audit_events WHERE organization_id IN (
+       SELECT organization_id FROM users WHERE email IN ($1, $2, $3))`,
+    [NEWCOMER, ATTENDEE, 'unverified@social-e2e.test'],
+  );
   await pool.query(
     `DELETE FROM organizations WHERE id IN (
        SELECT organization_id FROM users WHERE email IN ($1, $2, $3))`,

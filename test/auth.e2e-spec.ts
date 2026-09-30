@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const SLUG = 'acme-auth-test';
 const EMAIL = 'admin@acme-auth.test';
@@ -52,7 +53,7 @@ describe('Auth (e2e — envelope + passport)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
   });
 
@@ -217,8 +218,12 @@ async function seed(pool: Pool): Promise<number> {
        ('setSettings','Settings','Manage settings')
      ON CONFLICT (key) DO NOTHING`,
   );
+  // `is_system` defaults to TRUE, so a bare INSERT would have this fixture claim
+  // to be a built-in role — and sign-in reconciles a built-in named Admin,
+  // Organizer or Staff up to the full grant set its name carries, widening the
+  // narrow grants this seed holds on purpose. This role is the spec's own.
   const role = await pool.query<{ id: string }>(
-    `INSERT INTO roles (organization_id, name, description) VALUES ($1,'Admin','Full access') RETURNING id`,
+    `INSERT INTO roles (organization_id, name, description, is_system) VALUES ($1,'Admin','Full access',false) RETURNING id`,
     [orgId],
   );
   const roleId = Number(role.rows[0].id);

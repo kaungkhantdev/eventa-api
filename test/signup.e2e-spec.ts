@@ -9,6 +9,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'strongpass1';
 const OWNER = 'owner@signup-e2e.test';
@@ -35,7 +36,7 @@ describe('Organizer sign-up + email confirmation (US-ACC-01, e2e)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
   });
 
@@ -83,7 +84,9 @@ describe('Organizer sign-up + email confirmation (US-ACC-01, e2e)', () => {
     expect((res.body as Body<{ message: string }>).data.message).toMatch(
       /check your inbox/i,
     );
-    expect(await userStatus(OWNER)).toBe('Invited'); // not active until confirmed
+    // `Unconfirmed`, not `Invited`: they signed themselves up, rather than being
+    // invited by an admin — the two need different follow-ups (31da211).
+    expect(await userStatus(OWNER)).toBe('Unconfirmed'); // not active until confirmed
     expect(await verifyTokenFor(OWNER)).not.toBe('');
   });
 

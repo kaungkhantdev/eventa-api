@@ -15,6 +15,7 @@ import type {
 } from './auth.types';
 import { MeResponseDto, toMeResponse } from '../users/dto/user-response.dto';
 import { PermissionsService } from '../access/permissions.service';
+import { SystemRolesService } from '../access/system-roles.service';
 import { UsersRepository } from '../users/users.repository';
 import { AuthRepository } from './auth.repository';
 import { LoginThrottleService } from './login-throttle.service';
@@ -128,6 +129,7 @@ export class AuthService {
     private readonly outbox: OutboxPort,
     private readonly throttle: LoginThrottleService,
     private readonly signup: SignupService,
+    private readonly systemRoles: SystemRolesService,
   ) {}
 
   async login(input: LoginInput): Promise<LoginOutcome> {
@@ -239,6 +241,29 @@ export class AuthService {
       sessionId,
       refreshTtl,
     );
+    /**
+     * Bring this workspace's BUILT-IN roles up to the current permission
+     * catalog before reading the caller's keys.
+     *
+     * `DEFAULT_ROLES` is applied once, at workspace creation, so a key added by
+     * a later migration never reaches a workspace older than it and an Admin
+     * described as "Full access" quietly cannot use the new feature. Migration
+     * 0067 repairs the workspaces that exist today; doing it here is what stops
+     * the key added next year reopening the same gap. Sign-in is the moment
+     * this can happen at all: the reconcile is tenant-scoped and `roles` has
+     * RLS, so it needs a tenant context, which a sweep at boot does not have.
+     * It must precede `getFor` because that result IS `me.permissions` — after
+     * it, the corrected keys would only appear on the NEXT sign-in.
+     *
+     * Deliberately NOT wrapped in a try/catch: a failure here means the roles
+     * are in an unknown state, and answering with a permission set derived from
+     * it would be a silent authorization result. The trade-off is accepted
+     * knowingly — this is idempotent but it is a write on the sign-in path, so
+     * a database fault that would otherwise have let a session open now refuses
+     * one, and the session row opened just above is left behind unused (it is
+     * revoked by the normal expiry, and no tokens were returned for it).
+     */
+    await this.systemRoles.reconcile(found.org.id);
     const permissions = await this.permissions.getFor(
       found.org.id,
       found.user.id,

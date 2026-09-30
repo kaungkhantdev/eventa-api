@@ -28,6 +28,8 @@ import { TransactionLedgerPort } from '../reports/ports/transaction-ledger.port'
 import { TransactionLedgerAdapter } from './transaction-ledger.adapter';
 import { PaymentFeedPort } from '../notifications/ports/payment-feed.port';
 import { PaymentFeedAdapter } from './payment-feed.adapter';
+import { RegistrationRefundPort } from '../registrations/ports/registration-refund.port';
+import { RegistrationRefundAdapter } from './registration-refund.adapter';
 
 /**
  * Payments (US-DISC-05): collect an order's total by card or PromptPay, and act
@@ -57,6 +59,9 @@ import { PaymentFeedAdapter } from './payment-feed.adapter';
     { provide: PaymentFeedPort, useClass: PaymentFeedAdapter },
     // The charge-and-reversal ledger (US-RPT-06).
     { provide: TransactionLedgerPort, useClass: TransactionLedgerAdapter },
+    // Rejecting a registration paid for while it awaited approval gives the
+    // money back through THE refund path (US-REG-02).
+    { provide: RegistrationRefundPort, useClass: RegistrationRefundAdapter },
     PaymentsService,
     RefundsService,
     PaymentsLedgerService,
@@ -89,6 +94,7 @@ import { PaymentFeedAdapter } from './payment-feed.adapter';
     IncomeReportPort,
     PaymentFeedPort,
     TransactionLedgerPort,
+    RegistrationRefundPort,
   ],
 })
 export class PaymentsModule {}
