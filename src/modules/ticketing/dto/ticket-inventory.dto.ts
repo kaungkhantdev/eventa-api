@@ -36,9 +36,15 @@ export class TicketInventoryDto {
   @ApiProperty({ example: 100, description: 'Allocation; 0 = unlimited' })
   total!: number;
 
+  @ApiProperty({ example: 8 })
+  maxPerOrder!: number;
+
   @ApiProperty({ format: 'date-time', nullable: true, type: String })
   salesStartAt!: string | null;
 
   @ApiProperty({ format: 'date-time', nullable: true, type: String })
   salesEndAt!: string | null;
+
+  @ApiProperty({ example: 1, description: 'Optimistic-concurrency token' })
+  version!: number;
 }
