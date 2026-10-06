@@ -10,6 +10,12 @@ export interface RoleWithPermissions {
   name: string;
   description: string;
   permissions: string[];
+  /**
+   * Catalog keys this role has no recorded decision for — neither granted nor
+   * turned off. Nothing grants a permission automatically, so these are the
+   * gaps an organizer is shown and asked to answer.
+   */
+  neverOfferedPermissions: string[];
   /** Live members holding this role — the roles overview badge (US-SET-13). */
   memberCount: number;
   /** Built-in roles cannot be renamed away; custom ones are created by an Admin. */

@@ -32,6 +32,7 @@ describe('RolesService', () => {
           name: 'Admin',
           description: 'Full access',
           permissions: ['evCreate', 'setUsers'],
+          neverOfferedPermissions: [],
           memberCount: 3,
           isSystem: true,
         },
@@ -68,6 +69,7 @@ describe('RolesService', () => {
         name: 'Staff',
         description: 'seed',
         permissions: ['regView', 'regCheckin'],
+        neverOfferedPermissions: [],
         memberCount: 0,
         isSystem: true,
       });
@@ -91,6 +93,7 @@ describe('RolesService', () => {
         name: 'Staff',
         description: 'seed',
         permissions: ['regView'],
+        neverOfferedPermissions: [],
         memberCount: 0,
         isSystem: true,
       });

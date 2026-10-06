@@ -7,7 +7,6 @@ import { MembersController } from './members.controller';
 import { PermissionsService } from './permissions.service';
 import { RolesController } from './roles.controller';
 import { RolesService } from './roles.service';
-import { SystemRolesService } from './system-roles.service';
 
 /**
  * Workspace access control: team members, roles and the permission catalog (RBAC).
@@ -24,13 +23,7 @@ import { SystemRolesService } from './system-roles.service';
     RolesService,
     PermissionsService,
     PermissionsGuard,
-    SystemRolesService,
   ],
-  exports: [
-    PermissionsService,
-    PermissionsGuard,
-    AccessRepository,
-    SystemRolesService,
-  ],
+  exports: [PermissionsService, PermissionsGuard, AccessRepository],
 })
 export class AccessModule {}

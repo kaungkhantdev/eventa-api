@@ -1,55 +1,46 @@
--- Give the built-in roles the three permission keys added after them.
+-- WITHDRAWN. This migration does nothing, on purpose, and the statement below
+-- is a placeholder so the runner has something to execute.
 --
--- A workspace is handed its Admin / Organizer / Staff roles exactly once, by
--- `insertDefaultRoles` on the day it signs up. Three keys have been added to
--- the catalog since — `finManage` (0034), `evProgramView` (0038) and
--- `regManage` (0042) — and nothing ever went back for the workspaces that
--- already existed. So an Admin whose role says "Full access" cannot void an
--- invoice, retry a payout or file a VAT period, and an Organizer cannot approve
--- a registration: not because anybody decided that, but because their workspace
--- is older than the key.
+-- WHAT IT ORIGINALLY DID. A workspace is handed its Admin / Organizer / Staff
+-- roles exactly once, by `insertDefaultRoles` on the day it signs up, out of
+-- the `DEFAULT_ROLES` matrix as that matrix stood that day. A permission key
+-- added to the catalog afterwards therefore never reached a workspace older
+-- than it, and nothing ever went back for them. This migration granted three
+-- such keys -- `finManage`, `evProgramView` and `regManage` -- to the built-in
+-- roles whose defaults contained them, restricted to roles whose `created_at`
+-- predated the date each key entered the catalog. A matching runtime
+-- reconcile, `AccessRepository.reconcileSystemRoles`, applied the same rule on
+-- every organizer sign-in.
 --
--- Per role, and deliberately not "the three keys everywhere": `finManage` is in
--- Admin's defaults alone, so handing it to Organizer or Staff would be an
--- escalation this migration invented. The matrix below is `DEFAULT_ROLES` in
--- `src/modules/access/workspace-defaults.ts`, restricted to those three keys.
+-- WHY IT WAS WITHDRAWN. The age comparison was offered as proof that an absent
+-- row could only mean "this role was never offered this key", and it is not.
+-- An organizer may GRANT a key to a role long after the workspace was
+-- provisioned and later revoke it; under the delete-on-revoke behaviour that
+-- shipped before the `granted = false` tombstone, that revoke left no row at
+-- all. The role is older than the key, the row is gone, and this backfill
+-- handed the key straight back -- silently reversing a decision somebody made.
+-- Nothing on disk records what a role was ever offered, so no rule over dates
+-- can recover that intent. The decision taken is to stop inferring it: nothing
+-- grants a permission automatically any more, and a key with no row is
+-- reported to the organizer as an open question (`neverOfferedPermissions` on
+-- the roles endpoints) for a person to answer.
 --
--- Restricted to those three on purpose. A revoke used to DELETE the row, so a
--- key an organizer took away before today is indistinguishable on disk from one
--- that was never offered. Older keys are therefore left alone — only the keys
--- that no workspace can ever have been offered are filled in. From now on a
--- revoke records `granted = false`, and ON CONFLICT DO NOTHING means such a row
--- is never overwritten: this can only fill a gap, never reverse a decision.
+-- THE CONSEQUENCE, which cannot be undone here. A database that already
+-- applied the original version of this migration still carries the grants it
+-- made, and they are NOT reversed. After the fact, a key it wrongly re-granted
+-- is indistinguishable from one the organizer wanted: both are now a row
+-- saying `granted = true`, written by the same statement. Un-granting them
+-- would therefore reverse real decisions in exactly the way that got this
+-- withdrawn. The grants stand; an organizer who does not want one turns it off
+-- in Settings -> Roles, and that refusal is recorded as a tombstone.
 --
--- Only `is_system` roles. A role a workspace created itself is nobody's default,
--- whatever it was named.
---
--- Every tenant, with no organization predicate: migrations are meant to run as
--- the owning role, which RLS does not apply to. Idempotent and safe to re-run.
---
--- That convention is an ops one, though, and this is the first migration whose
--- DML READS an RLS-protected tenant table. Run as the non-owning role the app
--- connects as (0002), `roles` has no `app.current_org` to match, the SELECT
--- finds nothing, and the backfill would insert zero rows, commit, and be
--- stamped as applied — a migration that silently did nothing at all, leaving
--- every organizer still short of the keys below. `row_security = off` is the
--- one setting that says "fail rather than quietly filter": a no-op for the
--- owning role, and an error for any role RLS would apply to. It is reset
--- immediately afterwards because drizzle runs every pending migration inside a
--- single transaction, and this one has no business changing the others.
-SET LOCAL row_security = off;--> statement-breakpoint
-INSERT INTO "role_permissions" ("role_id", "permission_key", "granted")
-SELECT r."id", d."key"::permission_key, true
-  FROM "roles" r
-  JOIN (VALUES
-    ('Admin', 'evProgramView'),
-    ('Admin', 'finManage'),
-    ('Admin', 'regManage'),
-    ('Organizer', 'evProgramView'),
-    ('Organizer', 'regManage'),
-    ('Staff', 'evProgramView')
-  ) AS d("role_name", "key") ON d."role_name" = r."name"
-  JOIN "permissions" p ON p."key" = d."key"::permission_key
- WHERE r."is_system"
-ON CONFLICT ("role_id", "permission_key") DO NOTHING;--> statement-breakpoint
-SET LOCAL row_security = on;
+-- THE FILE STAYS, and so does its `meta/_journal.json` entry. Drizzle decides
+-- what to run by comparing each journal entry's `folderMillis` against the
+-- `created_at` of the last applied row in `__drizzle_migrations`, and never
+-- compares the stored hash (drizzle-orm/pg-core/dialect.cjs). Deleting or
+-- renumbering this file would therefore not re-run anything, but it would
+-- shift every later entry's position relative to a database that has already
+-- stamped this one -- so editing it in place is the only safe way to neutralise
+-- it. Rewriting the body is safe for the same reason: a database that ran the
+-- old text will never read this file again.
+SELECT 1;
