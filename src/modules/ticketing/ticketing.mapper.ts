@@ -1,5 +1,7 @@
 import { vatInclusiveBreakdown } from '../../common/money/vat';
 import { TicketResponseDto } from './dto/ticket-response.dto';
+import type { UpdatedTicketResponseDto } from './dto/updated-ticket-response.dto';
+import type { WaitlistOfferOutcome } from './ports/waitlist-offers.port';
 import type { TicketRow } from './ticketing.types';
 
 const iso = (d: Date | null): string | null => (d ? d.toISOString() : null);
@@ -31,5 +33,18 @@ export function toTicketResponse(
     salesStartAt: iso(t.salesStartAt),
     salesEndAt: iso(t.salesEndAt),
     version: t.version,
+  };
+}
+
+/** An edited tier, and what the edit's new places did for its waitlist. */
+export function toUpdatedTicketResponse(
+  t: TicketRow,
+  vatRate: number,
+  waitlist: WaitlistOfferOutcome,
+): UpdatedTicketResponseDto {
+  return {
+    ...toTicketResponse(t, vatRate),
+    waitlistOffered: waitlist.offered,
+    waitlistOfferInterrupted: waitlist.interrupted,
   };
 }

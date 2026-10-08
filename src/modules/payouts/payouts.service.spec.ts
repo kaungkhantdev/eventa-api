@@ -178,7 +178,9 @@ describe('PayoutsService', () => {
         expect.objectContaining({
           reference: 'PO-2026-0001',
           amountSatang: IN_FLIGHT,
-          accountId: 'acct_123',
+          // Whose key re-submits it. The provider authenticates AS the
+          // workspace, so there is no account to name any more.
+          organizationId: ORG,
         }),
       );
       expect(repo.markRetried).toHaveBeenCalledWith(
@@ -232,7 +234,7 @@ describe('PayoutsService', () => {
       const link = await service.settingsLink(auth);
       expect(link.url).toBe('https://provider.test/express');
       expect(link.connected).toBe(true);
-      expect(provider.payoutSettingsLink).toHaveBeenCalledWith('acct_123');
+      expect(provider.payoutSettingsLink).toHaveBeenCalledWith(ORG, 'acct_123');
     });
 
     it('asks the organizer to connect first when there is no account', async () => {

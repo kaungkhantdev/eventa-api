@@ -1,0 +1,184 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform, Type } from 'class-transformer';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { MAX_NPS_SCORE, MIN_NPS_SCORE } from '../nps-rules';
+import { MAX_RATING, MIN_RATING } from '../response-rules';
+import { SurveyQuestionDto } from './survey.dto';
+
+const trim = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? value.trim() : value;
+
+/** The live survey an attendee is being asked, if there is one. */
+export class MySurveyDto {
+  @ApiProperty({ type: String, nullable: true, example: '7' })
+  surveyId!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  title!: string | null;
+
+  @ApiProperty({ type: [SurveyQuestionDto] })
+  questions!: SurveyQuestionDto[];
+
+  @ApiProperty({
+    description:
+      'True once this account has answered. Each person answers once, so the form is not offered again.',
+  })
+  answered!: boolean;
+}
+
+export class SubmitAnswerDto {
+  @ApiProperty({ example: '12' })
+  @IsString()
+  questionId!: string;
+
+  @ApiPropertyOptional({ minimum: MIN_RATING, maximum: MAX_RATING })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(MIN_RATING)
+  @Max(MAX_RATING)
+  rating?: number;
+
+  @ApiPropertyOptional({ maxLength: 2000 })
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(2000)
+  answerText?: string;
+
+  @ApiPropertyOptional({ maxLength: 120 })
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(120)
+  choice?: string;
+
+  @ApiPropertyOptional({
+    minimum: MIN_NPS_SCORE,
+    maximum: MAX_NPS_SCORE,
+    description:
+      'How likely they are to recommend it, answering an `nps` question. 0 is an answer.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(MIN_NPS_SCORE)
+  @Max(MAX_NPS_SCORE)
+  score?: number;
+}
+
+export class SubmitResponseDto {
+  @ApiProperty({ type: [SubmitAnswerDto], maxItems: 30 })
+  @IsArray()
+  @ArrayMaxSize(30)
+  @ValidateNested({ each: true })
+  @Type(() => SubmitAnswerDto)
+  answers!: SubmitAnswerDto[];
+}
+
+/** The net promoter score of the recommendation answers in scope (US-MSG-08). */
+export class NpsSummaryDto {
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 25,
+    description:
+      'Promoters (9–10) less detractors (0–6), as whole percentage points from −100 to 100. Null when nobody has answered a recommendation question — never 0, which is a real score.',
+  })
+  score!: number | null;
+
+  @ApiProperty({ example: 4, description: 'Recommendation answers counted.' })
+  answers!: number;
+
+  @ApiProperty({ example: 2, description: 'Answered 9 or 10.' })
+  promoters!: number;
+
+  @ApiProperty({ example: 1, description: 'Answered 7 or 8.' })
+  passives!: number;
+
+  @ApiProperty({ example: 1, description: 'Answered 0 to 6.' })
+  detractors!: number;
+}
+
+/** What a workspace's feedback adds up to (US-MSG-08). */
+export class FeedbackSummaryDto {
+  @ApiProperty({
+    example: 42,
+    description:
+      'People who answered in scope, one per response — not the star ratings given. A survey asking only the recommendation question still counts here; `distribution` sums to the ratings.',
+  })
+  responses!: number;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 4.3,
+    description:
+      'Null when nobody has rated anything — never 0, which is a verdict.',
+  })
+  average!: number | null;
+
+  @ApiProperty({
+    description: 'How many gave each star, 1 to 5.',
+    example: { 1: 0, 2: 1, 3: 4, 4: 12, 5: 25 },
+  })
+  distribution!: Record<number, number>;
+
+  @ApiProperty({
+    example: 120,
+    description:
+      'People the post-event thank-you (with the survey link) reached, counted once per event. A failed send asked nobody.',
+  })
+  asked!: number;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 38,
+    description:
+      'Whole percent of the people ASKED who answered. Answers from people who were never emailed count in `responses` but not here, so this never exceeds 100. Across the workspace it pools every event by how many were asked. Null when nobody was asked — never 0.',
+  })
+  completionRate!: number | null;
+
+  @ApiProperty({
+    type: NpsSummaryDto,
+    description:
+      'Across the workspace it pools every answer, so each event weighs by how many answered it.',
+  })
+  nps!: NpsSummaryDto;
+}
+
+/** One person's response (US-MSG-10). */
+export class FeedbackResponseDto {
+  @ApiProperty({ example: '31' })
+  id!: string;
+
+  @ApiProperty({ example: 'Post-event feedback' })
+  surveyTitle!: string;
+
+  @ApiProperty({ example: 'Anong Pattana' })
+  personName!: string;
+
+  @ApiProperty({ type: Number, nullable: true, example: 5 })
+  rating!: number | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Their free text, when the survey asked for any.',
+  })
+  comment!: string | null;
+
+  @ApiProperty({ format: 'date-time' })
+  submittedAt!: string;
+}

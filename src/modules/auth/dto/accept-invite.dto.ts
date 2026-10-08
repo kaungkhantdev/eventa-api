@@ -1,5 +1,17 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
+import {
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_PATTERN,
+  PASSWORD_RULE_MESSAGE,
+} from '../../auth-password/auth-password.policy';
 
 /** Accept a workspace invite by setting a password. */
 export class AcceptInviteDto {
@@ -8,14 +20,20 @@ export class AcceptInviteDto {
   @IsNotEmpty()
   token!: string;
 
+  /**
+   * Chosen here, so the shared policy applies — the same rule sign-up, reset
+   * and change enforce. It used to carry its own hard-coded 8, which quietly
+   * made accepting an invite stricter than every other way of setting one.
+   */
   @ApiProperty({
-    minLength: 8,
-    maxLength: 200,
+    minLength: PASSWORD_MIN_LENGTH,
+    maxLength: PASSWORD_MAX_LENGTH,
     example: 'a strong new password',
   })
   @IsString()
-  @MinLength(8)
-  @MaxLength(200)
+  @MinLength(PASSWORD_MIN_LENGTH, { message: PASSWORD_RULE_MESSAGE })
+  @MaxLength(PASSWORD_MAX_LENGTH)
+  @Matches(PASSWORD_PATTERN, { message: PASSWORD_RULE_MESSAGE })
   password!: string;
 }
 

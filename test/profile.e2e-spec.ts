@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'profile-e2e', name: 'Profile E2E' };
@@ -46,7 +47,7 @@ describe('My profile (e2e — US-SET-01)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
 
     const res = await request(server)

@@ -2,8 +2,9 @@ import { DomainException } from '../../common/errors/domain.exception';
 import type { ProfileService } from '../users/profile.service';
 import { NotificationPreferencesRepository } from './notification-preferences.repository';
 import { NotificationPreferencesService } from './notification-preferences.service';
+import { organizerAuth } from '../../../test/support/auth-context';
 
-const auth = { organizationId: 1, userId: 'u1', sessionId: 's1' };
+const auth = organizerAuth();
 const attendee = { ...auth, persona: 'attendee' };
 
 describe('NotificationPreferencesService (US-SET-06)', () => {

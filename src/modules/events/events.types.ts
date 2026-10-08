@@ -117,6 +117,8 @@ export interface UpdateEventInput {
   onlineNote?: string | null;
   seatingMode?: SeatingMode;
   capacity?: number | null;
+  waitlistEnabled?: boolean;
+  requiresApproval?: boolean;
   coverImage?: string | null;
   accentColor?: string | null;
   contactEmail?: string | null;

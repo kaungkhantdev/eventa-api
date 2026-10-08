@@ -2,6 +2,7 @@ import type { ConfigService } from '@nestjs/config';
 import { DomainException } from '../../common/errors/domain.exception';
 import type { AuthContext } from '../auth/auth.types';
 import type { Env } from '../../config/env.validation';
+import { ImageUploadService } from '../uploads/image-upload.service';
 import type { ProfileService } from '../users/profile.service';
 import type { ObjectStoragePort } from './ports/object-storage.port';
 import { ProfilePhotoService } from './profile-photo.service';
@@ -57,7 +58,14 @@ describe('ProfilePhotoService (US-DISC-11)', () => {
         .mockResolvedValue({ avatarUrl: 'https://cdn.test/x' }),
       get: jest.fn().mockResolvedValue({ avatarUrl: null }),
     } as unknown as jest.Mocked<ProfileService>;
-    service = new ProfilePhotoService(storage, profile, config());
+    // The REAL shared service, not a mock of it: every rule asserted below —
+    // the staging prefix, the magic-byte check, the promote-then-delete — now
+    // lives in `ImageUploadService`, and this suite is what proves it still
+    // behaves identically for a profile photo after the duplicate was deleted.
+    service = new ProfilePhotoService(
+      new ImageUploadService(storage, config()),
+      profile,
+    );
   });
 
   const request = (o: Record<string, unknown> = {}) =>

@@ -9,6 +9,7 @@ import type {
   InviteMemberInput,
   ListMembersQuery,
   MemberRow,
+  MemberStatusCounts,
 } from './access.types';
 
 const DEFAULT_LIMIT = 20;
@@ -64,8 +65,40 @@ export class AccessService {
     const { items, total } = await this.repo.listMembers(organizationId, {
       limit,
       offset: (page - 1) * limit,
+      // A box somebody typed into and cleared must not become a filter for the
+      // empty string, which matches nobody.
+      search: query.search?.trim() || undefined,
+      status: query.status,
+      roleId: query.roleId,
     });
     return Paginated.of(items, total, page, limit);
+  }
+
+  /**
+   * The Users tabs' counts (US-ACC-02).
+   *
+   * Search and role narrow them; status does not — a tab has to show its own
+   * total while a different tab is selected, or every count collapses to the
+   * size of the current view and the tabs stop meaning anything.
+   */
+  async countMembers(
+    organizationId: number,
+    query: ListMembersQuery,
+  ): Promise<MemberStatusCounts> {
+    const byStatus = await this.repo.countMembersByStatus(organizationId, {
+      search: query.search?.trim() || undefined,
+      roleId: query.roleId,
+    });
+    const at = (status: string) => byStatus[status] ?? 0;
+    return {
+      // "All" is every status summed, including Unconfirmed — which has no tab
+      // of its own but is still somebody in the workspace, so leaving it out
+      // would make the tabs fail to add up.
+      all: Object.values(byStatus).reduce((sum, n) => sum + n, 0),
+      active: at('Active'),
+      invited: at('Invited'),
+      suspended: at('Suspended'),
+    };
   }
 
   /** Re-assign a member to another role (both must belong to the caller org). */

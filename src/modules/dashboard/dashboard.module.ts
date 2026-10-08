@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { AccessModule } from '../access/access.module';
 import { CheckInModule } from '../check-in/check-in.module';
 import { EventsModule } from '../events/events.module';
+import { OrganizationModule } from '../organization/organization.module';
+import { PaymentSettingsModule } from '../payment-settings/payment-settings.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { RegistrationsModule } from '../registrations/registrations.module';
 import { TicketingModule } from '../ticketing/ticketing.module';
@@ -9,6 +11,7 @@ import { UsersModule } from '../users/users.module';
 import { DashboardAnalyticsService } from './dashboard-analytics.service';
 import { DashboardController } from './dashboard.controller';
 import { DashboardHomeService } from './dashboard-home.service';
+import { WorkspaceSetupService } from './workspace-setup.service';
 
 /**
  * The daily operations home and the analytics dashboard (E11).
@@ -37,8 +40,14 @@ import { DashboardHomeService } from './dashboard-home.service';
     TicketingModule,
     EventsModule,
     CheckInModule,
+    OrganizationModule,
+    PaymentSettingsModule,
   ],
   controllers: [DashboardController],
-  providers: [DashboardHomeService, DashboardAnalyticsService],
+  providers: [
+    DashboardHomeService,
+    DashboardAnalyticsService,
+    WorkspaceSetupService,
+  ],
 })
 export class DashboardModule {}

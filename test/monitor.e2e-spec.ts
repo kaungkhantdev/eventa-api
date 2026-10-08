@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'monitor-e2e', name: 'Monitor E2E' };
@@ -42,7 +43,7 @@ describe('Event Monitor — Overview / Registrations / Attendees (US-EVT-14, e2e
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
   });
 
@@ -300,8 +301,12 @@ describe('Event Monitor — Overview / Registrations / Attendees (US-EVT-14, e2e
         [key, group[key], key],
       );
     }
+    // `is_system` defaults to TRUE, so a bare INSERT would have this fixture claim
+    // to be a built-in role — and sign-in reconciles a built-in named Admin,
+    // Organizer or Staff up to the full grant set its name carries, widening the
+    // grants each case here holds on purpose. This role is the spec's own.
     const role = await pool.query<{ id: string }>(
-      `INSERT INTO roles (organization_id, name, description) VALUES ($1, $2, 'seed') RETURNING id`,
+      `INSERT INTO roles (organization_id, name, description, is_system) VALUES ($1, $2, 'seed', false) RETURNING id`,
       [orgId, roleName],
     );
     const roleId = Number(role.rows[0].id);
@@ -389,5 +394,16 @@ describe('Event Monitor — Overview / Registrations / Attendees (US-EVT-14, e2e
 });
 
 async function cleanup(pool: Pool): Promise<void> {
+  // `audit_events` does NOT cascade from organizations, and signing in writes
+  // one. Deleting the org alone therefore fails the moment this suite has run
+  // once — leaving its workspace behind and every later run failing in
+  // `beforeAll` — which is exactly what happened when a second e2e suite began
+  // running alongside it. Clear the referencing rows first, as the other
+  // suites do.
+  await pool.query(
+    `DELETE FROM audit_events WHERE organization_id IN
+       (SELECT id FROM organizations WHERE slug = $1)`,
+    [ORG.slug],
+  );
   await pool.query(`DELETE FROM organizations WHERE slug = $1`, [ORG.slug]);
 }

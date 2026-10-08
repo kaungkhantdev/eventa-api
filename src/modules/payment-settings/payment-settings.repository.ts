@@ -39,6 +39,22 @@ export class PaymentSettingsRepository {
     });
   }
 
+  /**
+   * The workspace a webhook URL's token belongs to.
+   *
+   * Deliberately a GLOBAL lookup, outside `withTenant`: a callback from Stripe
+   * carries no session and no tenant. The token in its URL is what resolves
+   * one — exactly as a gateway reference does for an anonymous buyer's payment.
+   */
+  async findByWebhookToken(token: string): Promise<PaymentSettingsRow | null> {
+    const [row] = await this.db
+      .select()
+      .from(paymentSettings)
+      .where(eq(paymentSettings.webhookToken, token))
+      .limit(1);
+    return row ?? null;
+  }
+
   async update(
     organizationId: number,
     values: Partial<PaymentSettingsRow>,

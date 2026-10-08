@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'mytix-e2e', name: 'MyTix E2E' };
@@ -74,7 +75,7 @@ describe('My tickets (e2e — US-DISC-07, US-DISC-09)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
 
     // ANAN's upcoming registration goes through the REAL checkout, as a guest —
@@ -486,5 +487,11 @@ async function cleanup(pool: Pool): Promise<void> {
        (SELECT id::text FROM users WHERE email LIKE '%@mytix.test')`,
   );
   await pool.query(`DELETE FROM users WHERE email LIKE '%@mytix.test'`);
+  // audit_events is ON DELETE RESTRICT (a failed login writes one), so clear it first.
+  await pool.query(
+    `DELETE FROM audit_events WHERE organization_id IN
+       (SELECT id FROM organizations WHERE slug = $1)`,
+    [ORG.slug],
+  );
   await pool.query(`DELETE FROM organizations WHERE slug = $1`, [ORG.slug]);
 }

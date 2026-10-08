@@ -6,8 +6,10 @@ import type { OutboxPort } from '../platform/outbox.port';
 import type { PasswordService } from '../auth-password/auth-password.service';
 import { SignupService } from './auth-signup.service';
 import type { SignupRepository } from './auth-signup.repository';
+import type { ResendThrottleService } from './resend-throttle.service';
 import type { TokenService } from '../auth/token.service';
 import { IDENTITY_EMAIL_VERIFICATION_REQUESTED } from './events/email-verification-requested.event';
+import { outboxDouble } from '../../../test/support/outbox-double';
 
 const NOW = new Date('2026-07-31T00:00:00.000Z');
 const newAccount = {
@@ -21,6 +23,7 @@ describe('SignupService', () => {
   let passwords: jest.Mocked<PasswordService>;
   let tokens: jest.Mocked<TokenService>;
   let outbox: jest.Mocked<OutboxPort>;
+  let throttle: jest.Mocked<ResendThrottleService>;
   let service: SignupService;
 
   beforeEach(() => {
@@ -39,7 +42,13 @@ describe('SignupService', () => {
       createAttendeeAccount: jest
         .fn()
         .mockResolvedValue({ organizationId: 1, userId: 'a1' }),
+      pendingVerification: jest.fn().mockResolvedValue(null),
+      nameTaken: jest.fn().mockResolvedValue(false),
     } as unknown as jest.Mocked<SignupRepository>;
+    throttle = {
+      assertAllowed: jest.fn().mockResolvedValue(undefined),
+      remember: jest.fn().mockResolvedValue(undefined),
+    } as unknown as jest.Mocked<ResendThrottleService>;
     passwords = {
       hash: jest.fn().mockResolvedValue('HASH'),
     } as unknown as jest.Mocked<PasswordService>;
@@ -49,14 +58,20 @@ describe('SignupService', () => {
         .fn()
         .mockResolvedValue({ sub: 'u1', org: 7 }),
     } as unknown as jest.Mocked<TokenService>;
-    outbox = {
-      enqueue: jest.fn().mockResolvedValue(undefined),
-    };
+    outbox = outboxDouble();
     const clock: Clock = { now: () => NOW };
     const config = {
       getOrThrow: jest.fn().mockReturnValue('https://web.test'),
     } as unknown as ConfigService<Env, true>;
-    service = new SignupService(repo, passwords, tokens, outbox, clock, config);
+    service = new SignupService(
+      repo,
+      passwords,
+      tokens,
+      outbox,
+      clock,
+      throttle,
+      config,
+    );
   });
 
   describe('register', () => {
@@ -95,6 +110,39 @@ describe('SignupService', () => {
       expect(res.message).toMatch(/check your inbox/i);
       expect(repo.bootstrapWorkspace).not.toHaveBeenCalled();
       expect(outbox.enqueue).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Workspace names are unique across the platform. Two "Acme Events" on an
+     * attendee's ticket, invoice and receipt is a real confusion, and a name is
+     * what people give and remember — unlike the slug, which is generated.
+     */
+    describe('workspace name', () => {
+      it('refuses a name another workspace already has', async () => {
+        repo.nameTaken.mockResolvedValue(true);
+
+        await expect(
+          service.register({ ...newAccount, organizationName: 'Acme Events' }),
+        ).rejects.toMatchObject({ code: 'CONFLICT' });
+        expect(repo.bootstrapWorkspace).not.toHaveBeenCalled();
+      });
+
+      it('checks the name before creating anything', async () => {
+        await service.register({
+          ...newAccount,
+          organizationName: 'Acme Events',
+        });
+
+        expect(repo.nameTaken).toHaveBeenCalledWith('Acme Events');
+      });
+
+      // Nobody typed this one, so it cannot be refused for being taken — it is
+      // made unique instead, the way the slug always has been.
+      it('does not refuse the fallback name it invents itself', async () => {
+        repo.nameTaken.mockResolvedValue(true);
+
+        await expect(service.register(newAccount)).resolves.toBeDefined();
+      });
     });
   });
 
@@ -226,6 +274,73 @@ describe('SignupService', () => {
       await expect(service.verifyEmail('VTOKEN')).rejects.toBeInstanceOf(
         DomainException,
       );
+    });
+  });
+
+  /**
+   * Resending the confirmation link.
+   *
+   * The address is typed by whoever is asking, so the answer must be identical
+   * whether the account exists, is already active, or was never created — the
+   * endpoint is public and would otherwise be an account-existence oracle.
+   */
+  describe('requestResend', () => {
+    it('sends another link when the account is still waiting on one', async () => {
+      repo.pendingVerification.mockResolvedValue({
+        organizationId: 7,
+        userId: 'u1',
+        name: 'Somchai',
+        email: newAccount.email,
+      });
+
+      const res = await service.requestResend({
+        email: newAccount.email,
+        persona: 'admin',
+      });
+
+      expect(res.message).toMatch(/check your inbox/i);
+      expect(outbox.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          routingKey: IDENTITY_EMAIL_VERIFICATION_REQUESTED,
+        }),
+      );
+    });
+
+    it('says the same thing when there is no such account, and sends nothing', async () => {
+      repo.pendingVerification.mockResolvedValue(null);
+
+      const res = await service.requestResend({
+        email: 'nobody@nowhere.test',
+        persona: 'admin',
+      });
+
+      expect(res.message).toMatch(/check your inbox/i);
+      expect(outbox.enqueue).not.toHaveBeenCalled();
+    });
+
+    // The client counts down too, but a countdown in a browser is a courtesy,
+    // not a limit: a reload or a curl would step straight past it.
+    it('refuses a second request inside the cool-off', async () => {
+      throttle.assertAllowed.mockRejectedValueOnce(
+        DomainException.tooManyRequests('Wait a moment.'),
+      );
+
+      await expect(
+        service.requestResend({ email: newAccount.email, persona: 'admin' }),
+      ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+      expect(outbox.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('starts the cool-off even for an address with no account', async () => {
+      repo.pendingVerification.mockResolvedValue(null);
+
+      await service.requestResend({
+        email: 'nobody@nowhere.test',
+        persona: 'admin',
+      });
+
+      // Or the throttle itself would answer the question the response refuses to.
+      expect(throttle.remember).toHaveBeenCalled();
     });
   });
 });

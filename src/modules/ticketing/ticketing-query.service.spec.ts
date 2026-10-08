@@ -69,6 +69,17 @@ describe('TicketingQueryService (US-TKT-04)', () => {
     });
   });
 
+  // The inventory list is where an organizer edits a tier, and an edit sends
+  // back both the per-order cap it is changing and the row version it read.
+  it('carries the per-order cap and the concurrency token of each tier', async () => {
+    repo.search.mockResolvedValue({
+      items: [row({ maxPerOrder: 4, version: 7 })],
+      total: 1,
+    });
+    const page = await service.list(actor, {});
+    expect(page.items[0]).toMatchObject({ maxPerOrder: 4, version: 7 });
+  });
+
   it('reports the tab counts alongside the page', async () => {
     const counts = await service.statusCounts(actor);
     expect(counts).toEqual({ onsale: 3, scheduled: 1, paused: 0, soldout: 2 });

@@ -3,15 +3,21 @@ import Stripe from 'stripe';
 import { DomainException } from '../../../common/errors/domain.exception';
 import type { Clock } from '../../../common/time/clock';
 import type { Env } from '../../../config/env.validation';
+import { STRIPE_API_VERSION } from '../../../common/stripe/stripe-api-version';
+import type { GatewayCredentialsPort } from '../ports/gateway-credentials.port';
 import type { StartPaymentInput } from '../ports/payment-provider.port';
-import {
-  STRIPE_API_VERSION,
-  StripePaymentAdapter,
-} from './stripe-payment.adapter';
+import { StripePaymentAdapter } from './stripe-payment.adapter';
 
 const NOW = new Date('2026-06-01T00:00:00Z');
 const SECRET_KEY = 'sk_test_dummy';
 const WEBHOOK_SECRET = 'whsec_test_secret';
+/**
+ * What a workspace's endpoint could have been signed with. Two, because the
+ * same URL is registered in Stripe's test and live dashboards and each issues
+ * its own — the live one first here, so the tests also prove a non-matching
+ * secret is skipped rather than fataling.
+ */
+const SECRETS = ['whsec_live_other', WEBHOOK_SECRET] as const;
 const TTL = 900;
 const BAHT = 100;
 /** Unix seconds; the adapter derives the QR deadline from this, not from now. */
@@ -20,13 +26,19 @@ const PI_CREATED = 1_800_000_000;
 const SESSION_EXPIRES = 1_800_003_600;
 
 const clock: Clock = { now: () => NOW };
+const ORG = 7;
+/** The workspace's own secret — what every call must authenticate as. */
+const WORKSPACE_KEY = 'sk_test_workspace7';
 
+/**
+ * The adapter's whole appetite for configuration: one TTL that is ours, not
+ * Stripe's. Its secret key comes from the workspace's own row through
+ * `GatewayCredentialsPort`, so a double that answered `STRIPE_SECRET_KEY`
+ * would be describing a version of this class that no longer exists.
+ */
 function config(): ConfigService<Env, true> {
   return {
-    get: (key: string) =>
-      key === 'STRIPE_SECRET_KEY' ? SECRET_KEY : WEBHOOK_SECRET,
-    getOrThrow: (key: string) =>
-      key === 'PROMPTPAY_EXPIRY_SECONDS' ? TTL : WEBHOOK_SECRET,
+    getOrThrow: () => TTL,
   } as unknown as ConfigService<Env, true>;
 }
 
@@ -39,6 +51,8 @@ interface Harness {
   create: jest.Mock;
   /** `checkout.sessions.create` — the card path. */
   session: jest.Mock;
+  /** Every secret key a client was built from, in order. */
+  built: string[];
 }
 
 function harness(
@@ -66,11 +80,28 @@ function harness(
     checkout: { sessions: { create: session } },
     webhooks: real.webhooks,
   } as unknown as Stripe;
-  return {
-    adapter: new StripePaymentAdapter(clock, config(), client),
-    create,
-    session,
+  // The adapter builds a client from the workspace's OWN key, so the double
+  // has to arrive through the same seam: credentials answer with a key, and the
+  // factory turns that key into this client.
+  const credentials: GatewayCredentialsPort = {
+    secretKeyFor: () => Promise.resolve(WORKSPACE_KEY),
+    webhookIdentityFor: () =>
+      Promise.resolve({
+        organizationId: ORG,
+        signingSecrets: [WEBHOOK_SECRET],
+      }),
   };
+  const built: string[] = [];
+  const adapter = new StripePaymentAdapter(
+    clock,
+    config(),
+    credentials,
+    (key) => {
+      built.push(key);
+      return client;
+    },
+  );
+  return { adapter, create, session, built };
 }
 
 function input(o: Partial<StartPaymentInput> = {}): StartPaymentInput {
@@ -84,7 +115,6 @@ function input(o: Partial<StartPaymentInput> = {}): StartPaymentInput {
     method: 'Card',
     buyerEmail: 'anan@example.test',
     statementDescriptor: 'Bangkok Tech Week',
-    accountId: null,
     idempotencyKey: 'idem-1',
     ...o,
   };
@@ -227,16 +257,6 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
       expect(options.stripeAccount).toBeUndefined();
     });
 
-    it('charges on the workspace’s connected account when it has one', async () => {
-      const { adapter, session } = harness();
-      await adapter.start(input({ accountId: 'acct_123' }));
-      const [, options] = session.mock.calls[0] as [
-        unknown,
-        Stripe.RequestOptions,
-      ];
-      expect(options.stripeAccount).toBe('acct_123');
-    });
-
     it('sends the statement descriptor as a SUFFIX — cards reject the full form', async () => {
       const { adapter, session } = harness();
       await adapter.start(input({ statementDescriptor: 'Bangkok Tech Week' }));
@@ -264,9 +284,18 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
         order_id: 'o-1',
         org_id: '7',
       });
+      // Prefills the hosted page's email field; it is not a receipt.
       expect(params.customer_email).toBe('anan@example.test');
-      expect(params.payment_intent_data?.receipt_email).toBe(
-        'anan@example.test',
+    });
+
+    // Eventa's itemized VAT receipt (eventa-worker, behind the organizer's
+    // message switch AND `email_receipts`) is the only receipt. `receipt_email`
+    // makes Stripe send its own in live mode whatever the dashboard says.
+    it('asks Stripe for no receipt of its own — Eventa sends the VAT receipt', async () => {
+      const { adapter, session } = harness();
+      await adapter.start(input());
+      expect(sessionParams(session).payment_intent_data).not.toHaveProperty(
+        'receipt_email',
       );
     });
 
@@ -313,6 +342,19 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
       const [params] = create.mock.calls[0] as [
         Stripe.PaymentIntentCreateParams,
       ];
+      expect(params.payment_method_data?.billing_details?.email).toBe(
+        'anan@example.test',
+      );
+    });
+
+    // The billing email above is for a refund; a receipt is Eventa's to send.
+    it('asks Stripe for no receipt of its own, but keeps the email a refund needs', async () => {
+      const { adapter, create } = harness(qrIntent);
+      await adapter.start(input({ method: 'PromptPay' }));
+      const [params] = create.mock.calls[0] as [
+        Stripe.PaymentIntentCreateParams,
+      ];
+      expect(params).not.toHaveProperty('receipt_email');
       expect(params.payment_method_data?.billing_details?.email).toBe(
         'anan@example.test',
       );
@@ -384,7 +426,7 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
     it('settles a completed session against the reference we stored', () => {
       const { adapter } = harness();
       const { raw, signature } = signed(checkoutSessionEvent());
-      expect(adapter.verifyWebhook(raw, signature)).toMatchObject({
+      expect(adapter.verifyWebhook(raw, signature, SECRETS)).toMatchObject({
         eventId: 'evt_cs_1',
         type: 'succeeded',
         gatewayRef: 'cs_test_123',
@@ -400,7 +442,9 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
     it('carries the PaymentIntent the session finally created', () => {
       const { adapter } = harness();
       const { raw, signature } = signed(checkoutSessionEvent());
-      expect(adapter.verifyWebhook(raw, signature).settledRef).toBe('pi_123');
+      expect(adapter.verifyWebhook(raw, signature, SECRETS).settledRef).toBe(
+        'pi_123',
+      );
     });
 
     it('reads the intent when Stripe expands it into an object', () => {
@@ -408,7 +452,9 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
       const { raw, signature } = signed(
         checkoutSessionEvent({ payment_intent: { id: 'pi_456' } }),
       );
-      expect(adapter.verifyWebhook(raw, signature).settledRef).toBe('pi_456');
+      expect(adapter.verifyWebhook(raw, signature, SECRETS).settledRef).toBe(
+        'pi_456',
+      );
     });
 
     // A session can complete while the money is still in flight — an async
@@ -418,7 +464,9 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
       const { raw, signature } = signed(
         checkoutSessionEvent({ payment_status: 'unpaid' }),
       );
-      expect(adapter.verifyWebhook(raw, signature).type).toBe('ignored');
+      expect(adapter.verifyWebhook(raw, signature, SECRETS).type).toBe(
+        'ignored',
+      );
     });
 
     // The session lapsed before anybody paid: the hold should go back.
@@ -430,7 +478,7 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
         type: 'checkout.session.expired',
         data: { object: { id: 'cs_test_123', object: 'checkout.session' } },
       });
-      expect(adapter.verifyWebhook(raw, signature)).toMatchObject({
+      expect(adapter.verifyWebhook(raw, signature, SECRETS)).toMatchObject({
         type: 'expired',
         gatewayRef: 'cs_test_123',
       });
@@ -446,7 +494,7 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
           amount_received: 210_000,
         }),
       );
-      const verified = adapter.verifyWebhook(raw, signature);
+      const verified = adapter.verifyWebhook(raw, signature, SECRETS);
       expect(verified).toMatchObject({
         eventId: 'evt_1',
         type: 'succeeded',
@@ -463,7 +511,9 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
           amount_received: 100_000,
         }),
       );
-      expect(adapter.verifyWebhook(raw, signature).amountSatang).toBe(100_000);
+      expect(adapter.verifyWebhook(raw, signature, SECRETS).amountSatang).toBe(
+        100_000,
+      );
     });
 
     it('refuses a forged signature — the one input that could hand out free tickets', () => {
@@ -471,7 +521,12 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
       const { raw } = signed(
         paymentIntentEvent('payment_intent.succeeded', {}),
       );
-      const err = adapter.verifyWebhook.bind(adapter, raw, 't=1,v1=deadbeef');
+      const err = adapter.verifyWebhook.bind(
+        adapter,
+        raw,
+        't=1,v1=deadbeef',
+        SECRETS,
+      );
       expect(err).toThrow(DomainException);
       expect(err).toThrow(/signature/i);
     });
@@ -482,7 +537,7 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
         paymentIntentEvent('payment_intent.succeeded', {}),
       );
       const tampered = Buffer.from('{"id":"evt_1","type":"x"}', 'utf8');
-      expect(() => adapter.verifyWebhook(tampered, signature)).toThrow(
+      expect(() => adapter.verifyWebhook(tampered, signature, SECRETS)).toThrow(
         DomainException,
       );
     });
@@ -498,7 +553,9 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
           },
         }),
       );
-      expect(adapter.verifyWebhook(raw, signature).type).toBe('expired');
+      expect(adapter.verifyWebhook(raw, signature, SECRETS).type).toBe(
+        'expired',
+      );
     });
 
     it('maps an ordinary decline to failed, so the buyer keeps their seats to retry', () => {
@@ -512,7 +569,7 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
           },
         }),
       );
-      const verified = adapter.verifyWebhook(raw, signature);
+      const verified = adapter.verifyWebhook(raw, signature, SECRETS);
       expect(verified.type).toBe('failed');
       expect(verified.declineReason).toBe('Your card was declined.');
     });
@@ -522,7 +579,9 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
       const { raw, signature } = signed(
         paymentIntentEvent('payment_intent.canceled', { amount: 210_000 }),
       );
-      expect(adapter.verifyWebhook(raw, signature).type).toBe('expired');
+      expect(adapter.verifyWebhook(raw, signature, SECRETS).type).toBe(
+        'expired',
+      );
     });
 
     it('ignores everything it does not act on', () => {
@@ -533,7 +592,9 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
         type: 'charge.succeeded',
         data: { object: { id: 'ch_1', object: 'charge' } },
       });
-      expect(adapter.verifyWebhook(raw, signature).type).toBe('ignored');
+      expect(adapter.verifyWebhook(raw, signature, SECRETS).type).toBe(
+        'ignored',
+      );
     });
   });
 
@@ -549,17 +610,30 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
         refunds: { create },
         webhooks: real.webhooks,
       } as unknown as Stripe;
+      const credentials: GatewayCredentialsPort = {
+        secretKeyFor: () => Promise.resolve(WORKSPACE_KEY),
+        webhookIdentityFor: () =>
+          Promise.resolve({
+            organizationId: ORG,
+            signingSecrets: [...SECRETS],
+          }),
+      };
       return {
-        adapter: new StripePaymentAdapter(clock, config(), client),
+        adapter: new StripePaymentAdapter(
+          clock,
+          config(),
+          credentials,
+          () => client,
+        ),
         create,
       };
     }
 
     const input = {
+      organizationId: ORG,
       gatewayRef: 'pi_123',
       amountSatang: 210_000,
       idempotencyKey: 'refund-1',
-      accountId: null,
     };
 
     it('refunds the original intent, and says so on the idempotency key', async () => {
@@ -578,16 +652,6 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
       });
     });
 
-    it('refunds on the workspace’s connected account when it has one', async () => {
-      const { adapter, create } = refundHarness();
-      await adapter.refund({ ...input, accountId: 'acct_123' });
-      const [, options] = create.mock.calls[0] as [
-        unknown,
-        Stripe.RequestOptions,
-      ];
-      expect(options.stripeAccount).toBe('acct_123');
-    });
-
     it('reports a PromptPay refund awaiting the buyer’s bank details as pending', async () => {
       // Not a failure: Stripe emails the buyer for an account and settles later.
       const { adapter } = refundHarness({ status: 'pending' });
@@ -604,9 +668,106 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
       expect(result.failureReason).toBe('expired_or_canceled_card');
     });
 
-    it('treats an unknown provider status as failed, never as money returned', async () => {
+    /**
+     * Stripe's own flow for PromptPay ("Refunds that require action"): the
+     * refund STARTS in `requires_action` while Stripe emails the buyer for a
+     * bank account. It is live at Stripe — calling it failed would leave the
+     * buyer holding both the money and valid tickets.
+     */
+    it('reports a refund waiting on the buyer’s bank details (requires_action) as pending', async () => {
       const { adapter } = refundHarness({ status: 'requires_action' });
+      expect((await adapter.refund(input)).status).toBe('pending');
+    });
+
+    it('reports a cancelled refund as failed', async () => {
+      const { adapter } = refundHarness({ status: 'canceled' });
       expect((await adapter.refund(input)).status).toBe('failed');
+    });
+
+    it('treats an unknown provider status as failed, never as money returned', async () => {
+      const { adapter } = refundHarness({ status: 'something_new' });
+      expect((await adapter.refund(input)).status).toBe('failed');
+    });
+  });
+
+  /**
+   * A refund that did not settle at once (PromptPay) is finished by these
+   * events. `gatewayRef` is the REFUND's own `re_…` — what the refund row
+   * stored — not the charge's.
+   */
+  describe('verifyWebhook — refunds (US-FIN-02)', () => {
+    function refundEvent(
+      type: string,
+      refund: Record<string, unknown> = {},
+    ): Record<string, unknown> {
+      return {
+        id: 'evt_re_1',
+        object: 'event',
+        type,
+        data: {
+          object: {
+            id: 're_123',
+            object: 'refund',
+            amount: 210_000,
+            status: 'succeeded',
+            failure_reason: null,
+            payment_intent: 'pi_123',
+            ...refund,
+          },
+        },
+      };
+    }
+
+    const verify = (event: Record<string, unknown>) => {
+      const { adapter } = harness();
+      const { raw, signature } = signed(event);
+      return adapter.verifyWebhook(raw, signature, SECRETS);
+    };
+
+    it('reports a refund that went through, under the refund’s own reference', () => {
+      expect(verify(refundEvent('refund.updated'))).toMatchObject({
+        eventId: 'evt_re_1',
+        type: 'refund_succeeded',
+        gatewayRef: 're_123',
+        amountSatang: 210_000,
+        declineReason: null,
+      });
+    });
+
+    it('reports a failed refund with Stripe’s reason', () => {
+      expect(
+        verify(
+          refundEvent('refund.failed', {
+            status: 'failed',
+            failure_reason: 'insufficient_funds',
+          }),
+        ),
+      ).toMatchObject({
+        type: 'refund_failed',
+        gatewayRef: 're_123',
+        declineReason: 'insufficient_funds',
+      });
+    });
+
+    it('reports a cancelled refund as failed — the money never went back', () => {
+      expect(
+        verify(refundEvent('refund.updated', { status: 'canceled' })).type,
+      ).toBe('refund_failed');
+    });
+
+    it.each(['requires_action', 'pending'])(
+      'ignores a refund still in flight (%s)',
+      (status) => {
+        expect(verify(refundEvent('refund.updated', { status })).type).toBe(
+          'ignored',
+        );
+      },
+    );
+
+    // `refunds.create` already answered synchronously for this one; only a
+    // later change of state needs a webhook.
+    it('ignores refund.created', () => {
+      expect(verify(refundEvent('refund.created')).type).toBe('ignored');
     });
   });
 });

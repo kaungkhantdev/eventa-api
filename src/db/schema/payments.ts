@@ -42,6 +42,12 @@ export const payments = pgTable(
     status: paymentStatusEnum().notNull().default('pending'),
     paidAt: timestamp({ withTimezone: true }),
     gatewayRef: text(),
+    /**
+     * The connected account the charge was made on; NULL = the platform's own.
+     * Stamped at charge time so a refund reverses on the same account even if
+     * the workspace has since disconnected or reconnected elsewhere.
+     */
+    gatewayAccountId: text(),
     statementDescriptor: varchar({ length: 22 }),
     feeAmountSatang: bigint({ mode: 'number' }),
     idempotencyKey: text().notNull(),
@@ -79,6 +85,11 @@ export const refunds = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
     issuedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    /**
+     * When the money went back — the VAT month a refund belongs to. Null until
+     * it succeeds; a PromptPay refund settles days after it was issued.
+     */
+    settledAt: timestamp({ withTimezone: true }),
     gatewayRef: text(),
     idempotencyKey: text().notNull(),
     createdAt: createdAt(),

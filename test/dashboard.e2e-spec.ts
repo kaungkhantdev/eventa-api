@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'dash-e2e', name: 'Dashboard E2E' };
@@ -102,7 +103,7 @@ describe('Dashboard and operations home (e2e — E11)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
 
     adminJwt = await token(ADMIN, ORG.slug);
@@ -168,7 +169,10 @@ describe('Dashboard and operations home (e2e — E11)', () => {
     const event = o.event ?? eventId;
     const tier = o.tier ?? tierId;
     const total = o.totalSatang ?? 0;
-    const at = o.registeredAt ?? 'now()';
+    // A few seconds back, not `now()`: the window ends at the API's own clock,
+    // and a row stamped by the database's clock a few milliseconds "later"
+    // falls outside it — which made revenue read 0 on some runs.
+    const at = o.registeredAt ?? "now() - interval '5 seconds'";
     const order = await pool.query<{ id: string }>(
       `INSERT INTO orders (organization_id, reference, event_id, buyer_name, buyer_email,
                            status, payment_status, seats, subtotal_satang,
@@ -470,8 +474,12 @@ async function seedOrg(
         [key, PERM_GROUP[key], key],
       );
     }
+    // `is_system` defaults to TRUE, so a bare INSERT would have this fixture claim
+    // to be a built-in role — and sign-in reconciles a built-in named Admin,
+    // Organizer or Staff up to the full grant set its name carries, widening the
+    // grants each case here holds on purpose. This role is the spec's own.
     const role = await pool.query<{ id: string }>(
-      `INSERT INTO roles (organization_id, name, description) VALUES ($1, $2, 'seed') RETURNING id`,
+      `INSERT INTO roles (organization_id, name, description, is_system) VALUES ($1, $2, 'seed', false) RETURNING id`,
       [orgId, p.roleName],
     );
     const roleId = Number(role.rows[0].id);
@@ -538,6 +546,8 @@ async function seedTier(
 async function cleanup(pool: Pool): Promise<void> {
   const slugs = [ORG.slug, ORG2.slug];
   // Order matters: tickets and check-ins reference events ON DELETE RESTRICT.
+  // audit_events is ON DELETE RESTRICT on the organization too (a failed login
+  // writes one), which is why it leads the list and clears before the delete below.
   for (const table of [
     'audit_events',
     'outbox_events',

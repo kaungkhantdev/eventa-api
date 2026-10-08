@@ -42,6 +42,13 @@ import { PublishEventDto } from './dto/publish-event.dto';
 import { UnpublishEventDto } from './dto/unpublish-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { EventsQueryService } from './events-query.service';
+import { EventCoverService } from './event-cover.service';
+import {
+  ConfirmCoverDto,
+  CoverDto,
+  CoverUploadDto,
+  RequestCoverUploadDto,
+} from './dto/event-cover.dto';
 import { EventsService } from './events.service';
 import { AdminGuard } from '../../common/guards/admin.guard';
 
@@ -57,7 +64,44 @@ export class EventsController {
   constructor(
     private readonly events: EventsService,
     private readonly query: EventsQueryService,
+    private readonly cover: EventCoverService,
   ) {}
+
+  /**
+   * Two steps, because the bytes never pass through this API: ask for a URL,
+   * PUT the file to it, then confirm. Declared before `:id` routes so
+   * `cover/upload-url` is never parsed as an event id.
+   *
+   * Guarded by `evCreate` — the same permission that lets somebody build the
+   * event this image is for. The key is issued from the token's organization,
+   * never taken from the request.
+   */
+  @Post('cover/upload-url')
+  @RequirePermissions(Permission.evCreate)
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Upload URL issued.')
+  @ApiData(CoverUploadDto)
+  requestCoverUpload(
+    @CurrentAuth() auth: AuthContext,
+    @Body() dto: RequestCoverUploadDto,
+  ): Promise<CoverUploadDto> {
+    return this.cover.requestUpload(auth.organizationId, dto);
+  }
+
+  /** Promote the verified bytes; the URL is saved with the event, not here. */
+  @Post('cover')
+  @RequirePermissions(Permission.evCreate)
+  @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Cover image ready.')
+  @ApiData(CoverDto)
+  async confirmCover(
+    @CurrentAuth() auth: AuthContext,
+    @Body() dto: ConfirmCoverDto,
+  ): Promise<CoverDto> {
+    return {
+      coverImage: await this.cover.confirm(auth.organizationId, dto.key),
+    };
+  }
 
   @Post()
   @RequirePermissions(Permission.evCreate)

@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  boolean,
   char,
   check,
   index,
@@ -95,11 +96,40 @@ export const orders = pgTable(
     registeredAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     /** When it actually became confirmed — the history US-REG-01 renders. */
     confirmedAt: timestamp({ withTimezone: true }),
-    /** Set only on the organizer's decision path (US-REG-02), never by checkout. */
+    /**
+     * Set only on the decision path (US-REG-02), never by checkout. With
+     * `decidedBy` null, nobody decided: the waitlist confirmed a free place
+     * when a capacity raise freed one (US-REG-04).
+     */
     approvedAt: timestamp({ withTimezone: true }),
     rejectedAt: timestamp({ withTimezone: true }),
     decidedBy: uuid().references(() => users.id, { onDelete: 'set null' }),
     rejectionReason: text(),
+    /**
+     * A waitlist offer (US-REG-04): the registration was given a seat to pay
+     * for by `offerExpiresAt`. `offeredBy` is null when the line offered it
+     * by itself — a lapsed offer passed on, or a capacity raise freeing
+     * places — and `offerSkipped` is how many people were ahead in line when
+     * an organizer chose this one — non-zero is the out-of-order choice the
+     * story says must be recorded.
+     */
+    offeredAt: timestamp({ withTimezone: true }),
+    offeredBy: uuid().references(() => users.id, { onDelete: 'set null' }),
+    offerExpiresAt: timestamp({ withTimezone: true }),
+    offerSkipped: smallint(),
+    /**
+     * The event's "Require approval" rule as the buyer was told it at checkout
+     * (US-REG-02) — a snapshot, so flipping the event's switch later, or while
+     * this buyer's payment is in flight, never changes the deal they made.
+     */
+    requiresApproval: boolean().notNull().default(false),
+    /**
+     * When the organizer's decision became the only thing left: at placement
+     * for a free order, when the money landed for a paid one. Pending with this
+     * set is "awaiting approval" — on the organizer's clock, not the buyer's,
+     * so nothing expires it.
+     */
+    approvalRequestedAt: timestamp({ withTimezone: true }),
     cancelledAt: timestamp({ withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

@@ -1,6 +1,6 @@
 import { DomainException } from '../../common/errors/domain.exception';
 import { Clock } from '../../common/time/clock';
-import { AuthService, type LoginInput } from './auth.service';
+import { AuthService, type LoginInput, type LoginUser } from './auth.service';
 import type {
   OrganizationRow,
   RefreshTokenClaims,
@@ -14,6 +14,7 @@ import type { LoginThrottleService } from './login-throttle.service';
 import type { SignupService } from '../auth-signup/auth-signup.service';
 import { PasswordService } from '../auth-password/auth-password.service';
 import { TokenService } from './token.service';
+import { outboxDouble } from '../../../test/support/outbox-double';
 
 const clock: Clock = { now: () => new Date('2026-01-01T00:00:00Z') };
 
@@ -70,6 +71,7 @@ describe('AuthService', () => {
     } as unknown as jest.Mocked<AuthRepository>;
     users = {
       findLoginUser: jest.fn(),
+      findLoginCandidates: jest.fn().mockResolvedValue([]),
       findProfile: jest.fn(),
       touchLastActive: jest.fn(),
     } as unknown as jest.Mocked<UsersRepository>;
@@ -89,9 +91,7 @@ describe('AuthService', () => {
       accessTtlSeconds: 900,
       refreshTtlSeconds: 604800,
     } as unknown as jest.Mocked<TokenService>;
-    outbox = {
-      enqueue: jest.fn().mockResolvedValue(undefined),
-    };
+    outbox = outboxDouble();
     throttle = {
       assertNotLocked: jest.fn().mockResolvedValue(undefined),
       recordFailure: jest.fn().mockResolvedValue(undefined),
@@ -186,9 +186,10 @@ describe('AuthService', () => {
 
       const result = await service.login(input);
 
-      // No challenge here — 2FA is off for this account.
+      // No challenge here — 2FA is off — and one workspace, so no picker.
       if ('twoFactorRequired' in result)
         throw new Error('unexpected challenge');
+      if ('chooseWorkspace' in result) throw new Error('unexpected picker');
       expect(result.accessToken).toBe('access.jwt');
       expect(result.refreshToken).toBe('refresh.jwt');
       expect(result.expiresIn).toBe(900);
@@ -290,10 +291,18 @@ describe('AuthService', () => {
       expect(users.findLoginUser).not.toHaveBeenCalled();
     });
 
-    it('still requires the workspace slug for an organizer login', async () => {
+    /**
+     * It used to refuse an organizer who named no workspace. That asked for
+     * the one thing they cannot know — the slug is generated at sign-up and
+     * shown nowhere — so the password resolves it instead.
+     */
+    it('resolves an organizer login by password when no workspace is named', async () => {
+      users.findLoginCandidates.mockResolvedValue([]);
+
       await expect(
         service.login({ ...input, orgSlug: undefined }),
-      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+      expect(users.findLoginCandidates).toHaveBeenCalled();
       expect(users.findLoginUser).not.toHaveBeenCalled();
     });
 
@@ -382,6 +391,190 @@ describe('AuthService', () => {
         email: 'new@acme.test',
         status: 'Active',
       });
+    });
+  });
+
+  /**
+   * Signing in without naming a workspace (US-ACC-02).
+   *
+   * A user row belongs to one organization, so a person invited into a second
+   * workspace has a second account sharing only an email. Asking which is the
+   * one thing they cannot answer — the slug is invented by the product and
+   * shown nowhere — so the password decides instead.
+   */
+  describe('login without a workspace', () => {
+    // No `orgSlug`: the sign-in form that does not ask which workspace.
+    const noWorkspace: LoginInput = {
+      email: input.email,
+      password: input.password,
+      device: input.device,
+      ip: input.ip,
+    };
+
+    function candidate(slug: string, name: string): LoginUser {
+      return { user: userRow(), org: { ...org, slug, name } };
+    }
+
+    it('signs in when the address has one account', async () => {
+      users.findLoginCandidates.mockResolvedValue([
+        candidate('acme-events', 'Acme Events'),
+      ]);
+      passwords.verify.mockResolvedValue(true);
+
+      const res = await service.login(noWorkspace);
+
+      expect(res).toHaveProperty('accessToken', 'access.jwt');
+      expect(users.findLoginUser).not.toHaveBeenCalled();
+    });
+
+    // The password is itself the disambiguator: two accounts on one address
+    // rarely share one, and where they differ nobody needs to be asked.
+    it('picks the workspace whose password matches', async () => {
+      users.findLoginCandidates.mockResolvedValue([
+        candidate('other-co', 'Other Co'),
+        candidate('acme-events', 'Acme Events'),
+      ]);
+      passwords.verify.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+      const res = await service.login(noWorkspace);
+
+      expect(res).toHaveProperty('accessToken', 'access.jwt');
+      expect(repo.createSession).toHaveBeenCalledWith(
+        expect.objectContaining({ organizationId: org.id }),
+      );
+    });
+
+    it('asks which workspace only when the password fits both', async () => {
+      users.findLoginCandidates.mockResolvedValue([
+        candidate('acme-events', 'Acme Events'),
+        candidate('acme-bkk', 'Acme Bangkok'),
+      ]);
+      passwords.verify.mockResolvedValue(true);
+
+      await expect(service.login(noWorkspace)).resolves.toMatchObject({
+        chooseWorkspace: true,
+        workspaces: [
+          { slug: 'acme-events', name: 'Acme Events' },
+          { slug: 'acme-bkk', name: 'Acme Bangkok' },
+        ],
+      });
+      // Nothing is issued until they say which.
+      expect(repo.createSession).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The workspace list is only ever shown to somebody who has already proved
+     * the password. A wrong one is refused exactly as before, so this is not a
+     * way to ask which workspaces an address belongs to.
+     */
+    it('refuses a wrong password without naming any workspace', async () => {
+      users.findLoginCandidates.mockResolvedValue([
+        candidate('acme-events', 'Acme Events'),
+        candidate('acme-bkk', 'Acme Bangkok'),
+      ]);
+      passwords.verify.mockResolvedValue(false);
+
+      await expect(service.login(noWorkspace)).rejects.toMatchObject({
+        code: 'UNAUTHORIZED',
+      });
+    });
+
+    it('refuses an address with no account at all, the same way', async () => {
+      users.findLoginCandidates.mockResolvedValue([]);
+
+      await expect(service.login(noWorkspace)).rejects.toMatchObject({
+        code: 'UNAUTHORIZED',
+      });
+    });
+
+    // Naming one still works: it is what the picker sends back.
+    it('goes straight to the named workspace when one is given', async () => {
+      users.findLoginUser.mockResolvedValue({ user: userRow(), org });
+      passwords.verify.mockResolvedValue(true);
+
+      await service.login(input);
+
+      expect(users.findLoginCandidates).not.toHaveBeenCalled();
+    });
+  });
+  /**
+   * What a sign-in writes, now that it writes nothing about roles.
+   *
+   * Two designs tried to top a workspace's built-in roles up to the permission
+   * catalog here, and both silently reversed an organizer's decision: Admin's
+   * defaults are the whole catalog, so a workspace provisioned after a key
+   * appeared was handed it at once, and a key granted and later revoked leaves
+   * an old role with no row to tell the revoke from a gap. Nothing on disk
+   * records what a role was ever offered, so no rule over dates can recover
+   * that intent — the gap is shown to an organizer instead (see
+   * `neverOfferedPermissions`). Signing in therefore touches no role at all.
+   */
+  describe('startSession', () => {
+    const session: Omit<LoginInput, 'email' | 'password' | 'orgSlug'> = {
+      device: 'jest',
+      ip: null,
+    };
+
+    beforeEach(() => {
+      repo.createSession.mockResolvedValue('sess-1');
+    });
+
+    /**
+     * The sign-in's write surface, asserted as a whole: a session row, the
+     * last-active stamp and the outbox event, in that order, and nothing else.
+     * Stated this way because the regression to guard against is a role write
+     * returning here — which is a write this list does not have room for, and
+     * which would have to run before `getFor` to affect the answer.
+     */
+    it('writes a session and the sign-in record, and nothing before them', async () => {
+      const order: string[] = [];
+      repo.createSession.mockImplementation(() => {
+        order.push('createSession');
+        return Promise.resolve('sess-1');
+      });
+      users.touchLastActive.mockImplementation(() => {
+        order.push('touchLastActive');
+        return Promise.resolve();
+      });
+      outbox.enqueue.mockImplementation(() => {
+        order.push('enqueue');
+        return Promise.resolve();
+      });
+      permissions.getFor.mockImplementation(() => {
+        order.push('getFor');
+        return Promise.resolve([]);
+      });
+
+      await service.startSession({ user: userRow(), org }, session);
+
+      expect(order).toEqual([
+        'createSession',
+        'touchLastActive',
+        'enqueue',
+        'getFor',
+      ]);
+    });
+
+    it('answers with the permissions the workspace already holds', async () => {
+      permissions.getFor.mockResolvedValue(['evCreate']);
+
+      const result = await service.startSession(
+        { user: userRow(), org },
+        session,
+      );
+
+      expect(permissions.getFor).toHaveBeenCalledWith(org.id, 'u1');
+      expect(result.user.permissions).toEqual(['evCreate']);
+    });
+
+    it('signs an attendee in all the same', async () => {
+      const result = await service.startSession(
+        { user: userRow({ persona: 'attendee' }), org },
+        session,
+      );
+
+      expect(result.accessToken).toBe('access.jwt');
+      expect(repo.createSession).toHaveBeenCalled();
     });
   });
 });

@@ -85,6 +85,12 @@ export class CheckoutTierDto {
     description: 'Null when the allocation is unlimited',
   })
   remaining!: number | null;
+
+  @ApiProperty({
+    description:
+      'Sold out, and a buyer may join its waitlist instead (US-REG-04)',
+  })
+  waitlist!: boolean;
 }
 
 /** One seat on a reserved-seating map. Taken seats are drawn, not hidden. */
@@ -124,6 +130,15 @@ export class CheckoutNotesDto {
 
   @ApiProperty({ nullable: true, type: String })
   delivery!: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description:
+      'Set when the event requires approval (US-REG-02): each registration ' +
+      'waits for the organizer, and a paid one is refunded if not approved.',
+  })
+  approval!: string | null;
 }
 
 /** Everything the checkout page needs before the buyer picks anything. */

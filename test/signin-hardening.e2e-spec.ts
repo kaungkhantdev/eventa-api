@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'signin1password';
 /**
@@ -40,7 +41,7 @@ describe('Sign-in hardening & audience separation (US-ACC-02/03/08/11, e2e)', ()
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
 
     // Register the owner (stays unconfirmed until the verify test runs).

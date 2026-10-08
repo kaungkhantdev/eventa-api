@@ -14,6 +14,7 @@ export interface MyRegistrationRow {
   endAt: Date | null;
   timezone: string;
   venueName: string | null;
+  venueAddress: string | null;
   city: string | null;
   isOnline: boolean;
   coverImage: string | null;
@@ -37,6 +38,7 @@ export interface TicketPassRow {
   startAt: Date;
   timezone: string;
   venueName: string | null;
+  venueAddress: string | null;
   city: string | null;
   isOnline: boolean;
   seatSection: string | null;

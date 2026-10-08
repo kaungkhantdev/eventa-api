@@ -16,8 +16,6 @@ export interface StartPaymentInput {
   buyerEmail: string;
   /** ≤22 chars, shown on the buyer's statement (US-SET-10). */
   statementDescriptor: string | null;
-  /** The workspace's connected account at the provider; null = platform account. */
-  accountId: string | null;
   /**
    * What the buyer is paying for, shown on the provider's own page.
    *
@@ -67,19 +65,20 @@ export interface StartedPayment {
 
 /** Give money back to the card or wallet it came from (US-FIN-02). */
 export interface RefundPaymentInput {
+  /** Whose key reverses it — the same workspace that took the money. */
+  organizationId: number;
   /** The provider's reference for the original charge (`gateway_ref`). */
   gatewayRef: string;
   amountSatang: number;
   /** Exactly-once at the PROVIDER — a double-click must not refund twice. */
   idempotencyKey: string;
-  /** The workspace's connected account; null = platform account. */
-  accountId: string | null;
 }
 
 /**
  * The provider's answer. `pending` is a real outcome, not a failure: a
- * PromptPay refund needs the buyer's bank details and settles later, so the
- * ledger records it and the webhook confirms it.
+ * PromptPay refund needs the buyer's bank details and settles later (Stripe
+ * reports it as `requires_action` while it emails the buyer), so the ledger
+ * records it with `refundRef` and a refund webhook finishes it.
  */
 export interface RefundedPayment {
   refundRef: string;
@@ -89,12 +88,12 @@ export interface RefundedPayment {
 
 /** Re-submit a settlement the bank rejected (US-FIN-04). */
 export interface RetryPayoutInput {
+  /** Whose key re-submits it. */
+  organizationId: number;
   /** OUR reference for the payout being recovered. */
   reference: string;
   amountSatang: number;
   currency: string;
-  /** The workspace's connected account; null = platform account. */
-  accountId: string | null;
 }
 
 export interface RetriedPayout {
@@ -104,11 +103,25 @@ export interface RetriedPayout {
   failureReason: string | null;
 }
 
+/**
+ * A refund that did not settle when it was issued, reported later: it went
+ * through, or it failed (or was cancelled) and the money never went back.
+ */
+export const REFUND_WEBHOOK_TYPES = [
+  'refund_succeeded',
+  'refund_failed',
+] as const;
+export type RefundWebhookType = (typeof REFUND_WEBHOOK_TYPES)[number];
+
 /** What a verified provider callback turned out to mean. */
 export interface VerifiedWebhook {
   /** The PROVIDER's event id — what `webhook_events` dedupes on. */
   eventId: string;
-  type: 'succeeded' | 'failed' | 'expired' | 'ignored';
+  type: 'succeeded' | 'failed' | 'expired' | RefundWebhookType | 'ignored';
+  /**
+   * For a payment event, the charge's reference (`payments.gateway_ref`); for
+   * a refund event, the REFUND's own reference (`refunds.gateway_ref`).
+   */
   gatewayRef: string;
   /**
    * The reference the provider settled under, when it differs from the one we
@@ -120,7 +133,9 @@ export interface VerifiedWebhook {
    * it out and the stored reference is reconciled onto it.
    */
   settledRef?: string | null;
+  /** What landed for a payment; what was returned for a refund. */
   amountSatang: number;
+  /** The provider's reason a payment was declined or a refund failed. */
   declineReason: string | null;
 }
 
@@ -149,7 +164,16 @@ export abstract class PaymentProviderPort {
    * does not check out: an unverified webhook is an attacker claiming an order
    * was paid, and is the one input that could hand out tickets for free.
    */
-  abstract verifyWebhook(rawBody: Buffer, signature: string): VerifiedWebhook;
+  /**
+   * `signingSecrets` rather than one, because a workspace registers the same
+   * URL in the provider's test and live dashboards and each issues its own. The
+   * event does not say which until it is verified.
+   */
+  abstract verifyWebhook(
+    rawBody: Buffer,
+    signature: string,
+    signingSecrets: readonly string[],
+  ): VerifiedWebhook;
 
   /**
    * Return a settled charge to its original method. Idempotent on the given
@@ -167,7 +191,10 @@ export abstract class PaymentProviderPort {
    * workspace has no connected account yet — the caller must guide them through
    * connecting before there is anything to manage.
    */
-  abstract payoutSettingsLink(accountId: string | null): Promise<string | null>;
+  abstract payoutSettingsLink(
+    organizationId: number,
+    accountId: string | null,
+  ): Promise<string | null>;
 
   /**
    * Re-submit a failed payout to the same connected account (US-FIN-04). The

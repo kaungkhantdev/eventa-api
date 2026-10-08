@@ -5,7 +5,11 @@ import { Clock } from '../../common/time/clock';
 import type { AuthContext } from '../auth/auth.types';
 import { OrderPaymentPort } from './ports/order-payment.port';
 import { PaymentProviderPort } from './ports/payment-provider.port';
-import type { PaymentRow, RefundRow } from './payments.repository';
+import type {
+  MarkRefundedInput,
+  PaymentRow,
+  RefundRow,
+} from './payments.repository';
 import { PaymentsRepository } from './payments.repository';
 
 export interface RefundPaymentRequest {
@@ -20,11 +24,39 @@ export interface RefundResult {
   amountSatang: number;
 }
 
+/** What a provider's refund callback reported, for the workspace its URL named. */
+export interface ProviderRefundReport {
+  organizationId: number;
+  /** The provider's reference for the REFUND — `refunds.gateway_ref`. */
+  refundRef: string;
+  outcome: 'succeeded' | 'failed';
+  /** What the provider says it returned, in satang. */
+  amountSatang: number;
+  failureReason: string | null;
+}
+
+/** What finishing a pending refund came to — the webhook log records it. */
+export type RefundCompletion =
+  | 'settled'
+  | 'failed'
+  | 'unknown'
+  | 'already_final'
+  | 'amount_mismatch'
+  | 'failed_after_settled';
+
 const NOT_PAID =
   'Only a completed payment can be refunded — this one never cleared.';
 const ALREADY_REFUNDED = 'This payment has already been refunded.';
 const NO_GATEWAY_REF =
   'This payment has no provider reference, so it cannot be refunded automatically.';
+const FINISHED_ELSEWHERE =
+  'This refund was finished by another request — reload to see where it stands.';
+
+/**
+ * Thrown inside the refund transaction when its guarded write matched nothing,
+ * so the ticket void and returned stock that ran before it roll back.
+ */
+class RefundNoLongerPending extends Error {}
 
 /**
  * Issue a refund (US-FIN-02). Full refunds only this release, admin-only, and
@@ -34,18 +66,29 @@ const NO_GATEWAY_REF =
  *
  * 1. **Claim the ledger row first.** `uq_refunds_org_idem` makes the claim the
  *    thing that decides who refunds — so a second request finds the row instead
- *    of calling the provider again, and a crash after the provider call still
- *    leaves evidence that a refund was attempted.
+ *    of refunding again, and a crash after the provider call still leaves
+ *    evidence that a refund was attempted. A claim the provider never answered
+ *    is asked again under its own key (`replay`), which the provider dedupes.
  * 2. **Then call the provider**, outside any transaction, because a network
  *    call inside one holds locks for as long as Stripe takes to answer.
  * 3. **Then free the inventory in ONE transaction** with the ledger write: the
  *    payment flips to refunded, the tickets are voided and their seats go back,
- *    and the refund row is marked succeeded — together or not at all.
+ *    and the refund row is marked succeeded — together or not at all. The
+ *    exception is a duplicate payment, while another paid payment still
+ *    covers the order: only its own ledger lines flip, because the buyer paid
+ *    once and keeps what they bought.
+ *
+ * Only a `pending` refund moves, and that is enforced by the writes
+ * themselves, not by the read before them — so two outcomes for one refund
+ * processed at the same moment cannot leave the ledger contradicting itself.
  *
  * A `pending` refund (PromptPay, where Stripe must still collect the buyer's
  * bank details) deliberately frees nothing yet. The money has not landed back,
  * so voiding the ticket now would take the admission away before the refund
- * actually settles.
+ * actually settles. It keeps the provider's reference instead, and the
+ * provider's refund webhook finishes it through `completePending` — in the
+ * very transaction step 3 uses, so a refund settled later lands exactly as one
+ * settled at once.
  */
 @Injectable()
 export class RefundsService {
@@ -73,8 +116,27 @@ export class RefundsService {
       idempotencyKey: input.idempotencyKey,
       now: this.clock.now(),
     });
-    if (!fresh) return this.toResult(refund);
+    if (!fresh) return this.replay(payment, refund);
     return this.settleRefund(payment, refund);
+  }
+
+  /**
+   * The same key again. Usually that is answered with what the first request
+   * recorded — but not a claim still `pending` with no provider reference:
+   * that one's provider call never came back (it threw, or the process died),
+   * and no webhook can ever find a refund with no reference, so answering
+   * "pending" would leave the money where it is for good. Asking the provider
+   * again under the SAME key is safe — it answers with the refund it already
+   * made, or makes it now — and is the only way that refund ever finishes.
+   */
+  private async replay(
+    payment: PaymentRow & { gatewayRef: string },
+    refund: RefundRow,
+  ): Promise<RefundResult> {
+    if (refund.status === 'pending' && !refund.gatewayRef) {
+      return this.settleRefund(payment, refund);
+    }
+    return this.toResult(refund);
   }
 
   private async requireRefundable(
@@ -99,11 +161,11 @@ export class RefundsService {
     refund: RefundRow,
   ): Promise<RefundResult> {
     const outcome = await this.provider.refund({
+      organizationId: payment.organizationId,
       gatewayRef: payment.gatewayRef,
       // The payment's own amount, never a number from the request.
       amountSatang: payment.amountSatang,
       idempotencyKey: refund.idempotencyKey,
-      accountId: null,
     });
     if (outcome.status === 'failed') {
       await this.repo.markRefundFailed(refund.id, outcome.failureReason);
@@ -114,24 +176,161 @@ export class RefundsService {
       );
     }
     if (outcome.status === 'pending') {
+      await this.repo.markRefundPending(
+        refund.id,
+        outcome.refundRef,
+        this.clock.now(),
+      );
       this.logger.log(
         { refundId: refund.id, refundRef: outcome.refundRef },
         'refund accepted but not settled — the ticket stays valid until it is',
       );
       return { ...this.toResult(refund), status: 'pending' };
     }
-    await this.orders.refundOrder(
-      payment.organizationId,
-      payment.orderId,
-      (tx) =>
-        this.repo.markRefundedIn(tx, {
-          refundId: refund.id,
-          paymentId: payment.id,
-          gatewayRef: outcome.refundRef,
-          now: this.clock.now(),
-        }),
-    );
+    if (!(await this.completeRefund(refund, outcome.refundRef))) {
+      throw DomainException.conflict(FINISHED_ELSEWHERE);
+    }
     return { ...this.toResult(refund), status: 'succeeded' };
+  }
+
+  /**
+   * Finish a refund the provider did not settle when it was issued (US-FIN-02),
+   * from the provider's own refund callback.
+   *
+   * Only a `pending` row moves, which is what makes a redelivered event — or a
+   * second event about the same refund — change nothing. The lookup is scoped
+   * to the workspace the callback's URL named.
+   */
+  async completePending(
+    report: ProviderRefundReport,
+  ): Promise<RefundCompletion> {
+    const refund = await this.repo.findRefundByGatewayRef(
+      report.organizationId,
+      report.refundRef,
+    );
+    if (!refund) return 'unknown';
+    if (refund.status !== 'pending') return this.onFinished(refund, report);
+    if (report.outcome === 'failed') return this.onFailed(refund, report);
+    return this.onConfirmed(refund, report);
+  }
+
+  /**
+   * A report about a refund already finished. The one that matters is a
+   * failure after it SETTLED — Stripe can take a refund back when the buyer's
+   * bank returns it. The tickets are already void and the place may have been
+   * sold again, so reviving them would be a guess; a person has to look.
+   */
+  private onFinished(
+    refund: RefundRow,
+    report: ProviderRefundReport,
+  ): RefundCompletion {
+    if (refund.status === 'succeeded' && report.outcome === 'failed') {
+      this.logger.warn(
+        { refundId: refund.id, reason: report.failureReason },
+        'the provider failed a refund already settled here — tickets stay void, follow up by hand',
+      );
+      return 'failed_after_settled';
+    }
+    return 'already_final';
+  }
+
+  /** The money never went back, so the buyer keeps a valid ticket. */
+  private async onFailed(
+    refund: RefundRow,
+    report: ProviderRefundReport,
+  ): Promise<RefundCompletion> {
+    if (await this.repo.markRefundFailed(refund.id, report.failureReason)) {
+      return 'failed';
+    }
+    return this.afterLostRace(report);
+  }
+
+  /**
+   * The same rule as settling a payment: a different amount settles nothing,
+   * because voiding tickets on the strength of a partial refund would take the
+   * admission away for money the buyer never got back.
+   */
+  private async onConfirmed(
+    refund: RefundRow,
+    report: ProviderRefundReport,
+  ): Promise<RefundCompletion> {
+    if (report.amountSatang !== refund.amountSatang) {
+      this.logger.warn(
+        {
+          refundId: refund.id,
+          expected: refund.amountSatang,
+          got: report.amountSatang,
+        },
+        'refund webhook: amount mismatch — refusing to settle',
+      );
+      return 'amount_mismatch';
+    }
+    if (await this.completeRefund(refund, report.refundRef)) return 'settled';
+    return this.afterLostRace(report);
+  }
+
+  /**
+   * Another event about this refund was processed between our read and our
+   * write, and its write landed first. Report what the row says now — the
+   * same answer those two events one after the other would have produced.
+   */
+  private async afterLostRace(
+    report: ProviderRefundReport,
+  ): Promise<RefundCompletion> {
+    const current = await this.repo.findRefundByGatewayRef(
+      report.organizationId,
+      report.refundRef,
+    );
+    return current ? this.onFinished(current, report) : 'unknown';
+  }
+
+  /**
+   * Step 3 of the class note, shared by both paths. False when another event
+   * finished the refund first; nothing is written then.
+   *
+   * A duplicate payment — another payment still covers the order — flips only
+   * its own ledger lines: the buyer paid once and keeps what they bought. Only
+   * the refund of the order's last paid payment voids its tickets and returns
+   * their stock, in ONE transaction with the ledger.
+   */
+  private async completeRefund(
+    refund: RefundRow,
+    gatewayRef: string,
+  ): Promise<boolean> {
+    const ledger: MarkRefundedInput = {
+      refundId: refund.id,
+      paymentId: refund.paymentId,
+      gatewayRef,
+      now: this.clock.now(),
+    };
+    const duplicate = await this.repo.settleDuplicateRefund({
+      ...ledger,
+      organizationId: refund.organizationId,
+      orderId: refund.orderId,
+    });
+    if (duplicate === 'sole_payment') return this.voidOrder(refund, ledger);
+    return duplicate === 'settled';
+  }
+
+  private async voidOrder(
+    refund: RefundRow,
+    ledger: MarkRefundedInput,
+  ): Promise<boolean> {
+    try {
+      await this.orders.refundOrder(
+        refund.organizationId,
+        refund.orderId,
+        async (tx) => {
+          if (!(await this.repo.markRefundedIn(tx, ledger))) {
+            throw new RefundNoLongerPending();
+          }
+        },
+      );
+      return true;
+    } catch (error) {
+      if (error instanceof RefundNoLongerPending) return false;
+      throw error;
+    }
   }
 
   private toResult(refund: RefundRow): RefundResult {

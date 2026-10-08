@@ -5,6 +5,7 @@ import { PlatformModule } from '../platform/platform.module';
 import { AuthSignupController } from './auth-signup.controller';
 import { SignupRepository } from './auth-signup.repository';
 import { SignupService } from './auth-signup.service';
+import { ResendThrottleService } from './resend-throttle.service';
 
 /**
  * Organizer sign-up (US-ACC-01): create the workspace + owner and confirm the
@@ -15,7 +16,7 @@ import { SignupService } from './auth-signup.service';
 @Module({
   imports: [forwardRef(() => AuthModule), AuthPasswordModule, PlatformModule],
   controllers: [AuthSignupController],
-  providers: [SignupService, SignupRepository],
+  providers: [SignupService, SignupRepository, ResendThrottleService],
   exports: [SignupService, SignupRepository],
 })
 export class AuthSignupModule {}

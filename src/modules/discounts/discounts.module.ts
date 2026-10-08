@@ -1,4 +1,6 @@
-import { Module } from '@nestjs/common';
+import { DiscountReportPort } from '../reports/ports/discount-report.port';
+import { DiscountReportAdapter } from './discount-report.adapter';
+import { Module, forwardRef } from '@nestjs/common';
 import { AccessModule } from '../access/access.module';
 import { EventsModule } from '../events/events.module';
 import { TicketingModule } from '../ticketing/ticketing.module';
@@ -25,9 +27,15 @@ import { DiscountsService } from './discounts.service';
  * trusting the caller) and Ticketing's `EventLookupPort` (names for the list).
  */
 @Module({
-  imports: [EventsModule, TicketingModule, AccessModule],
+  // `forwardRef` only because Discounts sits inside a module cycle it does not
+  // itself create — Ticketing → Checkout → Discounts → Ticketing — and
+  // Ticketing is still loading when this file is first reached.
+  imports: [EventsModule, forwardRef(() => TicketingModule), AccessModule],
   controllers: [DiscountsController],
   providers: [
+    // Promotion payback for Reports (US-RPT-10), bound here because only this
+    // module knows what a redemption is.
+    { provide: DiscountReportPort, useClass: DiscountReportAdapter },
     DiscountsService,
     DiscountsQueryService,
     DiscountRedemptionService,
@@ -35,6 +43,6 @@ import { DiscountsService } from './discounts.service';
     DiscountsPolicy,
     DiscountCodeGenerator,
   ],
-  exports: [DiscountRedemptionService],
+  exports: [DiscountRedemptionService, DiscountReportPort],
 })
 export class DiscountsModule {}

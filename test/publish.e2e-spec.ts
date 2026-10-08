@@ -11,6 +11,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
 import { LANDING_TEMPLATES } from '../src/modules/events/landing-templates';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'pub-e2e', name: 'Publish E2E' };
@@ -53,7 +54,7 @@ describe('Publish / unpublish (e2e — US-EVT-07)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
     adminJwt = await token(ADMIN);
   }, 30000);
@@ -212,8 +213,14 @@ async function seedOrg(
         [key, PERM_GROUP[key], key],
       );
     }
+    // `is_system` false on purpose. The role below is this spec's own fixture,
+    // wearing a built-in's name only so the membership reads plausibly. A role
+    // marked built-in is reconciled against DEFAULT_ROLES, which would top the
+    // deliberately narrow grants back up and leave the refusal cases with
+    // nothing left to refuse.
     const role = await pool.query<{ id: string }>(
-      `INSERT INTO roles (organization_id, name, description) VALUES ($1, $2, 'seed') RETURNING id`,
+      `INSERT INTO roles (organization_id, name, description, is_system)
+       VALUES ($1, $2, 'seed', false) RETURNING id`,
       [orgId, p.roleName],
     );
     const roleId = Number(role.rows[0].id);

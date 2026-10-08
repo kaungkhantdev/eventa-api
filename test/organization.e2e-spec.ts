@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'org-e2e', name: 'Org E2E' };
@@ -32,6 +33,7 @@ interface Org {
   taxId: string | null;
   vatRatePercent: number;
   statementDescriptor: string | null;
+  version: number;
 }
 
 describe('Organization settings (e2e — US-SET-07)', () => {
@@ -55,7 +57,7 @@ describe('Organization settings (e2e — US-SET-07)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
 
     adminJwt = await login(ADMIN);
@@ -154,6 +156,39 @@ describe('Organization settings (e2e — US-SET-07)', () => {
     });
   });
 
+  /**
+   * The settings form reads a version and hands it back. Only the HTTP layer
+   * proves this: the whitelist pipe rejects any property the DTO does not
+   * declare, so an accepted field is a contract fact, not a service one.
+   */
+  describe('optimistic concurrency', () => {
+    it('accepts the version it handed out', async () => {
+      const before = ((await get(adminJwt)).body as Success<Org>).data.version;
+      const res = await patch(adminJwt, {
+        name: 'Org E2E Versioned',
+        version: before,
+      });
+
+      expect(res.status).toBe(200);
+      // Bumped, so the very same form cannot be submitted a second time.
+      expect((res.body as Success<Org>).data.version).toBe(before + 1);
+    });
+
+    it('refuses a form opened before somebody else’s edit (409)', async () => {
+      const before = ((await get(adminJwt)).body as Success<Org>).data.version;
+      await patch(adminJwt, { name: 'First writer wins', version: before });
+
+      const res = await patch(adminJwt, {
+        name: 'Second writer',
+        version: before,
+      });
+      expect(res.status).toBe(409);
+
+      const after = (await get(adminJwt)).body as Success<Org>;
+      expect(after.data.name).toBe('First writer wins');
+    });
+  });
+
   async function seedOrg(
     pool: Pool,
     org: { slug: string; name: string },
@@ -173,8 +208,14 @@ describe('Organization settings (e2e — US-SET-07)', () => {
           [key, PERM_GROUP[key], key],
         );
       }
+      // `is_system` false on purpose. The role below is this spec's own fixture,
+      // wearing a built-in's name only so the membership reads plausibly. A role
+      // marked built-in is reconciled against DEFAULT_ROLES, which would top the
+      // deliberately narrow grants back up and leave the refusal cases with
+      // nothing left to refuse.
       const role = await pool.query<{ id: string }>(
-        `INSERT INTO roles (organization_id, name, description) VALUES ($1, $2, 'seed') RETURNING id`,
+        `INSERT INTO roles (organization_id, name, description, is_system)
+         VALUES ($1, $2, 'seed', false) RETURNING id`,
         [orgId, p.roleName],
       );
       const roleId = Number(role.rows[0].id);

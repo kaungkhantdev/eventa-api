@@ -4,6 +4,7 @@ import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { events, ticketTypes } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
 import {
+  type EventMilestones,
   type EventReach,
   EventInsightsPort,
 } from '../dashboard/ports/operations-insights.port';
@@ -69,6 +70,32 @@ export class EventInsightsAdapter extends EventInsightsPort {
             ? null
             : round1((capacity.sold / capacity.offered) * PERCENT),
       };
+    });
+  }
+
+  /**
+   * Both setup milestones from one scan.
+   *
+   * `count(published_at)` counts only the non-null ones, so the same pass
+   * answers "is there anything" and "is any of it live". Every status counts
+   * as created, drafts included — step three of the checklist is explicitly
+   * "save as a draft and finish it later", so a draft has done it.
+   */
+  async setupMilestones(organizationId: number): Promise<EventMilestones> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({
+          created: sql<boolean>`count(*) > 0`,
+          published: sql<boolean>`count(${events.publishedAt}) > 0`,
+        })
+        .from(events)
+        .where(
+          and(
+            eq(events.organizationId, organizationId),
+            isNull(events.deletedAt),
+          ),
+        );
+      return { created: row.created, published: row.published };
     });
   }
 }

@@ -6,7 +6,9 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['eslint.config.mjs'],
+    // `scripts/` holds plain CommonJS run by node directly, outside the
+    // TypeScript project — the type-checked rules cannot resolve it.
+    ignores: ['eslint.config.mjs', 'scripts/**'],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,

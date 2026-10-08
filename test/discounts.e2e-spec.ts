@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'disc-e2e', name: 'Discounts E2E' };
@@ -64,7 +65,7 @@ describe('Discount codes (e2e — US-TKT-07…12)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
 
     eventId = await createEvent(await token(ADMIN, ORG.slug), 'Jazz Festival');
@@ -569,8 +570,12 @@ async function seedOrg(
         [key, PERM_GROUP[key], key],
       );
     }
+    // `is_system` defaults to TRUE, so a bare INSERT would have this fixture claim
+    // to be a built-in role — and sign-in reconciles a built-in named Admin,
+    // Organizer or Staff up to the full grant set its name carries, widening the
+    // grants each case here holds on purpose. This role is the spec's own.
     const role = await pool.query<{ id: string }>(
-      `INSERT INTO roles (organization_id, name, description) VALUES ($1, $2, 'seed') RETURNING id`,
+      `INSERT INTO roles (organization_id, name, description, is_system) VALUES ($1, $2, 'seed', false) RETURNING id`,
       [orgId, p.roleName],
     );
     const roleId = Number(role.rows[0].id);
@@ -595,6 +600,14 @@ async function seedOrg(
 }
 
 async function cleanup(pool: Pool): Promise<void> {
+  // `audit_events` does not cascade from organizations, and signing in writes
+  // one — so deleting the org alone fails from the second run on, leaving the
+  // workspace behind for every later run (the monitor suite's fix, 6a2b6cc).
+  await pool.query(
+    `DELETE FROM audit_events WHERE organization_id IN
+       (SELECT id FROM organizations WHERE slug = ANY($1))`,
+    [[ORG.slug, ORG2.slug]],
+  );
   await pool.query(`DELETE FROM organizations WHERE slug = ANY($1)`, [
     [ORG.slug, ORG2.slug],
   ]);

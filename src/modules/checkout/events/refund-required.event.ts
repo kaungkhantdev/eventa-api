@@ -11,6 +11,10 @@ export interface RefundRequiredInput {
   buyerEmail: string;
   amountSatang: number;
   currency: string;
+  /**
+   * A code (`soldout`, `duplicate_payment`, …), never a sentence: the buyer's
+   * email is in their language, and eventa-worker words the code for them.
+   */
   reason: string;
   occurredAt: string;
 }

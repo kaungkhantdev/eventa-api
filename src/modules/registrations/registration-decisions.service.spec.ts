@@ -1,11 +1,20 @@
+import { HttpStatus } from '@nestjs/common';
 import { RegistrationDecisionsService } from './registration-decisions.service';
-import type { DomainException } from '../../common/errors/domain.exception';
+import { DomainException } from '../../common/errors/domain.exception';
+import { ErrorCode } from '../../common/errors/error-codes';
+import type { PermissionsService } from '../access/permissions.service';
 import type { AuthContext } from '../auth/auth.types';
 import type {
   DecidableOrder,
   RegistrationApprovalPort,
 } from './ports/registration-approval.port';
-import { APPROVE_BLOCKED_UNPAID } from './registration-decision';
+import type { RegistrationRefundPort } from './ports/registration-refund.port';
+import {
+  APPROVE_BLOCKED_UNPAID,
+  OFFER_NOT_WAITLISTED,
+  REJECT_NEEDS_REFUND_PERMISSION,
+} from './registration-decision';
+import { NO_SEAT_FREE } from './registration-decisions.service';
 
 const ORG = 7;
 const ORDER = 'o-1';
@@ -33,11 +42,26 @@ const decidable = (o: Partial<DecidableOrder> = {}): DecidableOrder => ({
   status: 'pending',
   paymentStatus: 'pending',
   totalSatang: 0,
+  approvalRequestedAt: null,
   ...o,
 });
 
+/** Paid for, and waiting for the organizer (US-REG-02 — pay first). */
+const paidAndWaiting = (o: Partial<DecidableOrder> = {}): DecidableOrder =>
+  decidable({
+    paymentStatus: 'paid',
+    totalSatang: 105_000,
+    approvalRequestedAt: new Date('2026-09-01T00:00:00Z'),
+    ...o,
+  });
+
+const REGISTRATION_MANAGER = ['regView', 'regManage'];
+const FINANCE_ADMIN = [...REGISTRATION_MANAGER, 'finRefund'];
+
 describe('RegistrationDecisionsService (US-REG-02)', () => {
   let approvals: jest.Mocked<RegistrationApprovalPort>;
+  let refunds: jest.Mocked<RegistrationRefundPort>;
+  let permissions: jest.Mocked<PermissionsService>;
   let service: RegistrationDecisionsService;
 
   beforeEach(() => {
@@ -49,9 +73,24 @@ describe('RegistrationDecisionsService (US-REG-02)', () => {
         ticketCount: 2,
         reason: null,
       }),
-      reject: jest.fn().mockResolvedValue({ reference: REFERENCE }),
+      reject: jest
+        .fn()
+        .mockResolvedValue({ reference: REFERENCE, refundDue: false }),
+      offer: jest.fn().mockResolvedValue({
+        outcome: 'offered',
+        reference: REFERENCE,
+        offerExpiresAt: new Date('2026-08-02T03:00:00Z'),
+      }),
     };
-    service = new RegistrationDecisionsService(approvals);
+    refunds = {
+      refundRejected: jest
+        .fn()
+        .mockResolvedValue({ status: 'succeeded', amountSatang: 105_000 }),
+    };
+    permissions = {
+      getFor: jest.fn().mockResolvedValue(REGISTRATION_MANAGER),
+    } as unknown as jest.Mocked<PermissionsService>;
+    service = new RegistrationDecisionsService(approvals, refunds, permissions);
   });
 
   describe('approving', () => {
@@ -147,6 +186,7 @@ describe('RegistrationDecisionsService (US-REG-02)', () => {
       expect(approvals.reject).toHaveBeenCalledWith(ORG, ORDER, {
         decidedBy: 'u-1',
         reason: 'Duplicate sign-up',
+        mayRefund: false,
       });
     });
 
@@ -192,6 +232,213 @@ describe('RegistrationDecisionsService (US-REG-02)', () => {
       await expect(
         service.reject(auth, ORDER, { confirm: true, reason: null }),
       ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+  });
+
+  describe('rejecting a registration paid for while it waited (US-REG-02)', () => {
+    const rejectIt = () =>
+      service.reject(auth, ORDER, { confirm: true, reason: 'Not a member' });
+
+    beforeEach(() => {
+      approvals.findDecidable.mockResolvedValue(paidAndWaiting());
+      approvals.reject.mockResolvedValue({
+        reference: REFERENCE,
+        refundDue: true,
+      });
+      permissions.getFor.mockResolvedValue(FINANCE_ADMIN);
+    });
+
+    it('rejects first, then refunds — so an approval racing it cannot win after the money went back', async () => {
+      await expect(rejectIt()).resolves.toMatchObject({ outcome: 'rejected' });
+
+      expect(permissions.getFor).toHaveBeenCalledWith(ORG, 'u-1');
+      expect(refunds.refundRejected).toHaveBeenCalledWith(auth, ORDER);
+      const [rejected] = approvals.reject.mock.invocationCallOrder;
+      const [refunded] = refunds.refundRejected.mock.invocationCallOrder;
+      expect(rejected).toBeLessThan(refunded);
+    });
+
+    it('refunds nothing for a free registration', async () => {
+      approvals.findDecidable.mockResolvedValue(
+        decidable({ approvalRequestedAt: new Date('2026-09-01T00:00:00Z') }),
+      );
+      approvals.reject.mockResolvedValue({
+        reference: REFERENCE,
+        refundDue: false,
+      });
+
+      await rejectIt();
+
+      expect(refunds.refundRejected).not.toHaveBeenCalled();
+    });
+
+    it('refuses someone without the refund permission, and decides nothing', async () => {
+      permissions.getFor.mockResolvedValue(REGISTRATION_MANAGER);
+
+      const error = await failure(rejectIt());
+
+      expect(error.getStatus()).toBe(HttpStatus.FORBIDDEN);
+      expect(error.message).toBe(REJECT_NEEDS_REFUND_PERMISSION);
+      expect(approvals.reject).not.toHaveBeenCalled();
+      expect(refunds.refundRejected).not.toHaveBeenCalled();
+    });
+
+    it('says the registration WAS rejected when the refund then fails, and where to finish it', async () => {
+      refunds.refundRejected.mockRejectedValue(
+        new DomainException(
+          ErrorCode.INTERNAL_ERROR,
+          'The provider refused the refund: card expired.',
+          HttpStatus.BAD_GATEWAY,
+        ),
+      );
+
+      const error = await failure(rejectIt());
+
+      expect(error.getStatus()).toBe(HttpStatus.BAD_GATEWAY);
+      expect(error.message).toMatch(/was rejected/i);
+      expect(error.message).toMatch(/card expired/);
+      expect(error.message).toMatch(/Payments/);
+    });
+
+    it('says so too when the refund dies of something that is not a refusal', async () => {
+      // A network failure, or an SDK error the provider port never mapped:
+      // the rejection has committed, and a bare 500 would read as "nothing
+      // happened" — while its internals are nothing an organizer should see.
+      refunds.refundRejected.mockRejectedValue(
+        new Error('connect ETIMEDOUT 10.0.0.7:443'),
+      );
+
+      const error = await failure(rejectIt());
+
+      expect(error).toBeInstanceOf(DomainException);
+      expect(error.getStatus()).toBe(HttpStatus.BAD_GATEWAY);
+      expect(error.message).toMatch(/was rejected/i);
+      expect(error.message).toMatch(/Payments/);
+      expect(error.message).not.toMatch(/ETIMEDOUT|10\.0\.0\.7/);
+    });
+
+    it('a retried rejection finishes a refund that did not go through the first time', async () => {
+      approvals.findDecidable.mockResolvedValue(
+        paidAndWaiting({ status: 'rejected' }),
+      );
+
+      await rejectIt();
+
+      expect(approvals.reject).toHaveBeenCalled();
+      expect(refunds.refundRejected).toHaveBeenCalledWith(auth, ORDER);
+    });
+
+    it('will not let someone without the refund permission retry that refund either', async () => {
+      approvals.findDecidable.mockResolvedValue(
+        paidAndWaiting({ status: 'rejected' }),
+      );
+      permissions.getFor.mockResolvedValue(REGISTRATION_MANAGER);
+
+      const error = await failure(rejectIt());
+
+      expect(error.getStatus()).toBe(HttpStatus.FORBIDDEN);
+      expect(refunds.refundRejected).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('offering a seat from the waitlist (US-REG-04)', () => {
+    const waitlisted = (o: Partial<DecidableOrder> = {}) =>
+      decidable({ status: 'waitlisted', totalSatang: 180_000, ...o });
+
+    it('holds a seat for a paid entry to pay for by the deadline, recording who offered it', async () => {
+      approvals.findDecidable.mockResolvedValue(waitlisted());
+      const result = await service.offer(auth, ORDER);
+      expect(approvals.offer).toHaveBeenCalledWith(ORG, ORDER, 'u-1');
+      expect(result).toEqual({
+        outcome: 'offered',
+        reference: REFERENCE,
+        offerExpiresAt: '2026-08-02T03:00:00.000Z',
+        ticketCount: 0,
+      });
+      expect(approvals.approve).not.toHaveBeenCalled();
+    });
+
+    it('confirms a free entry at once — there is nothing to pay for', async () => {
+      approvals.findDecidable.mockResolvedValue(waitlisted({ totalSatang: 0 }));
+      const result = await service.offer(auth, ORDER);
+      expect(approvals.approve).toHaveBeenCalledWith(ORG, ORDER, 'u-1');
+      expect(approvals.offer).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        outcome: 'confirmed',
+        ticketCount: 2,
+        offerExpiresAt: null,
+      });
+    });
+
+    it('refuses when no seat is free, and says to free capacity first', async () => {
+      approvals.findDecidable.mockResolvedValue(waitlisted());
+      approvals.offer.mockResolvedValue({
+        outcome: 'no_seat',
+        reference: REFERENCE,
+        offerExpiresAt: null,
+      });
+      const error = await failure(service.offer(auth, ORDER));
+      expect(error.getStatus()).toBe(409);
+      expect(error.message).toBe(NO_SEAT_FREE);
+    });
+
+    it('says the same for a free entry, not the approval’s “offer the waitlist”', async () => {
+      // Approval's sold-out wording points at the waitlist — which is where
+      // this person already is.
+      approvals.findDecidable.mockResolvedValue(waitlisted({ totalSatang: 0 }));
+      approvals.approve.mockResolvedValue({
+        outcome: 'unavailable',
+        reference: REFERENCE,
+        ticketCount: 0,
+        reason:
+          'This ticket is now sold out — offer the attendee the waitlist instead.',
+      });
+      const error = await failure(service.offer(auth, ORDER));
+      expect(error.message).toBe(NO_SEAT_FREE);
+    });
+
+    it('refuses somebody who is not on the waitlist, without touching anything', async () => {
+      approvals.findDecidable.mockResolvedValue(
+        decidable({
+          status: 'confirmed',
+          paymentStatus: 'paid',
+          totalSatang: 180_000,
+        }),
+      );
+      const error = await failure(service.offer(auth, ORDER));
+      expect(error.getStatus()).toBe(409);
+      expect(error.message).toBe(OFFER_NOT_WAITLISTED);
+      expect(approvals.offer).not.toHaveBeenCalled();
+    });
+
+    it('refuses a free registration that was never on the waitlist', async () => {
+      // Otherwise "offer" would be a second, unguarded way to approve.
+      approvals.findDecidable.mockResolvedValue(
+        decidable({ status: 'pending' }),
+      );
+      const error = await failure(service.offer(auth, ORDER));
+      expect(error.message).toBe(OFFER_NOT_WAITLISTED);
+      expect(approvals.approve).not.toHaveBeenCalled();
+    });
+
+    it('reports a retried offer as already made, not as a conflict', async () => {
+      // The first click turned them `pending`; the second must find its own
+      // work done rather than be told they are not on the waitlist.
+      approvals.findDecidable.mockResolvedValue(
+        waitlisted({ status: 'pending' }),
+      );
+      approvals.offer.mockResolvedValue({
+        outcome: 'already_offered',
+        reference: REFERENCE,
+        offerExpiresAt: new Date('2026-08-02T03:00:00Z'),
+      });
+      const result = await service.offer(auth, ORDER);
+      expect(result.outcome).toBe('already_offered');
+    });
+
+    it('404s an order belonging to another workspace', async () => {
+      approvals.findDecidable.mockResolvedValue(null);
+      expect((await failure(service.offer(auth, ORDER))).getStatus()).toBe(404);
     });
   });
 });

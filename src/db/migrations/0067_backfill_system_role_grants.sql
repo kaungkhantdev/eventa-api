@@ -1,0 +1,46 @@
+-- WITHDRAWN. This migration does nothing, on purpose, and the statement below
+-- is a placeholder so the runner has something to execute.
+--
+-- WHAT IT ORIGINALLY DID. A workspace is handed its Admin / Organizer / Staff
+-- roles exactly once, by `insertDefaultRoles` on the day it signs up, out of
+-- the `DEFAULT_ROLES` matrix as that matrix stood that day. A permission key
+-- added to the catalog afterwards therefore never reached a workspace older
+-- than it, and nothing ever went back for them. This migration granted three
+-- such keys -- `finManage`, `evProgramView` and `regManage` -- to the built-in
+-- roles whose defaults contained them, restricted to roles whose `created_at`
+-- predated the date each key entered the catalog. A matching runtime
+-- reconcile, `AccessRepository.reconcileSystemRoles`, applied the same rule on
+-- every organizer sign-in.
+--
+-- WHY IT WAS WITHDRAWN. The age comparison was offered as proof that an absent
+-- row could only mean "this role was never offered this key", and it is not.
+-- An organizer may GRANT a key to a role long after the workspace was
+-- provisioned and later revoke it; under the delete-on-revoke behaviour that
+-- shipped before the `granted = false` tombstone, that revoke left no row at
+-- all. The role is older than the key, the row is gone, and this backfill
+-- handed the key straight back -- silently reversing a decision somebody made.
+-- Nothing on disk records what a role was ever offered, so no rule over dates
+-- can recover that intent. The decision taken is to stop inferring it: nothing
+-- grants a permission automatically any more, and a key with no row is
+-- reported to the organizer as an open question (`neverOfferedPermissions` on
+-- the roles endpoints) for a person to answer.
+--
+-- THE CONSEQUENCE, which cannot be undone here. A database that already
+-- applied the original version of this migration still carries the grants it
+-- made, and they are NOT reversed. After the fact, a key it wrongly re-granted
+-- is indistinguishable from one the organizer wanted: both are now a row
+-- saying `granted = true`, written by the same statement. Un-granting them
+-- would therefore reverse real decisions in exactly the way that got this
+-- withdrawn. The grants stand; an organizer who does not want one turns it off
+-- in Settings -> Roles, and that refusal is recorded as a tombstone.
+--
+-- THE FILE STAYS, and so does its `meta/_journal.json` entry. Drizzle decides
+-- what to run by comparing each journal entry's `folderMillis` against the
+-- `created_at` of the last applied row in `__drizzle_migrations`, and never
+-- compares the stored hash (drizzle-orm/pg-core/dialect.cjs). Deleting or
+-- renumbering this file would therefore not re-run anything, but it would
+-- shift every later entry's position relative to a database that has already
+-- stamped this one -- so editing it in place is the only safe way to neutralise
+-- it. Rewriting the body is safe for the same reason: a database that ran the
+-- old text will never read this file again.
+SELECT 1;

@@ -37,47 +37,17 @@ export function periodFor(range: DashboardRange, now: Date): Period {
   return { from, to: now, previousFrom, previousTo: from, days };
 }
 
-export interface PeriodChange {
-  direction: 'up' | 'down' | 'flat';
-  /** Null when there is no honest percentage to give — see `comparePeriod`. */
-  percent: number | null;
-  /** Null when flat, or when "better" is undefined for this metric. */
-  improved: boolean | null;
-}
-
 /**
- * How a figure moved against the previous period (US-DASH-08).
- *
- * Two deliberate nulls. A percentage from a ZERO baseline is refused — 0 → 5 is
- * "new", not "+500%" — and that is exactly the "misleading value" the story
- * rules out in favour of a neutral empty state. And `improved` is null when
- * nothing moved, so a flat card renders neutral rather than green.
- *
- * `higherIsBetter` exists because not every card reads the same way: a falling
- * check-in rate is a warning, and the caller says which direction is good rather
- * than the UI guessing from the metric's name.
+ * The comparison itself lives in `common/analytics`: the reports overview
+ * (US-RPT-01) states the same rule as US-DASH-08, and the two screens must not
+ * be able to disagree about how a figure moved. Re-exported so the dashboard's
+ * own callers still read it from here.
  */
-export function comparePeriod(
-  current: number,
-  previous: number,
-  options: { higherIsBetter?: boolean } = {},
-): PeriodChange {
-  const higherIsBetter = options.higherIsBetter ?? true;
-  if (current === previous) {
-    // Unchanged against a real baseline IS 0% — a fact worth showing. Unchanged
-    // at zero is not: there is nothing to have changed from.
-    return {
-      direction: 'flat',
-      percent: previous === 0 ? null : 0,
-      improved: null,
-    };
-  }
-  const direction = current > previous ? 'up' : 'down';
-  const improved = (direction === 'up') === higherIsBetter;
-  if (previous === 0) return { direction, percent: null, improved };
-  const raw = ((current - previous) / previous) * 100;
-  return { direction, percent: Math.round(raw * 10) / 10, improved };
-}
+export {
+  comparePeriod,
+  FLAT_CHANGE,
+  type PeriodChange,
+} from '../../common/analytics/period-change';
 
 /** Midnight Bangkok on the day of `instant`, as a UTC epoch millisecond. */
 function startOfBangkokDay(instant: Date): number {

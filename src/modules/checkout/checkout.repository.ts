@@ -9,6 +9,7 @@ import {
   isNull,
   max,
   ne,
+  sql,
 } from 'drizzle-orm';
 import { DomainException } from '../../common/errors/domain.exception';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
@@ -28,6 +29,13 @@ import {
 import { withTenant, type Tx } from '../../db/tenant';
 import type { BillableOrder } from '../invoices/ports/invoice-order.port';
 import { OutboxPort, type OutboxEventInput } from '../platform/outbox.port';
+import { rejectionRefunds } from '../registrations/registration-decision';
+import {
+  DECISION_HOLD_EXPIRY,
+  isAwaitingApproval,
+  isOnCheckoutClock,
+  statusAfterRefund,
+} from './approval-rules';
 import type { OrderTotals } from './checkout-pricing';
 
 /** Fallbacks if a workspace row somehow has none — the Thai statutory rate. */
@@ -63,12 +71,95 @@ export interface PlaceOrderInput {
   createdBy?: string;
   /** True when nothing is owed — a paid order waits for the payment (US-DISC-05). */
   issueTickets: boolean;
+  /** The event's "Require approval" rule, copied onto the order (US-REG-02). */
+  requiresApproval: boolean;
+  /**
+   * Free, on an approval event: the organizer's decision is all that is left,
+   * so the places are counted now and the reservation outlives its timer.
+   */
+  awaitsDecision: boolean;
   /** Pre-generated, one per admission, so the transaction stays deterministic. */
   qrTokens: string[];
   /** The outbox entry to write beside the order, or null when there is none yet. */
   buildEvent: (order: OrderRow, issued: TicketRow[]) => OutboxEventInput | null;
   now: Date;
 }
+
+/** A waitlist entry to write: priced, but holding nothing (US-REG-04). */
+export interface JoinWaitlistInput {
+  organizationId: number;
+  eventId: string;
+  reference: string;
+  idempotencyKey: string;
+  buyer: { name: string; email: string; phone?: string };
+  ticketTypeId: string;
+  quantity: number;
+  unitPriceSatang: number;
+  totals: OrderTotals;
+  now: Date;
+}
+
+/** The entry, and where it stands; 1 is next in line. */
+export interface JoinedWaitlist {
+  order: OrderRow;
+  position: number;
+}
+
+/** The fields an order row is written from, whichever path writes it. */
+type OrderInsert = Pick<
+  PlaceOrderInput,
+  | 'organizationId'
+  | 'reference'
+  | 'idempotencyKey'
+  | 'eventId'
+  | 'buyer'
+  | 'quantity'
+  | 'totals'
+> &
+  Partial<
+    Pick<PlaceOrderInput, 'discountCodeId' | 'createdBy' | 'requiresApproval'>
+  >;
+
+/** A waitlist entry with the one line it is waiting for. */
+export interface WaitlistEntry {
+  order: OrderRow;
+  ticketTypeId: string;
+  ticketTypeName: string;
+  quantity: number;
+}
+
+/** Recording an offer whose seats are already held (US-REG-04). */
+export interface MarkOfferedInput {
+  organizationId: number;
+  orderId: string;
+  /** Null when the line offered it rather than an organizer. */
+  offeredBy: string | null;
+  offerExpiresAt: Date;
+  now: Date;
+  buildEvent: (order: OrderRow) => OutboxEventInput;
+}
+
+/** Where a new order starts out. */
+interface OrderState {
+  status: OrderRow['status'];
+  paymentStatus: OrderRow['paymentStatus'];
+  /** Set when it starts out waiting for the organizer (US-REG-02). */
+  approvalRequestedAt?: Date | null;
+}
+
+/** A registration nobody has been offered a seat for yet. */
+const WAITLISTED: OrderState = {
+  status: 'waitlisted',
+  paymentStatus: 'pending',
+};
+
+/** How a waitlist entry is read, wherever it is read from. */
+const WAITLIST_ENTRY_COLUMNS = {
+  order: orders,
+  ticketTypeId: orderItems.ticketTypeId,
+  ticketTypeName: ticketTypes.name,
+  quantity: orderItems.quantity,
+};
 
 /** What was placed — `replayed` when an identical request already did this. */
 export interface PlacedOrder {
@@ -98,8 +189,11 @@ export interface SettleOrderInput {
   orderId: string;
   /** Defaults to `payment` — the path that existed before approvals. */
   mode?: SettlementMode;
-  /** The organizer, on the approval path only. Stamped onto the order. */
-  decidedBy?: string;
+  /**
+   * The organizer, on the approval path only. Stamped onto the order; null
+   * when the waitlist confirmed a free place by itself (US-REG-04).
+   */
+  decidedBy?: string | null;
   /** One fresh QR token per admission, minted as tickets are written. */
   mintQrToken: () => string;
   buildConfirmedEvent: (
@@ -117,8 +211,17 @@ export interface RejectOrderInput {
   orderId: string;
   decidedBy: string;
   reason: string | null;
+  /** The decider holds the refund permission — see `rejectOrder`. */
+  mayRefund: boolean;
   buildRejectedEvent: (order: OrderRow) => OutboxEventInput;
   now: Date;
+}
+
+/** A rejection, and whether it left money to give back (US-REG-02). */
+export interface RejectedOrder {
+  reference: string;
+  /** Paid for while it waited, and not refunded yet — the caller refunds it. */
+  refundDue: boolean;
 }
 
 interface SettlementBase {
@@ -128,9 +231,14 @@ interface SettlementBase {
   reason?: string;
 }
 
-/** Money arrived: it either bought tickets, or it has to go back. */
+/**
+ * Money arrived: it bought tickets, it has to go back — or, on an order that
+ * requires approval (US-REG-02), it paid for places now waiting for the
+ * organizer's decision (`awaiting_approval`, no tickets yet).
+ */
 export interface PaymentSettlement extends SettlementBase {
-  outcome: 'settled' | 'already_settled' | 'refund_required';
+  outcome:
+    'settled' | 'already_settled' | 'refund_required' | 'awaiting_approval';
 }
 
 /** An organizer decided: it either issued tickets, or nothing happened. */
@@ -158,18 +266,40 @@ interface SettlementContext {
   } | null;
   seatIds: number[];
   takenSeatIds: number[];
+  /**
+   * The order's places are already in `sold` — it has been waiting for approval
+   * (US-REG-02). Counting them again would refuse the last place as sold out
+   * because of the order itself, and leave `sold` one order too high.
+   */
+  placesCounted: boolean;
 }
 
 /**
- * The same four refusals, worded for whoever is about to read them. A buyer is
- * told what happened to their money; an organizer is told what to do next.
+ * Why money that arrived is going back, as the CODE `payment.refund_required`
+ * carries. eventa-worker words each one for the buyer in their own language
+ * (`REASONS` in its refund-notice.ts) — an English sentence here landed inside
+ * the Thai email. Keep the two lists in step.
+ */
+const REFUND_REASON = {
+  tierRemoved: 'tier_removed',
+  soldOut: 'soldout',
+  seatsTaken: 'seats_unavailable',
+  seatMismatch: 'seat_mismatch',
+  seatsReleased: 'seats_released',
+  orderClosed: 'order_closed',
+} as const;
+
+/**
+ * The same four refusals, for whoever is about to read them. A buyer's is a
+ * refund reason code the worker words for them; an organizer is told, in a
+ * sentence, what to do next.
  */
 const BLOCKERS = {
   payment: {
-    noTier: 'The ticket type on this order no longer exists.',
-    soldOut: 'The tickets sold out while the payment was being made.',
-    seatsTaken: 'The seats were taken while the payment was being made.',
-    seatMismatch: 'The seat reservation no longer matches the order.',
+    noTier: REFUND_REASON.tierRemoved,
+    soldOut: REFUND_REASON.soldOut,
+    seatsTaken: REFUND_REASON.seatsTaken,
+    seatMismatch: REFUND_REASON.seatMismatch,
   },
   approval: {
     noTier: 'The ticket type on this registration no longer exists.',
@@ -188,7 +318,10 @@ function settlementBlocker(
   const said = BLOCKERS[mode];
   if (!context.line) return said.noTier;
   const { sold, total, quantity } = context.line;
-  if (total !== UNLIMITED && sold + quantity > total) return said.soldOut;
+  const counted = context.placesCounted;
+  if (!counted && total !== UNLIMITED && sold + quantity > total) {
+    return said.soldOut;
+  }
   if (context.takenSeatIds.length > 0) return said.seatsTaken;
   // A reserved-seating order must seat every admission it is about to ticket.
   if (context.seatIds.length > 0 && context.seatIds.length !== quantity) {
@@ -201,6 +334,9 @@ function settlementBlocker(
 const AWAITING_DECISION = ['pending', 'waitlisted'] as const;
 const DECIDED_ELSEWHERE =
   'This registration was decided by someone else — refresh to see where it stands.';
+/** A payment landed between the organizer reading the list and clicking. */
+const PAID_WHILE_DECIDING =
+  'This registration was paid for while you were deciding — refresh to see where it stands.';
 
 /** An allocation of 0 means unlimited — mirrors `TicketingPolicy`. */
 const UNLIMITED = 0;
@@ -250,21 +386,145 @@ export class CheckoutRepository {
 
       await this.assertHoldsStillActive(tx, input);
       const attendeeId = await this.upsertAttendee(tx, input);
-      const order = await this.insertOrder(tx, input, attendeeId);
+      const order = await this.insertOrder(
+        tx,
+        input,
+        attendeeId,
+        initialState(input),
+      );
       const item = await this.insertOrderItem(tx, input, order.id);
       const issued = input.issueTickets
         ? await this.issueTickets(tx, input, order, item.id, attendeeId)
         : [];
-      if (input.issueTickets) await this.convertHolds(tx, input);
-      // A paid order keeps its holds live but stamps them with the order, so
-      // settlement can find its seats and an expiry can release exactly these.
-      if (!input.issueTickets) await this.attachHolds(tx, input, order.id);
+      await this.settleHolds(tx, input, order.id);
       await this.recordRedemption(tx, input, order.id);
       const event = input.buildEvent(order, issued);
       if (event) await this.outbox.enqueueIn(tx, event);
       // Sorted the same way the replay reads them, so confirming twice returns
       // an identical response rather than the same tickets in another order.
       return { order, tickets: byId(issued), replayed: false };
+    });
+  }
+
+  /**
+   * Put a buyer in line for a sold-out ticket (US-REG-04): the entry and its
+   * line item are written together or not at all.
+   *
+   * Two things make it safe to repeat. A repeated idempotency key returns what
+   * that key already made. And somebody already waiting for this ticket gets
+   * their existing place back rather than a second one behind it — two entries
+   * would mean two offers to one person for seats somebody else was owed.
+   */
+  async joinWaitlist(input: JoinWaitlistInput): Promise<JoinedWaitlist> {
+    return withTenant(this.db, input.organizationId, async (tx) => {
+      const existing =
+        (
+          await this.findByIdempotencyKey(
+            tx,
+            input.organizationId,
+            input.idempotencyKey,
+          )
+        )?.order ?? (await this.alreadyWaiting(tx, input));
+      const order = existing ?? (await this.insertWaitlistEntry(tx, input));
+      const ahead = await this.waitlistAhead(
+        tx,
+        input.organizationId,
+        order.id,
+      );
+      return { order, position: ahead + 1 };
+    });
+  }
+
+  /** A registration and the ticket it waits for, or null if not this workspace's. */
+  async waitlistEntry(
+    organizationId: number,
+    orderId: string,
+  ): Promise<WaitlistEntry | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select(WAITLIST_ENTRY_COLUMNS)
+        .from(orders)
+        .innerJoin(orderItems, eq(orderItems.orderId, orders.id))
+        .innerJoin(ticketTypes, eq(ticketTypes.id, orderItems.ticketTypeId))
+        .where(
+          and(
+            eq(orders.id, orderId),
+            eq(orders.organizationId, organizationId),
+          ),
+        )
+        .limit(1);
+      return row ?? null;
+    });
+  }
+
+  /**
+   * The front of a ticket's line (US-REG-04): its earliest `waitlisted`
+   * registration, in the order everyone else reads the line — when they
+   * joined, the id breaking a tie (`waitlistAhead`, the worker's pass-on).
+   *
+   * No lock. Whoever acts on the answer re-checks under their own — the seat
+   * hold under the tier's lock, the offer under the order's — so an answer
+   * gone stale is refused there rather than trusted here.
+   */
+  async frontOfLine(
+    organizationId: number,
+    ticketTypeId: string,
+  ): Promise<WaitlistEntry | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select(WAITLIST_ENTRY_COLUMNS)
+        .from(orders)
+        .innerJoin(orderItems, eq(orderItems.orderId, orders.id))
+        .innerJoin(ticketTypes, eq(ticketTypes.id, orderItems.ticketTypeId))
+        .where(
+          and(
+            eq(orders.organizationId, organizationId),
+            eq(orders.status, WAITLISTED.status),
+            eq(orderItems.ticketTypeId, ticketTypeId),
+          ),
+        )
+        .orderBy(asc(orders.registeredAt), asc(orders.id))
+        .limit(1);
+      return row ?? null;
+    });
+  }
+
+  /**
+   * Turn a waitlist entry into an offer (US-REG-04), under the order's row
+   * lock: `pending` — so paying is the ordinary checkout payment — with who
+   * offered it, until when, and how many were ahead in line, and the offer
+   * email queued in the same transaction.
+   *
+   * The seats are held BEFORE this runs, by the seat-hold engine; this only
+   * records the offer. Somebody else deciding first is a conflict, and the
+   * caller gives the hold back.
+   */
+  async markOffered(input: MarkOfferedInput): Promise<OrderRow> {
+    return withTenant(this.db, input.organizationId, async (tx) => {
+      const order = await this.lockOrder(tx, input);
+      if (order.status !== WAITLISTED.status) {
+        throw DomainException.conflict(DECIDED_ELSEWHERE);
+      }
+      const skipped = await this.waitlistAhead(
+        tx,
+        input.organizationId,
+        order.id,
+      );
+      const [offered] = await tx
+        .update(orders)
+        .set({
+          status: 'pending',
+          offeredAt: input.now,
+          offeredBy: input.offeredBy,
+          offerExpiresAt: input.offerExpiresAt,
+          offerSkipped: skipped,
+          updatedAt: input.now,
+          version: order.version + 1,
+        })
+        .where(eq(orders.id, order.id))
+        .returning();
+      await this.outbox.enqueueIn(tx, input.buildEvent(offered));
+      return offered;
     });
   }
 
@@ -467,6 +727,16 @@ export class CheckoutRepository {
           ticketCount: order.seats,
         };
       }
+      // Already paid for and waiting for the organizer: a second payment, which
+      // the caller refunds as a duplicate exactly as for a confirmed order.
+      if (mode === 'payment' && isAwaitingApproval(order)) {
+        await input.recordPayment(tx);
+        return {
+          outcome: 'already_settled',
+          reference: order.reference,
+          ticketCount: 0,
+        };
+      }
       if (!this.isOpenFor(mode, order.status)) {
         // An organizer approving something already decided is a lost race, not
         // stray money: nothing to cancel and nothing to send back.
@@ -477,7 +747,7 @@ export class CheckoutRepository {
           tx,
           input,
           order,
-          'The order was no longer open when the payment arrived.',
+          REFUND_REASON.orderClosed,
         );
       }
       const context = await this.loadSettlement(tx, input, order);
@@ -495,8 +765,133 @@ export class CheckoutRepository {
         }
         return this.refuseSettlement(tx, input, order, blocked);
       }
+      if (mode === 'payment' && order.requiresApproval) {
+        return this.awaitDecision(tx, input, order, context);
+      }
       return this.completeSettlement(tx, input, order, context);
     });
+  }
+
+  /**
+   * The money arrived on an order that requires approval (US-REG-02): it pays
+   * for places that now wait for the organizer, not for tickets. Its places are
+   * counted in `sold` here — `loadSettlement` locked the tier and read its count
+   * under that lock — so nobody else can take them while the organizer decides,
+   * and approval will not count them again. A GA hold then reserves nothing
+   * more and converts; a reserved seat's hold stays with the order until the
+   * decision.
+   *
+   * No confirmation and no receipt are queued: both go with the tickets, on
+   * approval. A seat whose hold was released while the buyer paid cannot be
+   * kept for anyone — it may already be someone else's — so the money goes
+   * back rather than waiting on a seat the order no longer has.
+   */
+  private async awaitDecision(
+    tx: Tx,
+    input: SettleOrderInput,
+    order: OrderRow,
+    context: SettlementContext,
+  ): Promise<PaymentSettlement> {
+    if (await this.seatHoldLost(tx, input.organizationId, order.id)) {
+      return this.refuseSettlement(
+        tx,
+        input,
+        order,
+        REFUND_REASON.seatsReleased,
+      );
+    }
+    const line = context.line as NonNullable<SettlementContext['line']>;
+    await this.countSale(tx, line, input.now);
+    await this.holdForDecision(tx, input.organizationId, order.id);
+    await tx
+      .update(orders)
+      .set({
+        paymentStatus: 'paid',
+        approvalRequestedAt: input.now,
+        updatedAt: input.now,
+        version: order.version + 1,
+      })
+      .where(eq(orders.id, order.id));
+    await input.recordPayment(tx);
+    return {
+      outcome: 'awaiting_approval',
+      reference: order.reference,
+      ticketCount: 0,
+    };
+  }
+
+  /**
+   * Raise the tier's `sold` by the order line. Absolute, so it is only right
+   * because `line.sold` was read under the tier's lock (`lockTier`).
+   */
+  private async countSale(
+    tx: Tx,
+    line: NonNullable<SettlementContext['line']>,
+    now: Date,
+  ): Promise<void> {
+    await tx
+      .update(ticketTypes)
+      .set({ sold: line.sold + line.quantity, updatedAt: now })
+      .where(eq(ticketTypes.id, line.ticketTypeId));
+  }
+
+  /**
+   * An order's holds once its places are counted and it waits for a decision:
+   * GA holds convert — `sold` carries them now — and reserved seats stay held,
+   * until a date no clock reaches, because a seat can only be assigned to a
+   * ticket and there is none yet.
+   */
+  private async holdForDecision(
+    tx: Tx,
+    organizationId: number,
+    orderId: string,
+  ): Promise<void> {
+    await tx
+      .update(seatHolds)
+      .set({ status: 'converted', orderId: null })
+      .where(
+        and(
+          eq(seatHolds.organizationId, organizationId),
+          eq(seatHolds.orderId, orderId),
+          isNull(seatHolds.seatId),
+        ),
+      );
+    await tx
+      .update(seatHolds)
+      .set({ expiresAt: DECISION_HOLD_EXPIRY })
+      .where(
+        and(
+          eq(seatHolds.organizationId, organizationId),
+          eq(seatHolds.orderId, orderId),
+          isNotNull(seatHolds.seatId),
+          eq(seatHolds.status, ACTIVE_HOLD),
+        ),
+      );
+  }
+
+  /**
+   * One of the order's seats is no longer held for it. Read after
+   * `loadSettlement` has locked the seats, so no other buyer can be taking one
+   * while this looks.
+   */
+  private async seatHoldLost(
+    tx: Tx,
+    organizationId: number,
+    orderId: string,
+  ): Promise<boolean> {
+    const [lost] = await tx
+      .select({ id: seatHolds.id })
+      .from(seatHolds)
+      .where(
+        and(
+          eq(seatHolds.organizationId, organizationId),
+          eq(seatHolds.orderId, orderId),
+          isNotNull(seatHolds.seatId),
+          ne(seatHolds.status, ACTIVE_HOLD),
+        ),
+      )
+      .limit(1);
+    return lost !== undefined;
   }
 
   /**
@@ -512,20 +907,45 @@ export class CheckoutRepository {
   }
 
   /**
-   * The organizer refused a sign-up (US-REG-02): the held seat goes back so it
-   * can be offered to someone else, and a notice is queued. Terminal, and never
-   * a money path — the "nothing captured" rule is re-checked HERE, under the
-   * row lock, because a payment can land between the organizer opening the list
-   * and clicking Reject. Idempotent: rejecting twice releases and notifies once.
+   * The organizer refused a sign-up (US-REG-02): its places go back so they
+   * can go to someone else, and a notice is queued. Terminal, and it moves no
+   * money itself — every rule is re-checked HERE, under the row lock, because
+   * a payment can land between the organizer opening the list and clicking
+   * Reject.
+   *
+   * Money captured on an ordinary sale still refuses: that is cancel-and-
+   * refund. Money taken while the registration waited for approval does not:
+   * the rejection commits first — so an approval racing it cannot win after
+   * the money went back — and `refundDue` tells the caller to refund it. The
+   * payment status is left `paid` until that refund lands.
+   *
+   * Idempotent: rejecting twice gives back and notifies once, and a repeat
+   * still reports `refundDue` while the money is owed, so a retry can finish
+   * an interrupted refund.
    */
-  async rejectOrder(input: RejectOrderInput): Promise<{ reference: string }> {
+  async rejectOrder(input: RejectOrderInput): Promise<RejectedOrder> {
     return withTenant(this.db, input.organizationId, async (tx) => {
       const order = await this.lockOrder(tx, input);
-      if (order.status === 'rejected') return { reference: order.reference };
-      const decidable =
-        (AWAITING_DECISION as readonly string[]).includes(order.status) &&
-        order.paymentStatus !== 'paid';
-      if (!decidable) throw DomainException.conflict(DECIDED_ELSEWHERE);
+      const refundDue = rejectionRefunds(order);
+      if (order.status === 'rejected') {
+        return { reference: order.reference, refundDue };
+      }
+      if (!isRejectable(order)) {
+        throw DomainException.conflict(DECIDED_ELSEWHERE);
+      }
+      if (refundDue && !input.mayRefund) {
+        throw DomainException.conflict(PAID_WHILE_DECIDING);
+      }
+      // Its places are in `sold` — give them back, so `sold` ends where it
+      // started. A registration that never waited counted nothing there.
+      if (isAwaitingApproval(order)) {
+        await this.givePlacesBack(
+          tx,
+          input.organizationId,
+          order.id,
+          input.now,
+        );
+      }
       await tx
         .update(orders)
         .set({
@@ -537,37 +957,84 @@ export class CheckoutRepository {
           version: order.version + 1,
         })
         .where(eq(orders.id, order.id));
-      await tx
-        .update(seatHolds)
-        .set({ status: 'released' })
-        .where(
-          and(
-            eq(seatHolds.organizationId, input.organizationId),
-            eq(seatHolds.orderId, order.id),
-            eq(seatHolds.status, ACTIVE_HOLD),
-          ),
-        );
+      await this.releaseActiveHolds(tx, input.organizationId, order.id);
       await this.outbox.enqueueIn(tx, input.buildRejectedEvent(order));
-      return { reference: order.reference };
+      return { reference: order.reference, refundDue };
     });
   }
 
-  /** Give a lapsed/failed payment's held inventory back (US-DISC-05). */
+  /** Hand a waiting registration's counted places back to its tiers. */
+  private async givePlacesBack(
+    tx: Tx,
+    organizationId: number,
+    orderId: string,
+    now: Date,
+  ): Promise<void> {
+    const lines = await tx
+      .select({
+        ticketTypeId: orderItems.ticketTypeId,
+        quantity: orderItems.quantity,
+      })
+      .from(orderItems)
+      .where(
+        and(
+          eq(orderItems.organizationId, organizationId),
+          eq(orderItems.orderId, orderId),
+        ),
+      );
+    const byType = new Map<string, number>();
+    for (const { ticketTypeId, quantity } of lines) {
+      byType.set(ticketTypeId, (byType.get(ticketTypeId) ?? 0) + quantity);
+    }
+    await this.giveBackStock(tx, organizationId, byType, now);
+  }
+
+  /** The seats an order still holds go back on sale. */
+  private async releaseActiveHolds(
+    tx: Tx,
+    organizationId: number,
+    orderId: string,
+  ): Promise<void> {
+    await tx
+      .update(seatHolds)
+      .set({ status: 'released' })
+      .where(
+        and(
+          eq(seatHolds.organizationId, organizationId),
+          eq(seatHolds.orderId, orderId),
+          eq(seatHolds.status, ACTIVE_HOLD),
+        ),
+      );
+  }
+
+  /**
+   * Give a lapsed payment attempt's held inventory back (US-DISC-05) — but
+   * only while the order is still on the checkout's clock.
+   *
+   * An expiry reports on ONE attempt, and an order can have several. A paid
+   * registration waiting for approval keeps its reserved seat's hold attached
+   * to the order until the decision (US-REG-02), so an abandoned attempt
+   * lapsing later must not put that paid seat back on sale. The order is
+   * locked first, so a settlement landing at the same moment takes turns with
+   * this rather than racing it.
+   */
   async releaseHoldsForOrder(
     organizationId: number,
     orderId: string,
   ): Promise<void> {
     await withTenant(this.db, organizationId, async (tx) => {
-      await tx
-        .update(seatHolds)
-        .set({ status: 'released' })
+      const [order] = await tx
+        .select()
+        .from(orders)
         .where(
           and(
-            eq(seatHolds.organizationId, organizationId),
-            eq(seatHolds.orderId, orderId),
-            eq(seatHolds.status, ACTIVE_HOLD),
+            eq(orders.id, orderId),
+            eq(orders.organizationId, organizationId),
           ),
-        );
+        )
+        .for('update');
+      if (!order || !isOnCheckoutClock(order)) return;
+      await this.releaseActiveHolds(tx, organizationId, orderId);
     });
   }
 
@@ -575,6 +1042,16 @@ export class CheckoutRepository {
    * Give the inventory back after a refund (US-FIN-02): void the order's live
    * tickets, release their seat assignments, and hand the tier's stock back.
    * `recordRefund` runs inside the same transaction as all of it.
+   *
+   * Stock goes back by the tickets THIS call voided, so a repeated refund —
+   * which finds nothing left to void — gives nothing back twice.
+   *
+   * A registration refunded while it still waits for approval (US-REG-02) has
+   * no tickets: its places are counted in `sold` and a reserved seat is held,
+   * so those go back instead. A rejected one gave them back when it was
+   * rejected, and stays `rejected` — the refund is the consequence of that
+   * decision, not a cancellation. The order is locked first, so this and a
+   * rejection or an approval of the same registration take turns.
    */
   async refundOrder(
     organizationId: number,
@@ -583,6 +1060,11 @@ export class CheckoutRepository {
     now: Date,
   ): Promise<{ ticketsVoided: number; seatsReleased: number }> {
     return withTenant(this.db, organizationId, async (tx) => {
+      const order = await this.lockOrder(tx, { organizationId, orderId });
+      if (isAwaitingApproval(order)) {
+        await this.givePlacesBack(tx, organizationId, orderId, now);
+        await this.releaseActiveHolds(tx, organizationId, orderId);
+      }
       const voided = await tx
         .update(tickets)
         .set({ status: 'refunded', updatedAt: now })
@@ -593,7 +1075,8 @@ export class CheckoutRepository {
             inArray(tickets.status, LIVE_TICKET_STATUSES),
           ),
         )
-        .returning({ id: tickets.id });
+        .returning({ id: tickets.id, ticketTypeId: tickets.ticketTypeId });
+      await this.returnStock(tx, organizationId, voided, now);
       const released = await tx
         .update(seatAssignments)
         .set({ releasedAt: now })
@@ -610,11 +1093,72 @@ export class CheckoutRepository {
         .returning({ id: seatAssignments.id });
       await tx
         .update(orders)
-        .set({ status: 'cancelled', paymentStatus: 'refunded', updatedAt: now })
+        .set({
+          status: statusAfterRefund(order.status),
+          paymentStatus: 'refunded',
+          updatedAt: now,
+        })
         .where(eq(orders.id, orderId));
       await recordRefund(tx);
       return { ticketsVoided: voided.length, seatsReleased: released.length };
     });
+  }
+
+  /**
+   * Lower each ticket type's `sold` by the tickets voided from it.
+   *
+   * `sold` is what every "is anything left?" check reads — checkout's live
+   * status, the seat-hold engine, a waitlist offer — and it counts every
+   * issued ticket, reserved seats included: both places that mint tickets
+   * raise it, whatever the seating. So it comes down for every voided ticket.
+   * Releasing a reserved seat alone left a free seat on a ticket type still
+   * reading "sold out", which refused it.
+   *
+   * One UPDATE per type takes that row's lock, as the increments do, and in
+   * id order so two refunds touching the same types cannot deadlock.
+   * `GREATEST(…, 0)`: a count already lower than the tickets it should cover is
+   * wrong, and a refund must not compound it into a negative that sells places
+   * which do not exist.
+   */
+  private async returnStock(
+    tx: Tx,
+    organizationId: number,
+    voided: { ticketTypeId: string | null }[],
+    now: Date,
+  ): Promise<void> {
+    const byType = new Map<string, number>();
+    for (const { ticketTypeId } of voided) {
+      // A ticket type since deleted has no stock left to give back to.
+      if (ticketTypeId) {
+        byType.set(ticketTypeId, (byType.get(ticketTypeId) ?? 0) + 1);
+      }
+    }
+    await this.giveBackStock(tx, organizationId, byType, now);
+  }
+
+  /** Lower each ticket type's `sold` by its count — see `returnStock`. */
+  private async giveBackStock(
+    tx: Tx,
+    organizationId: number,
+    byType: Map<string, number>,
+    now: Date,
+  ): Promise<void> {
+    for (const [ticketTypeId, count] of [...byType].sort(([a], [b]) =>
+      a.localeCompare(b),
+    )) {
+      await tx
+        .update(ticketTypes)
+        .set({
+          sold: sql`GREATEST(${ticketTypes.sold} - ${count}, 0)`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(ticketTypes.id, ticketTypeId),
+            eq(ticketTypes.organizationId, organizationId),
+          ),
+        );
+    }
   }
 
   /** Queue a refund for money that arrived on an order already paid for. */
@@ -650,33 +1194,48 @@ export class CheckoutRepository {
     input: SettleOrderInput,
     order: OrderRow,
   ): Promise<SettlementContext> {
-    const [line] = await tx
+    const [item] = await tx
       .select({
         orderItemId: orderItems.id,
         ticketTypeId: orderItems.ticketTypeId,
         quantity: orderItems.quantity,
+      })
+      .from(orderItems)
+      .where(eq(orderItems.orderId, order.id))
+      .limit(1);
+    const tier = item ? await this.lockTier(tx, item.ticketTypeId) : null;
+    const seatIds = await this.heldSeatIds(tx, input, order.id);
+    return {
+      line: item && tier ? { ...item, ...tier } : null,
+      seatIds,
+      takenSeatIds: await this.seatsAlreadyAssigned(tx, input, seatIds),
+      placesCounted: isAwaitingApproval(order),
+    };
+  }
+
+  /**
+   * The tier, read UNDER its row lock, so two settlements serialize and
+   * capacity is judged on the count as it stands.
+   *
+   * The lock and the read are one statement on purpose. `countSale` writes
+   * back an absolute `sold`, and a count read before the lock was taken would
+   * overwrite whatever committed while this waited for it — a rejection or a
+   * refund giving a place back — and that place would be lost for good.
+   */
+  private async lockTier(
+    tx: Tx,
+    ticketTypeId: string,
+  ): Promise<{ tierName: string; sold: number; total: number } | null> {
+    const [tier] = await tx
+      .select({
         tierName: ticketTypes.name,
         sold: ticketTypes.sold,
         total: ticketTypes.total,
       })
-      .from(orderItems)
-      .innerJoin(ticketTypes, eq(ticketTypes.id, orderItems.ticketTypeId))
-      .where(eq(orderItems.orderId, order.id))
-      .limit(1);
-    // Lock the tier before judging capacity, so two settlements serialize.
-    if (line) {
-      await tx
-        .select({ id: ticketTypes.id })
-        .from(ticketTypes)
-        .where(eq(ticketTypes.id, line.ticketTypeId))
-        .for('update');
-    }
-    const seatIds = await this.heldSeatIds(tx, input, order.id);
-    return {
-      line: line ?? null,
-      seatIds,
-      takenSeatIds: await this.seatsAlreadyAssigned(tx, input, seatIds),
-    };
+      .from(ticketTypes)
+      .where(eq(ticketTypes.id, ticketTypeId))
+      .for('update');
+    return tier ?? null;
   }
 
   private async heldSeatIds(
@@ -732,7 +1291,7 @@ export class CheckoutRepository {
     input: SettleOrderInput,
     order: OrderRow,
     reason: string,
-  ): Promise<SettlementOutcome> {
+  ): Promise<PaymentSettlement> {
     await tx
       .update(orders)
       .set({
@@ -769,10 +1328,7 @@ export class CheckoutRepository {
     context: SettlementContext,
   ): Promise<SettlementOutcome> {
     const line = context.line as NonNullable<SettlementContext['line']>;
-    await tx
-      .update(ticketTypes)
-      .set({ sold: line.sold + line.quantity, updatedAt: input.now })
-      .where(eq(ticketTypes.id, line.ticketTypeId));
+    if (!context.placesCounted) await this.countSale(tx, line, input.now);
     const issued = await tx
       .insert(tickets)
       .values(
@@ -886,10 +1442,72 @@ export class CheckoutRepository {
     );
   }
 
+  /** This buyer's entry for this ticket, if they are already in line. */
+  private async alreadyWaiting(
+    tx: Tx,
+    input: JoinWaitlistInput,
+  ): Promise<OrderRow | null> {
+    const [row] = await tx
+      .select({ order: orders })
+      .from(orders)
+      .innerJoin(orderItems, eq(orderItems.orderId, orders.id))
+      .where(
+        and(
+          eq(orders.organizationId, input.organizationId),
+          eq(orders.eventId, input.eventId),
+          eq(orders.buyerEmail, input.buyer.email),
+          eq(orders.status, WAITLISTED.status),
+          eq(orderItems.ticketTypeId, input.ticketTypeId),
+        ),
+      )
+      .limit(1);
+    return row?.order ?? null;
+  }
+
+  private async insertWaitlistEntry(
+    tx: Tx,
+    input: JoinWaitlistInput,
+  ): Promise<OrderRow> {
+    const attendeeId = await this.upsertAttendee(tx, input);
+    const order = await this.insertOrder(tx, input, attendeeId, WAITLISTED);
+    await this.insertOrderItem(tx, input, order.id);
+    return order;
+  }
+
+  /**
+   * How many are ahead of this registration in line for the same ticket:
+   * first come, first served by when they joined, with the id breaking a tie
+   * so the order is total and two people can never both be "next".
+   *
+   * The subqueries are literal SQL with their own aliases — Drizzle drops the
+   * table qualifier from an interpolated column inside a subquery, and an
+   * unqualified `id` there would silently compare the outer row to itself.
+   */
+  private async waitlistAhead(
+    tx: Tx,
+    organizationId: number,
+    orderId: string,
+  ): Promise<number> {
+    const [row] = await tx
+      .select({ ahead: sql<number>`count(*)::int` })
+      .from(orders)
+      .innerJoin(orderItems, eq(orderItems.orderId, orders.id))
+      .where(
+        and(
+          eq(orders.organizationId, organizationId),
+          eq(orders.status, WAITLISTED.status),
+          ne(orders.id, orderId),
+          sql`${orderItems.ticketTypeId} = (SELECT mi.ticket_type_id FROM order_items mi WHERE mi.order_id = ${orderId} LIMIT 1)`,
+          sql`(${orders.registeredAt}, ${orders.id}) < (SELECT me.registered_at, me.id FROM orders me WHERE me.id = ${orderId})`,
+        ),
+      );
+    return row.ahead;
+  }
+
   /** One CRM row per person per workspace; a repeat buyer updates, never duplicates. */
   private async upsertAttendee(
     tx: Tx,
-    input: PlaceOrderInput,
+    input: Pick<PlaceOrderInput, 'organizationId' | 'buyer' | 'now'>,
   ): Promise<number> {
     const [row] = await tx
       .insert(attendees)
@@ -909,8 +1527,9 @@ export class CheckoutRepository {
 
   private async insertOrder(
     tx: Tx,
-    input: PlaceOrderInput,
+    input: OrderInsert,
     attendeeId: number,
+    state: OrderState,
   ): Promise<OrderRow> {
     const [row] = await tx
       .insert(orders)
@@ -923,11 +1542,13 @@ export class CheckoutRepository {
         buyerName: input.buyer.name,
         buyerEmail: input.buyer.email,
         buyerPhone: input.buyer.phone ?? null,
-        status: input.issueTickets ? 'confirmed' : 'pending',
-        paymentStatus: input.issueTickets ? 'paid' : 'pending',
+        status: state.status,
+        paymentStatus: state.paymentStatus,
+        requiresApproval: input.requiresApproval ?? false,
+        approvalRequestedAt: state.approvalRequestedAt ?? null,
         seats: input.quantity,
         subtotalSatang: input.totals.subtotalSatang,
-        discountCodeId: input.discountCodeId,
+        discountCodeId: input.discountCodeId ?? null,
         discountAmountSatang: input.totals.discountSatang,
         vatAmountSatang: input.totals.vatSatang,
         totalSatang: input.totals.totalSatang,
@@ -939,7 +1560,14 @@ export class CheckoutRepository {
 
   private async insertOrderItem(
     tx: Tx,
-    input: PlaceOrderInput,
+    input: Pick<
+      PlaceOrderInput,
+      | 'organizationId'
+      | 'ticketTypeId'
+      | 'quantity'
+      | 'unitPriceSatang'
+      | 'totals'
+    >,
     orderId: string,
   ): Promise<{ id: number }> {
     const [row] = await tx
@@ -1034,6 +1662,41 @@ export class CheckoutRepository {
     );
   }
 
+  /** What becomes of the buyer's holds once their order exists. */
+  private async settleHolds(
+    tx: Tx,
+    input: PlaceOrderInput,
+    orderId: string,
+  ): Promise<void> {
+    if (input.issueTickets) return this.convertHolds(tx, input);
+    if (input.awaitsDecision) {
+      return this.reserveForDecision(tx, input, orderId);
+    }
+    // A paid order keeps its holds live but stamps them with the order, so
+    // settlement can find its seats and an expiry can release exactly these.
+    return this.attachHolds(tx, input, orderId);
+  }
+
+  /**
+   * A free registration now waiting for the organizer (US-REG-02). Its places
+   * are counted at once — under the tier lock, with the same sold-out refusal
+   * a ticketed order gets — so the public count is true and nobody else can
+   * take them. A GA hold then reserves nothing more and converts; a reserved
+   * seat's hold stays with the order until the decision, because a seat is
+   * assigned to a ticket and there is no ticket yet.
+   */
+  private async reserveForDecision(
+    tx: Tx,
+    input: PlaceOrderInput,
+    orderId: string,
+  ): Promise<void> {
+    await this.reserveAllocation(tx, input);
+    if (input.seatIds && input.seatIds.length > 0) {
+      return this.attachHolds(tx, input, orderId, DECISION_HOLD_EXPIRY);
+    }
+    return this.convertHolds(tx, input);
+  }
+
   /** A converted hold has become a ticket; it no longer reserves anything. */
   private async convertHolds(tx: Tx, input: PlaceOrderInput): Promise<void> {
     if (input.holdIds.length === 0) return;
@@ -1048,15 +1711,17 @@ export class CheckoutRepository {
       );
   }
 
+  /** `expiresAt` replaces the checkout timer — only a decision hold passes one. */
   private async attachHolds(
     tx: Tx,
     input: PlaceOrderInput,
     orderId: string,
+    expiresAt?: Date,
   ): Promise<void> {
     if (input.holdIds.length === 0) return;
     await tx
       .update(seatHolds)
-      .set({ orderId })
+      .set({ orderId, ...(expiresAt ? { expiresAt } : {}) })
       .where(
         and(
           eq(seatHolds.organizationId, input.organizationId),
@@ -1107,6 +1772,35 @@ export class CheckoutRepository {
       };
     });
   }
+}
+
+/**
+ * Still awaiting a decision, and not money captured on an ordinary sale —
+ * that is cancel-and-refund. Money taken while it waited for approval is the
+ * rejection's to give back.
+ */
+function isRejectable(order: OrderRow): boolean {
+  const awaiting = (AWAITING_DECISION as readonly string[]).includes(
+    order.status,
+  );
+  return (
+    awaiting &&
+    (order.paymentStatus !== 'paid' || order.approvalRequestedAt !== null)
+  );
+}
+
+/**
+ * Where a placed order starts: ticketed if nothing is owed and nobody decides,
+ * otherwise pending — and, when only the organizer's decision is left,
+ * already waiting for it.
+ */
+function initialState(input: PlaceOrderInput): OrderState {
+  if (input.issueTickets) return { status: 'confirmed', paymentStatus: 'paid' };
+  return {
+    status: 'pending',
+    paymentStatus: 'pending',
+    approvalRequestedAt: input.awaitsDecision ? input.now : null,
+  };
 }
 
 /**

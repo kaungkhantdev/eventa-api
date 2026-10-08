@@ -1,7 +1,11 @@
 import { Module } from '@nestjs/common';
 import { AccessModule } from '../access/access.module';
+import { UploadsModule } from '../uploads/uploads.module';
 import { OrganizationController } from './organization.controller';
 import { OrganizationRepository } from './organization.repository';
+import { OrganizationSetupPort } from '../dashboard/ports/workspace-setup.port';
+import { OrganizationSetupAdapter } from './organization-setup.adapter';
+import { OrganizationLogoService } from './organization-logo.service';
 import { OrganizationService } from './organization.service';
 
 /**
@@ -10,9 +14,14 @@ import { OrganizationService } from './organization.service';
  * AccessModule for the RBAC PermissionsGuard only.
  */
 @Module({
-  imports: [AccessModule],
+  imports: [AccessModule, UploadsModule],
   controllers: [OrganizationController],
-  providers: [OrganizationService, OrganizationRepository],
-  exports: [OrganizationService],
+  providers: [
+    { provide: OrganizationSetupPort, useClass: OrganizationSetupAdapter },
+    OrganizationService,
+    OrganizationLogoService,
+    OrganizationRepository,
+  ],
+  exports: [OrganizationService, OrganizationSetupPort],
 })
 export class OrganizationModule {}

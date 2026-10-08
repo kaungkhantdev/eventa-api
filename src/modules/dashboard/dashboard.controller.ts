@@ -8,11 +8,13 @@ import type { AuthContext } from '../auth/auth.types';
 import { ProfileService } from '../users/profile.service';
 import { DashboardAnalyticsService } from './dashboard-analytics.service';
 import { DashboardHomeService } from './dashboard-home.service';
+import { WorkspaceSetupService } from './workspace-setup.service';
 import {
   AnalyticsDto,
   AnalyticsQueryDto,
   HomeDto,
   HomeQueryDto,
+  WorkspaceSetupDto,
 } from './dto/dashboard.dto';
 
 /**
@@ -35,7 +37,24 @@ export class DashboardController {
     private readonly home: DashboardHomeService,
     private readonly analytics: DashboardAnalyticsService,
     private readonly profiles: ProfileService,
+    private readonly setup: WorkspaceSetupService,
   ) {}
+
+  /**
+   * How far this workspace has been set up — the first-run checklist's source
+   * of truth (US-DASH-01).
+   *
+   * `AdminGuard` only, like the rest of this controller: each step is gated
+   * individually inside the service, so somebody who may create events but not
+   * change settings gets the steps they can act on rather than a 403 for the
+   * whole checklist.
+   */
+  @Get('setup')
+  @ResponseMessage('Setup state loaded.')
+  @ApiData(WorkspaceSetupDto)
+  loadSetup(@CurrentAuth() auth: AuthContext): Promise<WorkspaceSetupDto> {
+    return this.setup.load(auth);
+  }
 
   @Get('home')
   @ResponseMessage('Home loaded.')

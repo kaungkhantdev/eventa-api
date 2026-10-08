@@ -28,10 +28,16 @@ export class UpdateEventDto {
   @MaxLength(120)
   name?: string;
 
-  @ApiPropertyOptional({ maxLength: 250 })
+  /**
+   * Rich text — the wizard's editor emits HTML and the API sanitises it on
+   * write (`rich-text.ts`). The cap counts MARKUP as well as words, which is
+   * why it is far above what anyone types: a page the length of a Meetup
+   * listing is ~2,400 characters of text and roughly double that as HTML.
+   */
+  @ApiPropertyOptional({ maxLength: 10000, description: 'Sanitised HTML' })
   @IsOptional()
   @IsString()
-  @MaxLength(250)
+  @MaxLength(10000)
   description?: string;
 
   @ApiPropertyOptional({ enum: EVENT_TYPES })
@@ -110,6 +116,22 @@ export class UpdateEventDto {
   @IsInt()
   @IsPositive()
   capacity?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Let attendees join a waitlist once a general-admission ticket sells out (US-REG-04).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  waitlistEnabled?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Hold each registration for the organizer to approve or reject before it is confirmed (US-REG-02). A paid registration pays first; rejecting it refunds the payment. Applies to registrations placed after the change.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  requiresApproval?: boolean;
 
   @ApiPropertyOptional({ maxLength: 500 })
   @IsOptional()

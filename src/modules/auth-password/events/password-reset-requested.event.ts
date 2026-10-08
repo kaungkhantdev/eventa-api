@@ -9,6 +9,13 @@ export interface PasswordResetRequestedInput {
   userId: string;
   name: string;
   email: string;
+  /**
+   * The workspace the link resets, for an organizer. One address can hold an
+   * account in several workspaces and gets one email per account, so each has
+   * to say which it opens. Absent for an attendee, whose one realm is the
+   * platform rather than a workspace they chose.
+   */
+  workspaceName?: string;
   /** Absolute link the recipient opens to set a new password (includes the token). */
   resetUrl: string;
   occurredAt: string;
@@ -33,6 +40,9 @@ export function passwordResetRequestedEvent(
       userId: input.userId,
       name: input.name,
       email: input.email,
+      ...(input.workspaceName === undefined
+        ? {}
+        : { workspaceName: input.workspaceName }),
       resetUrl: input.resetUrl,
       occurredAt: input.occurredAt,
     },

@@ -1,0 +1,12 @@
+-- When a refund's money actually went back (US-FIN-02, US-FIN-11).
+--
+-- A card refund settles the moment it is issued; a PromptPay refund settles
+-- days later, through the provider's webhook, once the buyer has given Stripe
+-- a bank account. The VAT ledger must back the reversal out of the month the
+-- money MOVED — the issue month may already be filed and frozen by then, and a
+-- frozen return never takes it.
+--
+-- No backfill: until the provider's refund webhook existed, a refund only ever
+-- settled at the moment it was issued, and the ledger reads
+-- coalesce(settled_at, issued_at) — so no figure already reported moves.
+ALTER TABLE "refunds" ADD COLUMN IF NOT EXISTS "settled_at" timestamptz;

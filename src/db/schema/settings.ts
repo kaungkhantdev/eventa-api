@@ -1,6 +1,8 @@
+import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
+  check,
   index,
   pgTable,
   text,
@@ -10,7 +12,9 @@ import {
 } from 'drizzle-orm/pg-core';
 import { createdAt, idPk, updatedAt } from './_columns';
 import {
+  announcementStatusEnum,
   apiKeyStatusEnum,
+  deliveryStatusEnum,
   messageChannelEnum,
   notificationKindEnum,
 } from './enums';
@@ -66,13 +70,47 @@ export const notificationPreferences = pgTable(
 );
 
 /**
+ * How far one member has read their notification feed (US-MSG-03).
+ *
+ * A watermark, not a row per notification. The feed itself is DERIVED from
+ * registrations, payments and payouts as they already stand, so there is nothing
+ * to mark read one by one — "unread" means "happened after this instant", and
+ * the whole of "mark all read" is moving this timestamp forward.
+ *
+ * One row per (organization, member): a colleague clearing their own feed must
+ * not clear anybody else's.
+ */
+export const notificationReads = pgTable(
+  'notification_reads',
+  {
+    id: idPk(),
+    organizationId: bigint({ mode: 'number' })
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** Everything at or before this instant is read. */
+    readAt: timestamp({ withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    unique('uq_notification_reads_member').on(t.organizationId, t.userId),
+  ],
+);
+
+/**
  * One automated message an organizer controls (US-MSG-01/02): the
  * registration confirmation, the payment receipt, the reminder, and so on,
  * identified by a stable `slug`.
  *
  * Only `active` is honoured today — it is the kill switch the trigger checks
- * before sending, and an ABSENT row means active, so a workspace that has
- * never touched its settings still gets its confirmations. The wording columns
+ * before sending. An ABSENT row means the catalog's `defaultActive` for that
+ * slug (message-template-catalog.ts): on for everything but the event
+ * reminder, so a workspace that has never touched its settings still gets its
+ * confirmations. The column's own default of `true` is therefore NOT the rule —
+ * an insert for an off-by-default message must say so. The wording columns
  * exist because `entities.md` specifies them and US-MSG-02 will edit them; the
  * worker renders built-in EN/TH copy until then.
  *
@@ -109,5 +147,121 @@ export const messageTemplates = pgTable(
   (t) => [
     unique('uq_message_templates_org_slug').on(t.organizationId, t.slug),
     index('ix_message_templates_org').on(t.organizationId),
+  ],
+);
+
+/**
+ * One broadcast an organizer sent to an event's attendees (US-MSG-04).
+ *
+ * A RECORD of a send, not a queue. The sending is already done by the outbox
+ * event written in the same transaction — this row exists so the organizer can
+ * see what they have sent, which is the one thing the broadcast path could not
+ * answer. Row and outbox event live or die together: an announcement listed but
+ * never sent, and one sent but never listed, are both wrong.
+ *
+ * `recipientCount` is the attendee count AT THE MOMENT IT WAS QUEUED. eventa-worker
+ * resolves the real recipients when it sends, so this is what the organizer was
+ * told they were writing to, not a delivery receipt. Proving delivery is
+ * US-MSG-06 and needs a per-recipient table this one deliberately is not.
+ *
+ * A SCHEDULED one (US-MSG-04/05) is the exception to "row and send together":
+ * it is written with no outbox event, no `sentAt` and no count, and waits.
+ * eventa-worker's sweep claims it when `scheduledFor` arrives and, in one
+ * transaction, marks it `sent`, counts the audience as it is THEN, and writes
+ * the same outbox event a send-now writes. Until then the organizer can cancel
+ * it or move it; afterwards neither. The `ck_announcements_state` CHECK keeps
+ * each status and its columns in agreement, whichever repo writes the row.
+ *
+ * There is no audience column: the broadcast path takes one event's confirmed
+ * attendees, and a column offering more would be a promise it cannot keep.
+ */
+export const announcements = pgTable(
+  'announcements',
+  {
+    id: idPk(),
+    organizationId: bigint({ mode: 'number' })
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    /** The event whose attendees were written to. */
+    eventId: uuid().notNull(),
+    subject: text().notNull(),
+    body: text().notNull(),
+    /**
+     * How many attendees it was queued for — see the note above. Null until it
+     * is sent: nobody has counted a scheduled one's audience yet, and 0 would
+     * claim they had and found nobody.
+     */
+    recipientCount: bigint({ mode: 'number' }),
+    /** Who sent (or scheduled) it. Kept when they leave: the send still happened. */
+    sentByUserId: uuid().references(() => users.id, { onDelete: 'set null' }),
+    status: announcementStatusEnum().notNull().default('sent'),
+    /** When a scheduled one is to go, UTC. Kept once it has, or was cancelled. */
+    scheduledFor: timestamp({ withTimezone: true }),
+    /** When it actually went. Null while scheduled, and forever if cancelled. */
+    sentAt: timestamp({ withTimezone: true }),
+    cancelledAt: timestamp({ withTimezone: true }),
+    /** Null on a cancelled row means the system dropped it (its event was deleted). */
+    cancelledByUserId: uuid().references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('ix_announcements_org_sent').on(t.organizationId, t.sentAt),
+    index('ix_announcements_event').on(t.organizationId, t.eventId),
+    index('ix_announcements_due')
+      .on(t.scheduledFor)
+      .where(sql`status = 'scheduled'`),
+    check(
+      'ck_announcements_state',
+      sql`(${t.status} = 'sent' AND ${t.sentAt} IS NOT NULL AND ${t.recipientCount} IS NOT NULL)
+        OR (${t.status} = 'scheduled' AND ${t.scheduledFor} IS NOT NULL AND ${t.sentAt} IS NULL)
+        OR (${t.status} = 'cancelled' AND ${t.cancelledAt} IS NOT NULL AND ${t.sentAt} IS NULL)`,
+    ),
+  ],
+);
+
+/**
+ * One outbound message and what became of it (US-MSG-06).
+ *
+ * Written by eventa-worker as it sends, one row per RECIPIENT — a broadcast to
+ * 1,340 attendees is 1,340 rows, which is the point: "prove it was sent and
+ * diagnose the failures" is a question about individuals, and a per-message
+ * summary cannot answer which address bounced.
+ *
+ * `status` is what the transport said, and nothing more. There is no
+ * `delivered` and no `opened`: those need a provider webhook and a tracking
+ * pixel, and this product has neither.
+ *
+ * `kind` is the catalog slug for an automated message (`registration-
+ * confirmation`) or `announcement` for a broadcast. Deliberately free text
+ * rather than an enum — the worker is the one that knows what it just sent,
+ * and a new message type should not need a migration in another repo before it
+ * can be logged.
+ */
+export const messageDeliveries = pgTable(
+  'message_deliveries',
+  {
+    id: idPk(),
+    organizationId: bigint({ mode: 'number' })
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    /** The event it was about, where there is one. */
+    eventId: uuid(),
+    kind: text().notNull(),
+    channel: messageChannelEnum().notNull().default('email'),
+    recipientEmail: text().notNull(),
+    /** Null where the send had only an address to go on. */
+    recipientName: text(),
+    status: deliveryStatusEnum().notNull(),
+    /** Why it failed, for diagnosing. Null on a successful send. */
+    error: text(),
+    sentAt: timestamp({ withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('ix_message_deliveries_org_sent').on(t.organizationId, t.sentAt),
+    index('ix_message_deliveries_org_status').on(t.organizationId, t.status),
   ],
 );

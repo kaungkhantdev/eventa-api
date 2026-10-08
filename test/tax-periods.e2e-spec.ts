@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'vat-e2e', name: 'VAT E2E' };
@@ -74,7 +75,7 @@ describe('The VAT ledger (e2e — US-FIN-11/12)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
 
     adminJwt = await token(ADMIN);
@@ -149,6 +150,41 @@ describe('The VAT ledger (e2e — US-FIN-11/12)', () => {
       ],
     );
   }
+
+  /** A refund issued but not yet settled — PromptPay, awaiting bank details. */
+  async function seedPendingRefund(
+    paymentId: string,
+    issuedAt: string,
+    amount: number,
+  ): Promise<string> {
+    seq += 1;
+    const admin = await pool.query<{ id: string }>(
+      `SELECT id FROM users WHERE email = $1`,
+      [ADMIN],
+    );
+    const res = await pool.query<{ id: string }>(
+      `INSERT INTO refunds (organization_id, payment_id, order_id, amount_satang,
+                            status, issued_by, issued_at, idempotency_key)
+       VALUES ($1,$2,$3,$4,'pending',$5,$6,$7) RETURNING id`,
+      [
+        orgId,
+        paymentId,
+        orderId,
+        amount,
+        admin.rows[0].id,
+        issuedAt,
+        `ridem-${seq}`,
+      ],
+    );
+    return res.rows[0].id;
+  }
+
+  /** The provider's webhook settling it, as far as the ledger is concerned. */
+  const settleRefund = (refundId: string, settledAt: string) =>
+    pool.query(
+      `UPDATE refunds SET status = 'succeeded', settled_at = $2 WHERE id = $1`,
+      [refundId, settledAt],
+    );
 
   const ledger = (jwt: string, query: string) =>
     request(server)
@@ -261,6 +297,29 @@ describe('The VAT ledger (e2e — US-FIN-11/12)', () => {
       expect(after.periods[6].vatSatang).toBe(-JUNE_VAT);
     });
 
+    /**
+     * The PromptPay case: issued in June, still pending when June was filed,
+     * settled in July once the buyer gave Stripe a bank account. June's return
+     * rightly left it out, and is frozen now — so the reversal belongs to the
+     * month the money actually went back, or it is backed out of no return.
+     */
+    it('backs a refund settled after its month was filed out of the month it SETTLED', async () => {
+      const paymentId = await seedPayment(`${YEAR}-06-15T03:00:00Z`);
+      const refundId = await seedPendingRefund(
+        paymentId,
+        `${YEAR}-06-28T03:00:00Z`,
+        JUNE_GROSS,
+      );
+      await file(adminJwt, 6);
+      await settleRefund(refundId, `${YEAR}-07-02T03:00:00Z`);
+
+      const after = (
+        (await ledger(adminJwt, `year=${YEAR}`)).body as Success<Ledger>
+      ).data;
+      expect(after.periods[5].vatSatang).toBe(JUNE_VAT);
+      expect(after.periods[6].vatSatang).toBe(-JUNE_VAT);
+    });
+
     it('flags a filing made after the deadline as late', async () => {
       await seedPayment(`${YEAR}-06-15T03:00:00Z`);
       const filed = (await file(adminJwt, 6)).body as Success<Period>;
@@ -359,8 +418,13 @@ async function seedOrg(pool: Pool): Promise<number> {
         [key, PERM_GROUP[key], key],
       );
     }
+    // A role this spec invented for its own fixtures, not one the product
+    // provisioned, so is_system is spelled out rather than left to the column
+    // default of true: a role that claims to be built-in has its deliberately
+    // narrow grants topped up by SystemRolesService.reconcile(), and would then
+    // stop denying what these tests assert.
     const role = await pool.query<{ id: string }>(
-      `INSERT INTO roles (organization_id, name, description) VALUES ($1, $2, 'seed') RETURNING id`,
+      `INSERT INTO roles (organization_id, name, description, is_system) VALUES ($1, $2, 'seed', false) RETURNING id`,
       [orgId, p.roleName],
     );
     const roleId = Number(role.rows[0].id);

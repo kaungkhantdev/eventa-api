@@ -1,0 +1,13 @@
+{
+  // Build config for `pnpm check:openapi` ONLY.
+  //
+  // It exists for one reason: nest-cli sets `deleteOutDir`, so every build
+  // WIPES its output directory. Running the contract guard while a developer
+  // has `pnpm start:dev` open would delete dist/ out from under the running
+  // app — two compilers racing on one directory, and the watcher left with
+  // nothing to run. The guard therefore builds somewhere of its own.
+  "extends": "./tsconfig.build.json",
+  "compilerOptions": {
+    "outDir": "./dist-openapi"
+  }
+}

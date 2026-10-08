@@ -4,6 +4,7 @@ import { Clock } from '../../common/time/clock';
 import type { Env } from '../../config/env.validation';
 import { AccessModule } from '../access/access.module';
 import { CheckoutModule } from '../checkout/checkout.module';
+import { PaymentSettingsModule } from '../payment-settings/payment-settings.module';
 import { InvoicePaymentPort } from '../invoices/ports/invoice-payment.port';
 import { SettledFundsPort } from '../payouts/ports/settled-funds.port';
 import { TaxableSalesPort } from '../tax-periods/ports/taxable-sales.port';
@@ -16,10 +17,19 @@ import { PaymentsLedgerService } from './payments-ledger.service';
 import { RefundsService } from './refunds.service';
 import { PaymentsRepository } from './payments.repository';
 import { PaymentsService } from './payments.service';
+import { GatewayCredentialsPort } from './ports/gateway-credentials.port';
 import { PaymentProviderPort } from './ports/payment-provider.port';
 import { StripePaymentAdapter } from './providers/stripe-payment.adapter';
 import { RevenueInsightsPort } from '../dashboard/ports/revenue-insights.port';
 import { RevenueInsightsAdapter } from './revenue-insights.adapter';
+import { IncomeReportPort } from '../reports/ports/income-report.port';
+import { IncomeReportAdapter } from './income-report.adapter';
+import { TransactionLedgerPort } from '../reports/ports/transaction-ledger.port';
+import { TransactionLedgerAdapter } from './transaction-ledger.adapter';
+import { PaymentFeedPort } from '../notifications/ports/payment-feed.port';
+import { PaymentFeedAdapter } from './payment-feed.adapter';
+import { RegistrationRefundPort } from '../registrations/ports/registration-refund.port';
+import { RegistrationRefundAdapter } from './registration-refund.adapter';
 
 /**
  * Payments (US-DISC-05): collect an order's total by card or PromptPay, and act
@@ -34,10 +44,24 @@ import { RevenueInsightsAdapter } from './revenue-insights.adapter';
  * boot rather than discovered at the till.
  */
 @Module({
-  imports: [AccessModule, CheckoutModule],
+  // PaymentSettings binds `MerchantAccountPort` — whose connected account a
+  // charge is made on. Without it every workspace's money lands in the
+  // platform's own Stripe balance.
+  imports: [AccessModule, CheckoutModule, PaymentSettingsModule],
   controllers: [PaymentsController, FinanceController],
   providers: [
     { provide: RevenueInsightsPort, useClass: RevenueInsightsAdapter },
+    // Same arithmetic as the revenue port above, per event and with fees — see
+    // the adapter. Bound here because only Payments knows what these mean.
+    { provide: IncomeReportPort, useClass: IncomeReportAdapter },
+    // Settled and declined charges as feed items (US-MSG-03). Which status
+    // means which kind is Payments' call, not the feed's.
+    { provide: PaymentFeedPort, useClass: PaymentFeedAdapter },
+    // The charge-and-reversal ledger (US-RPT-06).
+    { provide: TransactionLedgerPort, useClass: TransactionLedgerAdapter },
+    // Rejecting a registration paid for while it awaited approval gives the
+    // money back through THE refund path (US-REG-02).
+    { provide: RegistrationRefundPort, useClass: RegistrationRefundAdapter },
     PaymentsService,
     RefundsService,
     PaymentsLedgerService,
@@ -47,9 +71,12 @@ import { RevenueInsightsAdapter } from './revenue-insights.adapter';
       // A factory, not `useClass`: the adapter takes an optional Stripe client
       // as a third argument so a test can pass its own, and Nest would try to
       // resolve that as a dependency.
-      useFactory: (clock: Clock, config: ConfigService<Env, true>) =>
-        new StripePaymentAdapter(clock, config),
-      inject: [Clock, ConfigService],
+      useFactory: (
+        clock: Clock,
+        config: ConfigService<Env, true>,
+        credentials: GatewayCredentialsPort,
+      ) => new StripePaymentAdapter(clock, config, credentials),
+      inject: [Clock, ConfigService, GatewayCredentialsPort],
     },
     { provide: InvoicePaymentPort, useClass: InvoicePaymentAdapter },
     { provide: TaxableSalesPort, useClass: TaxableSalesAdapter },
@@ -64,6 +91,10 @@ import { RevenueInsightsAdapter } from './revenue-insights.adapter';
     // Payouts shares the provider seam: the hosted settings link and the
     // re-submitted transfer both go through the same adapter.
     PaymentProviderPort,
+    IncomeReportPort,
+    PaymentFeedPort,
+    TransactionLedgerPort,
+    RegistrationRefundPort,
   ],
 })
 export class PaymentsModule {}

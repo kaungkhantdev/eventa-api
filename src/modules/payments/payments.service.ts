@@ -7,20 +7,66 @@ import { ticketsUrlFor } from '../checkout/ticket-links';
 import type { Env } from '../../config/env.validation';
 import type { PayOrderDto } from './dto/pay-order.dto';
 import type { PaymentIntentDto } from './dto/payment-intent.dto';
+import { GatewayCredentialsPort } from './ports/gateway-credentials.port';
+import { MerchantAccountPort } from './ports/merchant-account.port';
 import {
   OrderPaymentPort,
   type PayableOrder,
 } from './ports/order-payment.port';
 import {
   PaymentProviderPort,
+  REFUND_WEBHOOK_TYPES,
+  type RefundWebhookType,
   type StartedPayment,
   type VerifiedWebhook,
 } from './ports/payment-provider.port';
 import { PaymentsRepository, type PaymentRow } from './payments.repository';
+import {
+  RefundsService,
+  type ProviderRefundReport,
+  type RefundCompletion,
+} from './refunds.service';
 
 /** The webhook's whole reply — the provider only wants to know we have it. */
 export interface WebhookAck {
   received: boolean;
+}
+
+/**
+ * Written for the buyer, who cannot fix this and did nothing wrong: it names
+ * the organizer's setup rather than implying the attempt was at fault.
+ */
+const NO_MERCHANT_ACCOUNT =
+  'This event cannot take payment yet — the organizer has not finished connecting their payment account.';
+
+/** A refund callback carries a REFUND's reference, not a payment's. */
+type RefundWebhook = VerifiedWebhook & { type: RefundWebhookType };
+
+const REFUND_OUTCOME_OF: Readonly<
+  Record<RefundWebhookType, ProviderRefundReport['outcome']>
+> = {
+  refund_succeeded: 'succeeded',
+  refund_failed: 'failed',
+};
+
+/**
+ * How each way a refund callback can end is logged. `failed` marks the ones a
+ * person must look at — the provider said something the ledger refused to act
+ * on — not the ones that simply changed nothing.
+ */
+const WEBHOOK_STATUS_FOR: Readonly<
+  Record<RefundCompletion, 'processed' | 'failed'>
+> = {
+  settled: 'processed',
+  failed: 'processed',
+  unknown: 'processed',
+  already_final: 'processed',
+  amount_mismatch: 'failed',
+  failed_after_settled: 'failed',
+};
+
+function isRefundWebhook(verified: VerifiedWebhook): verified is RefundWebhook {
+  return (REFUND_WEBHOOK_TYPES as readonly string[]).includes(verified.type);
 }
 
 /**
@@ -33,6 +79,10 @@ export interface WebhookAck {
  * arrived except a signature-verified callback, deduplicated by the provider's
  * own event id, and settlement flips the payment row inside the same transaction
  * that issues the tickets — so "paid" and "ticketed" cannot drift apart.
+ *
+ * The same callback also finishes a refund the provider did not settle when it
+ * was issued (PromptPay, US-FIN-02); that half is `RefundsService`'s, and this
+ * class only verifies, deduplicates and hands it over.
  */
 @Injectable()
 export class PaymentsService {
@@ -45,6 +95,9 @@ export class PaymentsService {
     private readonly repo: PaymentsRepository,
     private readonly provider: PaymentProviderPort,
     private readonly orders: OrderPaymentPort,
+    private readonly merchants: MerchantAccountPort,
+    private readonly credentials: GatewayCredentialsPort,
+    private readonly refunds: RefundsService,
     private readonly clock: Clock,
     config: ConfigService<Env, true>,
   ) {
@@ -54,6 +107,7 @@ export class PaymentsService {
   /** Start collecting. Safe to replay — the idempotency key finds its own attempt. */
   async pay(input: PayOrderDto): Promise<PaymentIntentDto> {
     const order = await this.requirePayable(input.orderId);
+    const accountId = await this.requireMerchantAccount(order.organizationId);
     const started = await this.provider.start({
       orderId: order.id,
       organizationId: order.organizationId,
@@ -64,7 +118,6 @@ export class PaymentsService {
       statementDescriptor: await this.repo.orgStatementDescriptor(
         order.organizationId,
       ),
-      accountId: null,
       description: order.eventName,
       // Where the provider sends the buyer back: their own copy of the order,
       // which reads correctly whether or not the money has landed yet.
@@ -80,6 +133,9 @@ export class PaymentsService {
       amountSatang: order.totalSatang,
       currency: order.currency,
       gatewayRef: started.gatewayRef,
+      // Stamped now, so the refund reverses on this account however the
+      // workspace's settings row changes later.
+      gatewayAccountId: accountId,
       statementDescriptor: null,
       idempotencyKey: input.idempotencyKey,
       status: started.status === 'failed' ? 'failed' : 'pending',
@@ -95,16 +151,38 @@ export class PaymentsService {
   /**
    * A provider callback. Verified first — an unverified webhook is a stranger
    * claiming an order was paid — then processed exactly once by provider event
-   * id, whatever retries or replicas do.
+   * id, whatever retries or replicas do. A refund's callback is handed to the
+   * refunds side before any payment lookup: its reference is the refund's.
    */
-  async handleWebhook(rawBody: Buffer, signature: string): Promise<WebhookAck> {
-    const verified = this.provider.verifyWebhook(rawBody, signature);
+  async handleWebhook(
+    token: string,
+    rawBody: Buffer,
+    signature: string,
+  ): Promise<WebhookAck> {
+    // The token in the URL is what resolves a tenant: a callback carries no
+    // session, and its signature cannot be checked until we know which
+    // workspace's signing secret to check it against.
+    const identity = await this.credentials.webhookIdentityFor(token);
+    if (!identity) {
+      // Same answer as a bad signature, and for the same reason: an unknown
+      // token must not tell a prober whether it guessed a real workspace.
+      throw DomainException.forbidden('Invalid webhook signature.');
+    }
+    const verified = this.provider.verifyWebhook(
+      rawBody,
+      signature,
+      identity.signingSecrets,
+    );
     if (verified.type === 'ignored') return { received: true };
     const fresh = await this.repo.recordWebhook(
       PaymentsService.PROVIDER_NAME,
       verified,
     );
     if (!fresh) return { received: true };
+    if (isRefundWebhook(verified)) {
+      await this.onRefundReport(identity.organizationId, verified);
+      return { received: true };
+    }
 
     const payment = await this.repo.findByGatewayRef(verified.gatewayRef);
     if (!payment) {
@@ -124,6 +202,36 @@ export class PaymentsService {
       : payment;
     await this.dispatch(verified, settled);
     return { received: true };
+  }
+
+  /**
+   * Finish a pending refund for the workspace the callback's URL named. An
+   * unknown reference (another environment, a refund made outside Eventa) is
+   * acknowledged and tied to no workspace, as an unknown payment is. A throw
+   * leaves the event unprocessed, so the provider's retry can finish the job.
+   */
+  private async onRefundReport(
+    organizationId: number,
+    verified: RefundWebhook,
+  ): Promise<void> {
+    const completion = await this.refunds.completePending({
+      organizationId,
+      refundRef: verified.gatewayRef,
+      outcome: REFUND_OUTCOME_OF[verified.type],
+      amountSatang: verified.amountSatang,
+      failureReason: verified.declineReason,
+    });
+    if (completion === 'unknown') {
+      this.logger.warn(
+        { refundRef: verified.gatewayRef },
+        'webhook: unknown refund',
+      );
+    }
+    await this.repo.markWebhookProcessed(
+      verified.eventId,
+      completion === 'unknown' ? null : organizationId,
+      WEBHOOK_STATUS_FOR[completion],
+    );
   }
 
   private async dispatch(
@@ -233,6 +341,28 @@ export class PaymentsService {
       amountSatang: payment.amountSatang,
       reason: 'duplicate_payment',
     });
+  }
+
+  /**
+   * Whose account this charge lands in — and a refusal when there isn't one.
+   *
+   * Collecting into the platform account instead would take a buyer's money
+   * into a balance the organizer cannot reach, issue a valid ticket against it,
+   * and leave a payout that can never settle. Stopping the checkout is the
+   * smaller failure by a wide margin, and the only one that can be undone.
+   *
+   * Both halves are checked: a row can be marked connected and still name no
+   * account, and charging "on behalf of" nothing is a platform charge wearing
+   * a workspace's label.
+   */
+  private async requireMerchantAccount(
+    organizationId: number,
+  ): Promise<string> {
+    const account = await this.merchants.findAccount(organizationId);
+    if (!account.connected || !account.accountId) {
+      throw DomainException.conflict(NO_MERCHANT_ACCOUNT);
+    }
+    return account.accountId;
   }
 
   private async requirePayable(orderId: string): Promise<PayableOrder> {

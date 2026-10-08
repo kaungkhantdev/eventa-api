@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, isNull, like, sql } from 'drizzle-orm';
+import { and, eq, isNull, like, ne, sql } from 'drizzle-orm';
 import { PLATFORM_ORG_SLUG } from '../../common/tenancy/platform-org';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
@@ -28,6 +28,14 @@ const ATTENDEE_PERSONA = 'attendee';
 const PENDING_STATUS = 'Unconfirmed';
 const ACTIVE_STATUS = 'Active';
 
+/** Just enough to sign a fresh token and address the email to a person. */
+export interface PendingVerification {
+  organizationId: number;
+  userId: string;
+  name: string;
+  email: string;
+}
+
 export interface AttendeeAccountInput {
   name: string;
   email: string;
@@ -53,6 +61,63 @@ export interface BootstrapResult {
 @Injectable()
 export class SignupRepository {
   constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+
+  /**
+   * The account this address is still waiting to confirm, if there is one.
+   *
+   * Only `Unconfirmed` matches: an active account has nothing to resend, and an
+   * invited one was sent a different link by somebody else. Returns null for
+   * every other case — including no account at all — so the caller answers
+   * identically either way and the endpoint reveals nothing.
+   */
+  async pendingVerification(
+    email: string,
+    persona: 'admin' | 'attendee',
+  ): Promise<PendingVerification | null> {
+    const [row] = await this.db
+      .select({
+        organizationId: users.organizationId,
+        userId: users.id,
+        name: users.name,
+        email: users.email,
+      })
+      .from(users)
+      .where(
+        and(
+          eq(users.email, email),
+          eq(users.persona, persona),
+          eq(users.status, PENDING_STATUS),
+          isNull(users.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  /**
+   * Is another live workspace already called this?
+   *
+   * Compared the way `uq_organizations_name` compares — lowercased and
+   * trimmed — because "Acme Events", "acme events" and " Acme Events " are one
+   * name to everybody except a byte comparison. The index is the guarantee;
+   * this exists so somebody gets a sentence rather than a 500.
+   */
+  async nameTaken(name: string, exceptOrgId?: number): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(
+        and(
+          sql`lower(btrim(${organizations.name})) = lower(btrim(${name}))`,
+          isNull(organizations.deletedAt),
+          exceptOrgId === undefined
+            ? undefined
+            : ne(organizations.id, exceptOrgId),
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
+  }
 
   /** Is this email already an organizer account anywhere? (Global, persona-scoped.) */
   async organizerEmailExists(email: string): Promise<boolean> {
@@ -227,11 +292,29 @@ export class SignupRepository {
     });
   }
 
+  /**
+   * Reconcile the `permissions` table with the catalog in code.
+   *
+   * `onConflictDoNothing` left a row alone once it existed, so a key seeded
+   * before its label was written — or before the wording was corrected — kept
+   * the old value forever, and the settings screen fell back to spacing out the
+   * key: "Ev create", "Fin manage". The catalog is the source of truth, so the
+   * table is brought up to it on every signup rather than only on the first.
+   *
+   * Only `group` and `label` are updated. The key is the identity, and grants
+   * reference it — nothing here touches those.
+   */
   private async ensureCatalog(tx: Tx): Promise<void> {
     await tx
       .insert(permissions)
       .values(PERMISSION_CATALOG)
-      .onConflictDoNothing({ target: permissions.key });
+      .onConflictDoUpdate({
+        target: permissions.key,
+        set: {
+          group: sql`excluded."group"`,
+          label: sql`excluded.label`,
+        },
+      });
   }
 
   private async insertDefaultRoles(

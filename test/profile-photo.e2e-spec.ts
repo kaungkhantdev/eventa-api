@@ -11,7 +11,8 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
 import { ObjectStoragePort } from '../src/modules/profile-photo/ports/object-storage.port';
-import { MemoryObjectStorageAdapter } from '../src/modules/profile-photo/providers/memory-object-storage.adapter';
+import { MemoryObjectStorageAdapter } from './doubles/memory-object-storage.adapter';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const RUN = Date.now();
@@ -52,13 +53,20 @@ describe('Profile photo (e2e — US-DISC-11)', () => {
       );
     }
 
+    // The double is installed here rather than selected by an env var: the app
+    // has one storage backend, and a suite that wants a different one says so
+    // out loud. `useClass` also guarantees a SINGLE instance behind the token,
+    // so the bytes this test hands to `receive` are the bytes the service reads.
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(ObjectStoragePort)
+      .useClass(MemoryObjectStorageAdapter)
+      .compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
     storage = app.get(ObjectStoragePort);
   }, 30000);

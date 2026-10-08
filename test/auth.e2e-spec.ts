@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const SLUG = 'acme-auth-test';
 const EMAIL = 'admin@acme-auth.test';
@@ -52,7 +53,7 @@ describe('Auth (e2e — envelope + passport)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
   });
 
@@ -166,6 +167,35 @@ describe('Auth (e2e — envelope + passport)', () => {
       .send({ refreshToken })
       .expect(401);
   });
+
+  /**
+   * The workspace slug is generated at sign-up and shown nowhere, so sign-in
+   * stopped asking for it (US-ACC-02). The password resolves the workspace.
+   */
+  describe('signing in without naming a workspace', () => {
+    const loginWithout = (password: string) =>
+      request(server)
+        .post('/api/v1/auth/login')
+        .send({ email: EMAIL, password });
+
+    it('signs in on email and password alone', async () => {
+      const res = await loginWithout(PASSWORD);
+
+      expect(res.status).toBe(200);
+      const data = (res.body as SuccessBody<LoginData>).data;
+      expect(data.accessToken).toEqual(expect.any(String));
+      expect(data.user.email).toBe(EMAIL);
+    });
+
+    // Identical to the refusal an unknown address gets: no workspace is named,
+    // so this cannot be used to ask which workspaces an address belongs to.
+    it('refuses a wrong password without naming a workspace', async () => {
+      const res = await loginWithout('not the password');
+
+      expect(res.status).toBe(401);
+      expect(JSON.stringify(res.body)).not.toContain(SLUG);
+    });
+  });
 });
 
 async function seed(pool: Pool): Promise<number> {
@@ -188,8 +218,12 @@ async function seed(pool: Pool): Promise<number> {
        ('setSettings','Settings','Manage settings')
      ON CONFLICT (key) DO NOTHING`,
   );
+  // `is_system` defaults to TRUE, so a bare INSERT would have this fixture claim
+  // to be a built-in role — and sign-in reconciles a built-in named Admin,
+  // Organizer or Staff up to the full grant set its name carries, widening the
+  // narrow grants this seed holds on purpose. This role is the spec's own.
   const role = await pool.query<{ id: string }>(
-    `INSERT INTO roles (organization_id, name, description) VALUES ($1,'Admin','Full access') RETURNING id`,
+    `INSERT INTO roles (organization_id, name, description, is_system) VALUES ($1,'Admin','Full access',false) RETURNING id`,
     [orgId],
   );
   const roleId = Number(role.rows[0].id);

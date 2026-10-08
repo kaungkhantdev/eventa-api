@@ -8,6 +8,7 @@ import { eventCancelledEvent } from './events/event-cancelled.event';
 import { eventPublishedEvent } from './events/event-published.event';
 import { toEventResponse } from './events.mapper';
 import { EventsRepository } from './events.repository';
+import { sanitizeDescription } from './rich-text';
 import { TicketAvailabilityPort } from './ports/ticket-availability.port';
 import type {
   CancelEventInput,
@@ -44,6 +45,27 @@ const PUBLISH_REQUIREMENTS = {
 } as const;
 type PublishRequirement = keyof typeof PUBLISH_REQUIREMENTS;
 
+/**
+ * The description is rich text an ORGANIZER authors and an ATTENDEE loads on a
+ * public page, so it is sanitised on the way IN — both write paths below go
+ * through these. Cleaning on read instead would put the obligation on every
+ * consumer, and the first one to forget serves the payload.
+ */
+function cleanDescription(html: string | undefined): string | null {
+  if (html === undefined) return null;
+  return sanitizeDescription(html) || null;
+}
+
+/**
+ * The same, for a PATCH. Absent means "leave it alone" and null means "clear
+ * it" — neither is a value to clean, and both must survive untouched.
+ */
+function withCleanDescription(input: UpdateEventInput): UpdateEventInput {
+  const { description } = input;
+  if (description === undefined || description === null) return input;
+  return { ...input, description: sanitizeDescription(description) };
+}
+
 /** Fields a PATCH may set on an event (Basics + Date/Location). */
 const UPDATABLE_KEYS: (keyof NewEventValues & keyof UpdateEventInput)[] = [
   'name',
@@ -60,6 +82,10 @@ const UPDATABLE_KEYS: (keyof NewEventValues & keyof UpdateEventInput)[] = [
   'onlineNote',
   'seatingMode',
   'capacity',
+  'waitlistEnabled',
+  // Applies to registrations placed from now on: each order keeps the rule it
+  // was placed under (orders.requires_approval), so a flip never strands one.
+  'requiresApproval',
   'coverImage',
   'accentColor',
   'contactEmail',
@@ -108,7 +134,7 @@ export class EventsService {
       status,
       bucket: bucketForStatus(status),
       startAt: input.startAt,
-      description: input.description ?? null,
+      description: cleanDescription(input.description),
       categoryId: input.categoryId ?? null,
       organizerName,
       createdBy: actor.userId,
@@ -166,6 +192,10 @@ export class EventsService {
       onlineNote: src.onlineNote,
       seatingMode: src.seatingMode,
       capacity: src.capacity,
+      // A setting, not a queue: the copy starts with the waitlist switched on
+      // or off as the original was, and with nobody on it (US-EVT-13).
+      waitlistEnabled: src.waitlistEnabled,
+      requiresApproval: src.requiresApproval,
       coverImage: src.coverImage,
       accentColor: src.accentColor,
       organizerName: src.organizerName,
@@ -194,7 +224,7 @@ export class EventsService {
     const updated = await this.repo.update(
       actor.organizationId,
       eventId,
-      pickDefined(input, UPDATABLE_KEYS),
+      pickDefined(withCleanDescription(input), UPDATABLE_KEYS),
       event.version,
     );
     if (!updated) throw this.staleEvent();

@@ -1,5 +1,6 @@
 import {
   Body,
+  Param,
   Controller,
   Headers,
   HttpCode,
@@ -48,15 +49,17 @@ export class PaymentsController {
    * JSON object would never verify.
    */
   @Public()
-  @Post('webhook')
+  @Post('webhook/:token')
   @HttpCode(HttpStatus.OK)
   @SkipResponseEnvelope()
   @ApiExcludeEndpoint()
   webhook(
+    @Param('token') token: string,
     @Req() req: RawBodyRequest<Request>,
     @Headers(SIGNATURE_HEADER) signature: string | undefined,
   ): Promise<WebhookAck> {
     return this.payments.handleWebhook(
+      token,
       req.rawBody ?? Buffer.alloc(0),
       signature ?? '',
     );

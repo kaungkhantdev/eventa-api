@@ -1,3 +1,4 @@
+import { memberStatusEnum } from '../../db/schema';
 export interface PermissionCatalogItem {
   key: string;
   group: string;
@@ -9,6 +10,12 @@ export interface RoleWithPermissions {
   name: string;
   description: string;
   permissions: string[];
+  /**
+   * Catalog keys this role has no recorded decision for — neither granted nor
+   * turned off. Nothing grants a permission automatically, so these are the
+   * gaps an organizer is shown and asked to answer.
+   */
+  neverOfferedPermissions: string[];
   /** Live members holding this role — the roles overview badge (US-SET-13). */
   memberCount: number;
   /** Built-in roles cannot be renamed away; custom ones are created by an Admin. */
@@ -26,14 +33,32 @@ export interface MemberRow {
   status: string;
 }
 
+/** Derived from the schema, never re-typed — the enum is the source of truth. */
+export type MemberStatus = (typeof memberStatusEnum.enumValues)[number];
+
 export interface ListMembersQuery {
   page?: number;
   limit?: number;
+  search?: string;
+  status?: MemberStatus;
+  roleId?: number;
 }
 
 export interface ListMembersOptions {
   limit: number;
   offset: number;
+  /** Already trimmed; undefined means "do not filter", never "match nothing". */
+  search?: string;
+  status?: MemberStatus;
+  roleId?: number;
+}
+
+/** How many members sit in each status — the Users tabs' counts. */
+export interface MemberStatusCounts {
+  all: number;
+  active: number;
+  invited: number;
+  suspended: number;
 }
 
 /** Payload to invite a teammate (admin side). */

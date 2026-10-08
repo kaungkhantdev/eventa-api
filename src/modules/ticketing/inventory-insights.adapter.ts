@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, gt, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, isNull, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { events, ticketTypes } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
@@ -71,6 +71,29 @@ export class InventoryInsightsAdapter extends InventoryInsightsPort {
         .orderBy(asc(sql`${ticketTypes.total} - ${ticketTypes.sold}`))
         .limit(limit),
     );
+  }
+
+  /**
+   * Whether anything has ever been put on sale — the checklist's fourth step.
+   *
+   * Any status counts, paused and scheduled included: the step is "add at least
+   * one so you can publish", and a tier that exists has done that whether or
+   * not it happens to be selling this minute. Soft-deleted ones do not, because
+   * a workspace that deleted its only tier is back where it started.
+   */
+  async hasTicketType(organizationId: number): Promise<boolean> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({ any: sql<boolean>`count(*) > 0` })
+        .from(ticketTypes)
+        .where(
+          and(
+            eq(ticketTypes.organizationId, organizationId),
+            isNull(ticketTypes.deletedAt),
+          ),
+        );
+      return row.any;
+    });
   }
 }
 

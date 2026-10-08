@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, ilike, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
 import { DomainException } from '../../common/errors/domain.exception';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
@@ -21,6 +22,8 @@ import type {
   PermissionCatalogItem,
   RoleWithPermissions,
 } from './access.types';
+import { roleGrantStates } from './role-grants';
+import type { RoleGrantRow } from './role-grants';
 
 const ACTIVE_STATUS = 'Active' as const;
 /** The role that must never be left without a holder. */
@@ -86,23 +89,68 @@ export class AccessRepository {
     });
   }
 
-  /** Replace the role's granted keys (grant/revoke) atomically, tenant-checked. */
+  /**
+   * Record the organizer's decision about every permission key, for this role.
+   *
+   * A key that is turned off is RECORDED as `granted = false`, not deleted,
+   * because deleting it left "the organizer took this away" and "nobody here
+   * has ever been asked about this key" as the same absence on disk. Those are
+   * different facts — one is a decision to leave alone, the other an open
+   * question the roles editor has to put to somebody — and nothing else in the
+   * schema tells them apart. Every read filters on `granted`, so a false row
+   * grants nothing.
+   *
+   * The second statement therefore CREATES the rows it needs rather than only
+   * updating the ones that exist. A save is a decision about the whole catalog,
+   * because that is what the editor shows: a switch per key, every one of them
+   * either on or off when the organizer presses save. So a key left off is
+   * refused whether or not the role had a row for it, and the refusal is
+   * written down.
+   *
+   * It did not used to be. While an automatic backfill existed, writing a row
+   * for a key the role had never been offered would have sealed shut the gap
+   * that backfill existed to fill, so this statement only ever UPDATED. The
+   * backfill is gone — nothing grants a permission automatically now — so there
+   * is no gap left to seal, and the old objection has become the opposite
+   * argument: without these rows a key the organizer has decided about would go
+   * on being reported as an open question, and they would be asked again
+   * forever.
+   *
+   * Provisioning a workspace deliberately does NOT do this (see
+   * `insertDefaultRoles`): the default matrix is the product's choice, not a
+   * decision anybody at this workspace made, so a key outside it stays an open
+   * question until an organizer answers it.
+   */
   async setRolePermissions(
     organizationId: number,
     roleId: number,
     keys: PermissionKey[],
   ): Promise<void> {
     await withTenant(this.db, organizationId, async (tx) => {
-      await tx
-        .delete(rolePermissions)
-        .where(eq(rolePermissions.roleId, roleId));
       if (keys.length > 0) {
         await tx
           .insert(rolePermissions)
           .values(
             keys.map((key) => ({ roleId, permissionKey: key, granted: true })),
-          );
+          )
+          .onConflictDoUpdate({
+            target: [rolePermissions.roleId, rolePermissions.permissionKey],
+            set: { granted: true },
+          });
       }
+      // Driven by `permissions` rather than by a list from this process, so the
+      // refusals cover exactly the keys the catalog actually has — a key this
+      // code knew about but the database did not would violate the foreign key.
+      // `::bigint` because the role id is a bound parameter in a SELECT list:
+      // without the cast its type is Postgres' to infer, and an `unknown`
+      // parameter there is a planner error rather than a coercion.
+      await tx.execute(sql`
+        insert into role_permissions (role_id, permission_key, granted)
+        select ${roleId}::bigint, p.key, false
+          from permissions p
+         where p.key <> all(${keyArray(keys)})
+        on conflict (role_id, permission_key) do update set granted = false
+      `);
     });
   }
 
@@ -112,13 +160,16 @@ export class AccessRepository {
     opts: ListMembersOptions,
   ): Promise<{ items: MemberRow[]; total: number }> {
     return withTenant(this.db, organizationId, async (tx) => {
-      const where = and(
-        eq(memberships.organizationId, organizationId),
-        isNull(memberships.deletedAt),
-      );
+      const where = memberFilter(organizationId, opts);
+      // The count carries the SAME joins as the rows. Counting `memberships`
+      // alone was already a latent mismatch, and a search on a name or an email
+      // makes it certain: the filter lives on `users`, so a count that never
+      // joined it would describe a different set from the page beneath it.
       const [{ count }] = await tx
         .select({ count: sql<number>`count(*)::int` })
         .from(memberships)
+        .innerJoin(users, eq(users.id, memberships.userId))
+        .innerJoin(roles, eq(roles.id, memberships.roleId))
         .where(where);
       const items = await tx
         .select(MEMBER_COLUMNS)
@@ -130,6 +181,33 @@ export class AccessRepository {
         .limit(opts.limit)
         .offset(opts.offset);
       return { items, total: count };
+    });
+  }
+
+  /**
+   * How many members sit in each status, for the Users tabs (US-ACC-02).
+   *
+   * One grouped pass rather than four counting queries, and deliberately
+   * unfiltered by status — a tab has to show its own total even while another
+   * tab is the one selected, or the counts would all collapse to the current
+   * view. Search and role DO apply: narrowing to "anong" should narrow the tabs.
+   */
+  async countMembersByStatus(
+    organizationId: number,
+    opts: Pick<ListMembersOptions, 'search' | 'roleId'>,
+  ): Promise<Record<string, number>> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({
+          status: memberships.status,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(memberships)
+        .innerJoin(users, eq(users.id, memberships.userId))
+        .innerJoin(roles, eq(roles.id, memberships.roleId))
+        .where(memberFilter(organizationId, opts))
+        .groupBy(memberships.status);
+      return Object.fromEntries(rows.map((r) => [r.status, r.count]));
     });
   }
 
@@ -502,30 +580,67 @@ export class AccessRepository {
       .orderBy(asc(roles.id));
     if (roleRows.length === 0) return [];
 
-    const grants = await tx
+    const decisions = await this.decisionsByRole(
+      tx,
+      roleRows.map((r) => r.id),
+    );
+    const catalog = await this.catalogKeys(tx);
+    const memberCount = await this.memberCountByRole(tx, organizationId);
+
+    return roleRows.map((r) => {
+      const states = roleGrantStates(catalog, decisions.get(r.id) ?? []);
+      return {
+        ...r,
+        permissions: states.granted,
+        neverOfferedPermissions: states.neverOffered,
+        memberCount: memberCount.get(r.id) ?? 0,
+      };
+    });
+  }
+
+  /**
+   * Every decision recorded for these roles — the refusals included.
+   *
+   * Deliberately NOT filtered to `granted`, unlike every enforcement read: a
+   * refusal is what distinguishes a key an organizer turned off from one nobody
+   * here has ever been asked about, so filtering it out would collapse the two
+   * states this surface exists to report.
+   */
+  private async decisionsByRole(
+    tx: Tx,
+    roleIds: number[],
+  ): Promise<Map<number, RoleGrantRow[]>> {
+    const rows = await tx
       .select({
         roleId: rolePermissions.roleId,
         key: rolePermissions.permissionKey,
+        granted: rolePermissions.granted,
       })
       .from(rolePermissions)
-      .where(
-        and(
-          inArray(
-            rolePermissions.roleId,
-            roleRows.map((r) => r.id),
-          ),
-          eq(rolePermissions.granted, true),
-        ),
-      );
-
-    const byRole = new Map<number, string[]>();
-    for (const g of grants) {
-      const list = byRole.get(g.roleId);
-      if (list) list.push(g.key);
-      else byRole.set(g.roleId, [g.key]);
+      .where(inArray(rolePermissions.roleId, roleIds));
+    const byRole = new Map<number, RoleGrantRow[]>();
+    for (const row of rows) {
+      const list = byRole.get(row.roleId);
+      if (list) list.push(row);
+      else byRole.set(row.roleId, [row]);
     }
+    return byRole;
+  }
 
-    const counts = await tx
+  /** The catalog's keys, in the order the roles editor lists them. */
+  private async catalogKeys(tx: Tx): Promise<string[]> {
+    const rows = await tx
+      .select({ key: permissions.key })
+      .from(permissions)
+      .orderBy(asc(permissions.group), asc(permissions.key));
+    return rows.map((row) => row.key);
+  }
+
+  private async memberCountByRole(
+    tx: Tx,
+    organizationId: number,
+  ): Promise<Map<number, number>> {
+    const rows = await tx
       .select({ roleId: memberships.roleId })
       .from(memberships)
       .where(
@@ -534,38 +649,83 @@ export class AccessRepository {
           isNull(memberships.deletedAt),
         ),
       );
-    const memberCount = new Map<number, number>();
-    for (const row of counts) {
-      memberCount.set(row.roleId, (memberCount.get(row.roleId) ?? 0) + 1);
+    const counts = new Map<number, number>();
+    for (const row of rows) {
+      counts.set(row.roleId, (counts.get(row.roleId) ?? 0) + 1);
     }
-
-    return roleRows.map((r) => ({
-      ...r,
-      permissions: byRole.get(r.id) ?? [],
-      memberCount: memberCount.get(r.id) ?? 0,
-    }));
+    return counts;
   }
 
-  /** Permission keys granted to the user in this org (via their active membership's role). */
+  /**
+   * Permission keys granted to the user in this org (via their active
+   * membership's role).
+   *
+   * Tenant-scoped like every other read here, and for a reason that does not
+   * show up on a developer's machine: `memberships` carries RLS, and the
+   * owning role the local DATABASE_URL connects as bypasses it. Read outside
+   * `withTenant` there is no `app.current_org`, so under the role the app
+   * connects as in staging the policy matches nothing and this returns an
+   * empty list — which every `@RequirePermissions` route then reads as "holds
+   * nothing" and answers 403. Proven in test/rls.e2e-spec.ts under SET ROLE.
+   */
   async getPermissions(
     organizationId: number,
     userId: string,
   ): Promise<string[]> {
-    const rows = await this.db
-      .select({ key: rolePermissions.permissionKey })
-      .from(memberships)
-      .innerJoin(
-        rolePermissions,
-        eq(rolePermissions.roleId, memberships.roleId),
-      )
-      .where(
-        and(
-          eq(memberships.organizationId, organizationId),
-          eq(memberships.userId, userId),
-          eq(memberships.status, 'Active'),
-          eq(rolePermissions.granted, true),
-        ),
-      );
-    return rows.map((r) => r.key);
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({ key: rolePermissions.permissionKey })
+        .from(memberships)
+        .innerJoin(
+          rolePermissions,
+          eq(rolePermissions.roleId, memberships.roleId),
+        )
+        .where(
+          and(
+            eq(memberships.organizationId, organizationId),
+            eq(memberships.userId, userId),
+            eq(memberships.status, 'Active'),
+            eq(rolePermissions.granted, true),
+          ),
+        );
+      return rows.map((r) => r.key);
+    });
   }
+}
+
+/**
+ * The keys as a Postgres array, for `<> all(...)`.
+ *
+ * The cast is written out rather than left to inference because a role stripped
+ * of everything sends no keys at all, and `array[]` with nothing in it gives
+ * Postgres no element to take a type from.
+ */
+function keyArray(keys: readonly PermissionKey[]): SQL {
+  const items = keys.map((key) => sql`${key}`);
+  return sql`array[${sql.join(items, sql`, `)}]::permission_key[]`;
+}
+
+/**
+ * The Users list's WHERE, shared by the page, its count and the tab counts so
+ * the three cannot describe different sets of people.
+ *
+ * `search` is matched against name OR email because the box says "name or
+ * email" — somebody pasting an address expects it to work.
+ */
+function memberFilter(
+  organizationId: number,
+  opts: Pick<ListMembersOptions, 'search' | 'status' | 'roleId'>,
+) {
+  return and(
+    eq(memberships.organizationId, organizationId),
+    isNull(memberships.deletedAt),
+    opts.status ? eq(memberships.status, opts.status) : undefined,
+    opts.roleId ? eq(memberships.roleId, opts.roleId) : undefined,
+    opts.search
+      ? or(
+          ilike(users.name, `%${opts.search}%`),
+          ilike(users.email, `%${opts.search}%`),
+        )
+      : undefined,
+  );
 }

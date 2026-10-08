@@ -9,6 +9,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const ORG = { slug: 'confirm-e2e', name: 'Confirm E2E' };
 const FREE = 'cfm-free-meetup';
@@ -57,7 +58,7 @@ describe('Confirming a registration (e2e — US-DISC-06)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
   }, 30000);
 
@@ -703,5 +704,11 @@ async function insertSeats(
 }
 
 async function cleanup(pool: Pool): Promise<void> {
+  // audit_events is ON DELETE RESTRICT (a failed login writes one), so clear it first.
+  await pool.query(
+    `DELETE FROM audit_events WHERE organization_id IN
+       (SELECT id FROM organizations WHERE slug = $1)`,
+    [ORG.slug],
+  );
   await pool.query(`DELETE FROM organizations WHERE slug = $1`, [ORG.slug]);
 }

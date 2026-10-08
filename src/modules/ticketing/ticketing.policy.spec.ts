@@ -218,4 +218,25 @@ describe('TicketingPolicy', () => {
       );
     });
   });
+
+  describe('raisesAllocation (US-REG-04)', () => {
+    it('is a raise when a limited allocation grows', () => {
+      expect(policy.raisesAllocation(10, 12)).toBe(true);
+    });
+
+    it('is not a raise when the allocation stays or shrinks', () => {
+      expect(policy.raisesAllocation(10, 10)).toBe(false);
+      expect(policy.raisesAllocation(12, 10)).toBe(false);
+    });
+
+    it('is not a raise when an unlimited tier is given a number', () => {
+      // 0 means unlimited: any number is a cut, never new places.
+      expect(policy.raisesAllocation(0, 50)).toBe(false);
+    });
+
+    it('is not a raise when a tier becomes unlimited', () => {
+      // Nothing can be held against "unlimited", so there is nothing to offer.
+      expect(policy.raisesAllocation(10, 0)).toBe(false);
+    });
+  });
 });

@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { listenOnLoopback } from './support/loopback';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG_A = { slug: 'evt-e2e-a', name: 'Events E2E A' };
@@ -72,7 +73,7 @@ describe('Events (e2e — create draft + list)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(buildValidationPipe());
-    await app.init();
+    await listenOnLoopback(app);
     server = app.getHttpServer() as Server;
   });
 
@@ -350,8 +351,12 @@ async function grantRole(
       [key, PERM_GROUP[key], key],
     );
   }
+  // `is_system` defaults to TRUE, so a bare INSERT would have this fixture claim
+  // to be a built-in role — and sign-in reconciles a built-in named Admin,
+  // Organizer or Staff up to the full grant set its name carries, widening the
+  // grants each case here holds on purpose. This role is the spec's own.
   const role = await pool.query<{ id: string }>(
-    `INSERT INTO roles (organization_id, name, description) VALUES ($1, $2, 'seed') RETURNING id`,
+    `INSERT INTO roles (organization_id, name, description, is_system) VALUES ($1, $2, 'seed', false) RETURNING id`,
     [orgId, roleName],
   );
   const roleId = Number(role.rows[0].id);
@@ -376,7 +381,12 @@ async function cleanup(pool: Pool): Promise<void> {
     [ATTENDEE_A],
   );
   await pool.query(`DELETE FROM users WHERE email = $1`, [ATTENDEE_A]);
-  await pool.query(`DELETE FROM organizations WHERE slug = ANY($1)`, [
-    [ORG_A.slug, ORG_B.slug],
-  ]);
+  const slugs = [ORG_A.slug, ORG_B.slug];
+  // audit_events is ON DELETE RESTRICT (a failed login writes one), so clear it first.
+  await pool.query(
+    `DELETE FROM audit_events WHERE organization_id IN
+       (SELECT id FROM organizations WHERE slug = ANY($1))`,
+    [slugs],
+  );
+  await pool.query(`DELETE FROM organizations WHERE slug = ANY($1)`, [slugs]);
 }
