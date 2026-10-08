@@ -9,7 +9,6 @@ import type {
 import { OutboxPort } from '../platform/outbox.port';
 import { AuthRepository } from './auth.repository';
 import type { PermissionsService } from '../access/permissions.service';
-import type { SystemRolesService } from '../access/system-roles.service';
 import type { UsersRepository } from '../users/users.repository';
 import type { LoginThrottleService } from './login-throttle.service';
 import type { SignupService } from '../auth-signup/auth-signup.service';
@@ -54,7 +53,6 @@ describe('AuthService', () => {
   let repo: jest.Mocked<AuthRepository>;
   let users: jest.Mocked<UsersRepository>;
   let permissions: jest.Mocked<PermissionsService>;
-  let systemRoles: jest.Mocked<SystemRolesService>;
   let passwords: jest.Mocked<PasswordService>;
   let tokens: jest.Mocked<TokenService>;
   let outbox: jest.Mocked<OutboxPort>;
@@ -80,9 +78,6 @@ describe('AuthService', () => {
     permissions = {
       getFor: jest.fn().mockResolvedValue([]),
     } as unknown as jest.Mocked<PermissionsService>;
-    systemRoles = {
-      reconcile: jest.fn().mockResolvedValue(undefined),
-    } as unknown as jest.Mocked<SystemRolesService>;
     passwords = {
       hash: jest.fn(),
       verify: jest.fn(),
@@ -115,7 +110,6 @@ describe('AuthService', () => {
       outbox,
       throttle,
       signup,
-      systemRoles,
     );
   });
 
@@ -504,17 +498,18 @@ describe('AuthService', () => {
     });
   });
   /**
-   * Forward convergence of the built-in roles.
+   * What a sign-in writes, now that it writes nothing about roles.
    *
-   * `DEFAULT_ROLES` is applied once, when a workspace is created, so a
-   * permission key added to the catalog by a later migration never reaches a
-   * workspace older than it — an Admin described as "Full access" quietly
-   * cannot do the new thing. Migration 0067 repairs the workspaces that exist
-   * today; reconciling at sign-in is what keeps the NEXT such key from
-   * reopening the same gap, and sign-in is the natural moment because it is
-   * where the app holds a tenant context and is about to read the caller's keys.
+   * Two designs tried to top a workspace's built-in roles up to the permission
+   * catalog here, and both silently reversed an organizer's decision: Admin's
+   * defaults are the whole catalog, so a workspace provisioned after a key
+   * appeared was handed it at once, and a key granted and later revoked leaves
+   * an old role with no row to tell the revoke from a gap. Nothing on disk
+   * records what a role was ever offered, so no rule over dates can recover
+   * that intent — the gap is shown to an organizer instead (see
+   * `neverOfferedPermissions`). Signing in therefore touches no role at all.
    */
-  describe('startSession \u2014 converging the built-in roles', () => {
+  describe('startSession', () => {
     const session: Omit<LoginInput, 'email' | 'password' | 'orgSlug'> = {
       device: 'jest',
       ip: null,
@@ -524,10 +519,25 @@ describe('AuthService', () => {
       repo.createSession.mockResolvedValue('sess-1');
     });
 
-    it('reconciles this workspace BEFORE reading the permissions it answers with', async () => {
+    /**
+     * The sign-in's write surface, asserted as a whole: a session row, the
+     * last-active stamp and the outbox event, in that order, and nothing else.
+     * Stated this way because the regression to guard against is a role write
+     * returning here — which is a write this list does not have room for, and
+     * which would have to run before `getFor` to affect the answer.
+     */
+    it('writes a session and the sign-in record, and nothing before them', async () => {
       const order: string[] = [];
-      systemRoles.reconcile.mockImplementation(() => {
-        order.push('reconcile');
+      repo.createSession.mockImplementation(() => {
+        order.push('createSession');
+        return Promise.resolve('sess-1');
+      });
+      users.touchLastActive.mockImplementation(() => {
+        order.push('touchLastActive');
+        return Promise.resolve();
+      });
+      outbox.enqueue.mockImplementation(() => {
+        order.push('enqueue');
         return Promise.resolve();
       });
       permissions.getFor.mockImplementation(() => {
@@ -537,36 +547,34 @@ describe('AuthService', () => {
 
       await service.startSession({ user: userRow(), org }, session);
 
-      expect(systemRoles.reconcile).toHaveBeenCalledWith(org.id);
-      // Order is the point, not an implementation detail: this response IS
-      // `me.permissions`. Reconciling after the read would hand the caller the
-      // stale set and only take effect on their next sign-in.
-      expect(order).toEqual(['reconcile', 'getFor']);
+      expect(order).toEqual([
+        'createSession',
+        'touchLastActive',
+        'enqueue',
+        'getFor',
+      ]);
     });
 
-    /**
-     * Errors are surfaced, never swallowed. A reconcile that fails means this
-     * workspace's roles are in an unknown state, and answering with a
-     * permission set derived from it would be a silent authorization result.
-     */
-    it('fails the sign-in when the reconcile fails, rather than swallowing it', async () => {
-      systemRoles.reconcile.mockRejectedValue(new Error('deadlock detected'));
+    it('answers with the permissions the workspace already holds', async () => {
+      permissions.getFor.mockResolvedValue(['evCreate']);
 
-      await expect(
-        service.startSession({ user: userRow(), org }, session),
-      ).rejects.toThrow('deadlock detected');
-      expect(permissions.getFor).not.toHaveBeenCalled();
+      const result = await service.startSession(
+        { user: userRow(), org },
+        session,
+      );
+
+      expect(permissions.getFor).toHaveBeenCalledWith(org.id, 'u1');
+      expect(result.user.permissions).toEqual(['evCreate']);
     });
 
-    // All three sign-in routes (password, social, 2FA) funnel through
-    // `startSession`, so covering that one seam covers all of them.
-    it('reconciles on a password sign-in too, through that one seam', async () => {
-      users.findLoginUser.mockResolvedValue({ user: userRow(), org });
-      passwords.verify.mockResolvedValue(true);
+    it('signs an attendee in all the same', async () => {
+      const result = await service.startSession(
+        { user: userRow({ persona: 'attendee' }), org },
+        session,
+      );
 
-      await service.login(input);
-
-      expect(systemRoles.reconcile).toHaveBeenCalledWith(org.id);
+      expect(result.accessToken).toBe('access.jwt');
+      expect(repo.createSession).toHaveBeenCalled();
     });
   });
 });

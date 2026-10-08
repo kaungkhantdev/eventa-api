@@ -22,10 +22,8 @@ import type {
   PermissionCatalogItem,
   RoleWithPermissions,
 } from './access.types';
-import {
-  DEFAULT_ROLES,
-  backfillableGrantsForSystemRole,
-} from './workspace-defaults';
+import { roleGrantStates } from './role-grants';
+import type { RoleGrantRow } from './role-grants';
 
 const ACTIVE_STATUS = 'Active' as const;
 /** The role that must never be left without a holder. */
@@ -92,23 +90,36 @@ export class AccessRepository {
   }
 
   /**
-   * Replace the role's granted keys (grant/revoke) atomically, tenant-checked.
+   * Record the organizer's decision about every permission key, for this role.
    *
-   * A key that is turned off is RECORDED as `granted = false`, not deleted.
-   * Deleting it left "the organizer took this away" and "this workspace was
-   * never offered this key" as the same absence, and the two have to be told
-   * apart: `reconcileSystemRoles` fills the second and must never undo the
-   * first. Every read filters on `granted`, so a false row grants nothing.
+   * A key that is turned off is RECORDED as `granted = false`, not deleted,
+   * because deleting it left "the organizer took this away" and "nobody here
+   * has ever been asked about this key" as the same absence on disk. Those are
+   * different facts — one is a decision to leave alone, the other an open
+   * question the roles editor has to put to somebody — and nothing else in the
+   * schema tells them apart. Every read filters on `granted`, so a false row
+   * grants nothing.
    *
-   * The second statement only ever UPDATES: it records a removal for keys the
-   * role already has a row for, and creates nothing. A key with no row is one
-   * this workspace was never offered, and the editor cannot say so — it draws
-   * the switch off exactly as it does for a key the organizer took away, since
-   * it is seeded from the keys the role grants. Writing a row for it would
-   * record a decision nobody made, and because the backfill never overwrites a
-   * row, it would seal shut the very gap the backfill exists to close: save any
-   * older workspace's "Full access" Admin once, and it could never be given
-   * `finManage` again.
+   * The second statement therefore CREATES the rows it needs rather than only
+   * updating the ones that exist. A save is a decision about the whole catalog,
+   * because that is what the editor shows: a switch per key, every one of them
+   * either on or off when the organizer presses save. So a key left off is
+   * refused whether or not the role had a row for it, and the refusal is
+   * written down.
+   *
+   * It did not used to be. While an automatic backfill existed, writing a row
+   * for a key the role had never been offered would have sealed shut the gap
+   * that backfill existed to fill, so this statement only ever UPDATED. The
+   * backfill is gone — nothing grants a permission automatically now — so there
+   * is no gap left to seal, and the old objection has become the opposite
+   * argument: without these rows a key the organizer has decided about would go
+   * on being reported as an open question, and they would be asked again
+   * forever.
+   *
+   * Provisioning a workspace deliberately does NOT do this (see
+   * `insertDefaultRoles`): the default matrix is the product's choice, not a
+   * decision anybody at this workspace made, so a key outside it stays an open
+   * question until an organizer answers it.
    */
   async setRolePermissions(
     organizationId: number,
@@ -127,65 +138,18 @@ export class AccessRepository {
             set: { granted: true },
           });
       }
-      await tx.execute(sql`
-        update role_permissions
-           set granted = false
-         where role_id = ${roleId}
-           and permission_key <> all(${keyArray(keys)})
-      `);
-    });
-  }
-
-  /**
-   * Give this workspace's BUILT-IN roles the keys they were always meant to
-   * hold, without overriding anything an organizer decided.
-   *
-   * A workspace receives its roles once, at creation, so a permission key added
-   * to the catalog later never reaches a workspace older than it: `finManage`
-   * (0034), `evProgramView` (0038) and `regManage` (0042) are all missing from
-   * every workspace made before them, and the Admin who "has full access" quietly
-   * cannot void an invoice. `ON CONFLICT DO NOTHING` keeps a recorded removal —
-   * a row saying `granted = false` conflicts, so it survives — but it is only
-   * half the safety property, because a removal made before removals were
-   * recorded left no row at all. The other half is
-   * `backfillableGrantsForSystemRole`: restricted to the keys that postdate the
-   * roles themselves, an absence cannot be an old revoke, and this can only
-   * fill a gap. Widened to the whole of `DEFAULT_ROLES` it would hand an Admin
-   * back the `finRefund` somebody deliberately took away — which is why
-   * migration `0067` is restricted to the same three keys, and why the two
-   * lists are compared in `workspace-defaults.spec.ts`.
-   *
-   * This is deliberately NOT a sweep at boot. `roles` has RLS enabled, the role
-   * the app connects as is not BYPASSRLS, and at boot there is no tenant GUC to
-   * set — so a boot sweep would see no rows in production while appearing to
-   * work on a developer's superuser connection. Migrations do run as the owning
-   * role and are the right place for a one-off backfill, but they are a separate
-   * script rather than a boot step. That leaves per-workspace reconciliation,
-   * scoped by the same tenant transaction as everything else here.
-   *
-   * The explicit `organization_id` predicate is not redundant with RLS for the
-   * same reason: it is what makes a superuser connection behave exactly as
-   * `eventa_app` does, instead of silently reconciling every tenant on disk.
-   * Joining `permissions` keeps the `permission_key` foreign key satisfiable
-   * when the catalog and this code disagree.
-   */
-  async reconcileSystemRoles(organizationId: number): Promise<void> {
-    const defaults = DEFAULT_ROLES.flatMap(({ name }) =>
-      backfillableGrantsForSystemRole(name).map(
-        (key) => sql`(${name}, ${key})`,
-      ),
-    );
-    await withTenant(this.db, organizationId, async (tx) => {
+      // Driven by `permissions` rather than by a list from this process, so the
+      // refusals cover exactly the keys the catalog actually has — a key this
+      // code knew about but the database did not would violate the foreign key.
+      // `::bigint` because the role id is a bound parameter in a SELECT list:
+      // without the cast its type is Postgres' to infer, and an `unknown`
+      // parameter there is a planner error rather than a coercion.
       await tx.execute(sql`
         insert into role_permissions (role_id, permission_key, granted)
-        select r.id, p.key, true
-          from roles r
-          join (values ${sql.join(defaults, sql`, `)}) as d(role_name, key)
-            on d.role_name = r.name
-          join permissions p on p.key = d.key::permission_key
-         where r.organization_id = ${organizationId}
-           and r.is_system
-        on conflict (role_id, permission_key) do nothing
+        select ${roleId}::bigint, p.key, false
+          from permissions p
+         where p.key <> all(${keyArray(keys)})
+        on conflict (role_id, permission_key) do update set granted = false
       `);
     });
   }
@@ -616,30 +580,67 @@ export class AccessRepository {
       .orderBy(asc(roles.id));
     if (roleRows.length === 0) return [];
 
-    const grants = await tx
+    const decisions = await this.decisionsByRole(
+      tx,
+      roleRows.map((r) => r.id),
+    );
+    const catalog = await this.catalogKeys(tx);
+    const memberCount = await this.memberCountByRole(tx, organizationId);
+
+    return roleRows.map((r) => {
+      const states = roleGrantStates(catalog, decisions.get(r.id) ?? []);
+      return {
+        ...r,
+        permissions: states.granted,
+        neverOfferedPermissions: states.neverOffered,
+        memberCount: memberCount.get(r.id) ?? 0,
+      };
+    });
+  }
+
+  /**
+   * Every decision recorded for these roles — the refusals included.
+   *
+   * Deliberately NOT filtered to `granted`, unlike every enforcement read: a
+   * refusal is what distinguishes a key an organizer turned off from one nobody
+   * here has ever been asked about, so filtering it out would collapse the two
+   * states this surface exists to report.
+   */
+  private async decisionsByRole(
+    tx: Tx,
+    roleIds: number[],
+  ): Promise<Map<number, RoleGrantRow[]>> {
+    const rows = await tx
       .select({
         roleId: rolePermissions.roleId,
         key: rolePermissions.permissionKey,
+        granted: rolePermissions.granted,
       })
       .from(rolePermissions)
-      .where(
-        and(
-          inArray(
-            rolePermissions.roleId,
-            roleRows.map((r) => r.id),
-          ),
-          eq(rolePermissions.granted, true),
-        ),
-      );
-
-    const byRole = new Map<number, string[]>();
-    for (const g of grants) {
-      const list = byRole.get(g.roleId);
-      if (list) list.push(g.key);
-      else byRole.set(g.roleId, [g.key]);
+      .where(inArray(rolePermissions.roleId, roleIds));
+    const byRole = new Map<number, RoleGrantRow[]>();
+    for (const row of rows) {
+      const list = byRole.get(row.roleId);
+      if (list) list.push(row);
+      else byRole.set(row.roleId, [row]);
     }
+    return byRole;
+  }
 
-    const counts = await tx
+  /** The catalog's keys, in the order the roles editor lists them. */
+  private async catalogKeys(tx: Tx): Promise<string[]> {
+    const rows = await tx
+      .select({ key: permissions.key })
+      .from(permissions)
+      .orderBy(asc(permissions.group), asc(permissions.key));
+    return rows.map((row) => row.key);
+  }
+
+  private async memberCountByRole(
+    tx: Tx,
+    organizationId: number,
+  ): Promise<Map<number, number>> {
+    const rows = await tx
       .select({ roleId: memberships.roleId })
       .from(memberships)
       .where(
@@ -648,16 +649,11 @@ export class AccessRepository {
           isNull(memberships.deletedAt),
         ),
       );
-    const memberCount = new Map<number, number>();
-    for (const row of counts) {
-      memberCount.set(row.roleId, (memberCount.get(row.roleId) ?? 0) + 1);
+    const counts = new Map<number, number>();
+    for (const row of rows) {
+      counts.set(row.roleId, (counts.get(row.roleId) ?? 0) + 1);
     }
-
-    return roleRows.map((r) => ({
-      ...r,
-      permissions: byRole.get(r.id) ?? [],
-      memberCount: memberCount.get(r.id) ?? 0,
-    }));
+    return counts;
   }
 
   /**
