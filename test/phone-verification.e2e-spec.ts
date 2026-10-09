@@ -7,6 +7,11 @@ process.env.LOGIN_MAX_ATTEMPTS = '2';
 // The cool-off is asserted by its own case and would otherwise 429 every other
 // one of these, since they all ask for a code as the same member.
 process.env.VERIFY_RESEND_COOLDOWN_SECONDS = '1';
+// This suite asks the same member for a dozen codes, which is well past the
+// per-window budget a real account gets. The budget is exercised in
+// `resend-throttle.service.spec.ts`, where a window can be made to lapse
+// without the suite waiting out a real one.
+process.env.VERIFY_CODE_MAX_PER_WINDOW = '50';
 
 import type { Server } from 'node:http';
 import type { INestApplication } from '@nestjs/common';

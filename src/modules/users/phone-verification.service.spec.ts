@@ -114,8 +114,7 @@ describe('PhoneVerificationService (US-DISC-11 AC3)', () => {
       ),
     } as unknown as jest.Mocked<ProfileRepository>;
     throttle = {
-      assertAllowed: jest.fn().mockResolvedValue(undefined),
-      remember: jest.fn().mockResolvedValue(undefined),
+      claim: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<ResendThrottleService>;
     const clock: Clock = { now: () => NOW };
     service = new PhoneVerificationService(repo, throttle, clock, config);
@@ -174,7 +173,7 @@ describe('PhoneVerificationService (US-DISC-11 AC3)', () => {
         code: 'VALIDATION_ERROR',
       });
       expect(repo.startPhoneChange).not.toHaveBeenCalled();
-      expect(throttle.remember).not.toHaveBeenCalled();
+      expect(throttle.claim).not.toHaveBeenCalled();
     });
 
     it('refuses the number already confirmed on the account', async () => {
@@ -193,9 +192,7 @@ describe('PhoneVerificationService (US-DISC-11 AC3)', () => {
     });
 
     it('refuses a second code inside the cool-off, and sends nothing', async () => {
-      throttle.assertAllowed.mockRejectedValue(
-        DomainException.tooManyRequests('wait'),
-      );
+      throttle.claim.mockRejectedValue(DomainException.tooManyRequests('wait'));
       await expect(service.request(auth, NEW_PHONE)).rejects.toMatchObject({
         code: 'RATE_LIMITED',
       });
@@ -204,9 +201,42 @@ describe('PhoneVerificationService (US-DISC-11 AC3)', () => {
 
     it('keys the cool-off on the account, not the number', async () => {
       await service.request(auth, NEW_PHONE);
-      const [identity] = throttle.remember.mock.calls[0];
+      const [identity] = throttle.claim.mock.calls[0];
       expect(identity).toContain(userId);
       expect(identity).not.toContain(NEW_PHONE);
+    });
+
+    /**
+     * ONE call, and it comes first.
+     *
+     * The cool-off used to be checked here and only set after the write, so
+     * concurrent requests all passed the check before any of them set the key:
+     * one window issued as many codes as arrived at once, each a paid text and
+     * each one resetting the guess budget. Claiming it atomically, before the
+     * work, is what makes the window mean one send.
+     */
+    it('claims the window once, before anything is sent', async () => {
+      await service.request(auth, NEW_PHONE);
+
+      expect(throttle.claim).toHaveBeenCalledTimes(1);
+      expect(throttle.claim).toHaveBeenCalledWith(expect.any(String), 'code');
+      expect(throttle.claim.mock.invocationCallOrder[0]).toBeLessThan(
+        repo.startPhoneChange.mock.invocationCallOrder[0],
+      );
+    });
+
+    /**
+     * A request that fails still spends the window. It was skipped before —
+     * `remember` came after the write and never ran when it returned null — so
+     * the one path a caller can arrange on purpose cost them nothing.
+     */
+    it('spends the window even when the write finds no profile', async () => {
+      repo.startPhoneChange.mockResolvedValue(null);
+
+      await expect(service.request(auth, NEW_PHONE)).rejects.toBeInstanceOf(
+        DomainException,
+      );
+      expect(throttle.claim).toHaveBeenCalledTimes(1);
     });
 
     it('changing the number again replaces the code in flight', async () => {

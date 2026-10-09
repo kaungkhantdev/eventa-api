@@ -53,10 +53,18 @@ const TOO_MANY_MESSAGE =
  * again — for a different number, or the same one because the text never
  * arrived — replaces the challenge wholesale, so the earlier code is dead the
  * moment the new one is written and the member gets a fresh five attempts;
- * there is never more than one code alive per account. Notification
- * preferences are deliberately NOT rewritten: whether SMS is available is
- * DERIVED from the confirmed number every time it is asked, so there is no
- * second copy of that fact to go stale (see NotificationPreferencesService).
+ * there is never more than one code alive per account.
+ *
+ * That reset is why HOW MANY TIMES they may ask is a security limit and not
+ * just a courtesy, and why `request` claims a send from `ResendThrottleService`
+ * before it writes anything. The attempt cap bounds the guesses against one
+ * code; the throttle bounds the number of codes, and therefore the number of
+ * times that cap is handed back. Neither one is a bound on its own.
+ *
+ * Notification preferences are deliberately NOT rewritten: whether SMS is
+ * available is DERIVED from the confirmed number every time it is asked, so
+ * there is no second copy of that fact to go stale (see
+ * NotificationPreferencesService).
  */
 @Injectable()
 export class PhoneVerificationService {
@@ -84,16 +92,21 @@ export class PhoneVerificationService {
    * Asking again with the same number is the resend — one endpoint, because
    * "send it again" and "I mistyped it, here is another" are the same request
    * from the member's side and the same work from ours.
+   *
+   * Which is also why both are rationed together, by one claim on the account:
+   * from here they are indistinguishable, and each one costs a paid text and
+   * hands back a fresh guess budget against the account.
    */
   async request(auth: AuthContext, phone: string): Promise<ProfileResponseDto> {
     const pendingPhone = this.requireTextable(phone);
     const current = await this.load(auth);
     this.assertNotAlreadyConfirmed(current, pendingPhone);
 
-    // After both refusals: a number we would never text, and a number that is
-    // already confirmed, should not spend the member's cool-off.
-    const identity = cooldownIdentity(auth);
-    await this.throttle.assertAllowed(identity, 'code');
+    // After both refusals — a number we would never text, and a number that is
+    // already confirmed should spend neither the cool-off nor a send from the
+    // budget — and BEFORE the write, because the claim has to cover the send
+    // whether or not the send then works.
+    await this.throttle.claim(cooldownIdentity(auth), 'code');
 
     const code = generateCode();
     const expiresAt = new Date(
@@ -114,7 +127,6 @@ export class PhoneVerificationService {
       }),
     );
     if (!saved) throw DomainException.notFound('Profile not found.');
-    await this.throttle.remember(identity);
     return toProfileResponse(saved);
   }
 
