@@ -41,4 +41,11 @@ export class SurveyDto {
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
+
+  @ApiProperty({
+    example: 4,
+    description:
+      'Send this back when saving. A save carrying a stale version is refused rather than overwriting somebody else’s edit.',
+  })
+  version!: number;
 }

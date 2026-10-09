@@ -27,8 +27,29 @@ export interface PreferenceView {
   category: NotificationCategory;
   emailEnabled: boolean;
   smsEnabled: boolean;
-  /** False when there's no phone on file — the SMS switch is unavailable. */
+  /**
+   * False when there's no CONFIRMED phone on file — the SMS switch is
+   * unavailable. An unconfirmed number does not count: see `smsReachable`.
+   */
   smsAvailable: boolean;
+}
+
+/**
+ * Is there a number Eventa is allowed to text?
+ *
+ * "On file" is not enough, and this is the second half of US-DISC-11 AC3. A
+ * number only becomes textable once a code sent to it has been typed back
+ * (`phoneVerified`), so a member who types a number and immediately switches
+ * SMS alerts on would otherwise have sent this workspace's alerts to a number
+ * nobody proved — which is exactly the mistyped-digit case the criterion
+ * exists for, arriving through this endpoint instead of the profile one.
+ *
+ * Derived on every read rather than copied into the preference row, so there
+ * is no stored "SMS is usable" that can disagree with the profile after a
+ * number is changed or removed.
+ */
+function smsReachable(me: { phone: string | null; phoneVerified: boolean }) {
+  return Boolean(me.phone) && me.phoneVerified;
 }
 
 /**
@@ -48,7 +69,7 @@ export class NotificationPreferencesService {
       this.repo.list(auth.organizationId, auth.userId),
       this.profile.get(auth),
     ]);
-    const smsAvailable = Boolean(me.phone);
+    const smsAvailable = smsReachable(me);
     const byCategory = new Map(stored.map((r) => [r.category, r]));
     return categoriesFor(auth).map((category) => {
       const row = byCategory.get(category);
@@ -66,18 +87,28 @@ export class NotificationPreferencesService {
     category: NotificationCategory,
     values: { emailEnabled?: boolean; smsEnabled?: boolean },
   ): Promise<PreferenceView[]> {
-    if (values.smsEnabled === true) await this.assertPhoneOnFile(auth);
+    if (values.smsEnabled === true) await this.assertTextable(auth);
     assertOwnCategory(auth, category);
     await this.repo.set(auth.organizationId, auth.userId, category, values);
     return this.list(auth);
   }
 
-  /** SMS can't be switched on with nowhere to send it. */
-  private async assertPhoneOnFile(auth: AuthContext): Promise<void> {
+  /**
+   * SMS can't be switched on with nowhere to send it — nor with a number
+   * nobody has proved. The two refusals are separate sentences because the
+   * remedies are: one is "add a number", the other is "you already have one,
+   * finish confirming it".
+   */
+  private async assertTextable(auth: AuthContext): Promise<void> {
     const me = await this.profile.get(auth);
     if (!me.phone) {
       throw DomainException.validation(
         'Add a phone number to your profile before turning on SMS alerts.',
+      );
+    }
+    if (!me.phoneVerified) {
+      throw DomainException.validation(
+        'Confirm your phone number with the code we texted before turning on SMS alerts.',
       );
     }
   }

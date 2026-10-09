@@ -81,27 +81,38 @@ describe('My profile (e2e — US-SET-01)', () => {
     });
   });
 
-  it('saves name, phone, timezone and language', async () => {
+  it('saves name, timezone and language', async () => {
     const res = await patch({
       name: 'Somchai S.',
-      phone: '+66812345678',
       timezone: 'Asia/Bangkok',
       locale: 'th',
     });
     expect(res.status).toBe(200);
     expect((res.body as Success<Profile>).data).toMatchObject({
       name: 'Somchai S.',
-      phone: '+66812345678',
       timezone: 'Asia/Bangkok',
       locale: 'th',
     });
   });
 
   it('a partial save keeps the other fields', async () => {
-    await patch({ phone: '+66899999999' });
+    await patch({ city: 'Bangkok' });
     expect((await get()).body).toMatchObject({
       data: { name: 'Somchai S.', timezone: 'Asia/Bangkok' },
     });
+  });
+
+  /**
+   * US-DISC-11 AC3: a phone number cannot be saved here at all — it has to be
+   * confirmed by a texted code first, so it moves through
+   * `POST /me/profile/phone`. The refusal is a 400 naming the field rather
+   * than a silently dropped change, because the validation pipe runs
+   * `forbidNonWhitelisted`. See `phone-verification.e2e-spec.ts`.
+   */
+  it('refuses a phone number on the generic save (400)', async () => {
+    const res = await patch({ phone: '+66812345678' });
+    expect(res.status).toBe(400);
+    expect((await get()).body).toMatchObject({ data: { phone: null } });
   });
 
   it('rejects an unknown timezone (422)', async () => {

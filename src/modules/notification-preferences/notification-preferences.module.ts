@@ -8,7 +8,8 @@ import { NotificationPreferencesService } from './notification-preferences.servi
  * Per-topic email/SMS choices (US-SET-06). Gates optional alerts only — receipts
  * and other required transactional messages always send. Reads the caller's phone
  * through UsersModule's ProfileService (never the users table) to know whether the
- * SMS switches are even available.
+ * SMS switches are even available — and only a CONFIRMED number counts, so a
+ * number typed a second ago cannot be switched on here (US-DISC-11 AC3).
  */
 @Module({
   imports: [UsersModule],

@@ -37,8 +37,13 @@ describe('Attendee settings (e2e — US-DISC-12)', () => {
     pool = new Pool({ connectionString: process.env.DATABASE_URL });
     await cleanup(pool);
     await pool.query(
-      `INSERT INTO users (organization_id, name, email, persona, status, password_hash, phone)
-       SELECT id, 'Anan', $1, 'attendee', 'Active', $2, '+66812345678'
+      // `phone_verified_at` as well as the number: since US-DISC-11 AC3 a
+      // number is only textable once a code sent to it came back, so a bare
+      // `phone` is NOT a phone the SMS switches will accept. Confirming it in
+      // the seed keeps this spec about notification topics; the request →
+      // code → confirm flow is `phone-verification.e2e-spec.ts`.
+      `INSERT INTO users (organization_id, name, email, persona, status, password_hash, phone, phone_verified_at)
+       SELECT id, 'Anan', $1, 'attendee', 'Active', $2, '+66812345678', now()
        FROM organizations WHERE slug = 'eventa'`,
       [ANAN, await hash(PASSWORD)],
     );
@@ -120,7 +125,7 @@ describe('Attendee settings (e2e — US-DISC-12)', () => {
       expect(rows[0].updated_at).toBeInstanceOf(Date);
     });
 
-    it('turns SMS alerts on for reminders — a phone is on file', async () => {
+    it('turns SMS alerts on for reminders — a CONFIRMED phone is on file', async () => {
       const res = await patch('/me/notification-preferences/reminder', {
         smsEnabled: true,
       });

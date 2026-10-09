@@ -5,6 +5,7 @@ import {
   char,
   date,
   index,
+  integer,
   jsonb,
   pgTable,
   text,
@@ -45,6 +46,43 @@ export const users = pgTable(
     avatarUrl: text(),
     /** Contact number; also gates the SMS notification toggles (US-SET-01/06). */
     phone: text(),
+    /**
+     * When `phone` was proven by a code texted to it (US-DISC-11 AC3). NULL
+     * means the number has never been confirmed — including every number typed
+     * before that story was built — and an unconfirmed number is NOT textable:
+     * `smsAvailable` is false and nothing may be sent to it.
+     *
+     * Not derivable from `pending_phone IS NULL`, the way `emailVerified` is
+     * derived from `pending_email`: a confirmed address is the only thing that
+     * can reach `email` (`promoteEmail` is its only writer), whereas `phone`
+     * holds numbers that predate confirmation entirely. "A change is in
+     * flight" and "the number on file has been proven" are two facts here, so
+     * they are two columns.
+     */
+    phoneVerifiedAt: timestamp({ withTimezone: true }),
+    /**
+     * A requested new number awaiting its code (US-DISC-11 AC3) — the mirror of
+     * `pendingEmail`. The number in `phone` keeps receiving texts until this one
+     * is confirmed, so a typo never silently diverts somebody's alerts.
+     */
+    pendingPhone: text(),
+    /**
+     * SHA-256 of the code texted for `pendingPhone`, never the code — the same
+     * choice `recovery_codes.code_hash` and `api_keys.key_hash` make for a
+     * secret that is only ever compared. Cleared on confirmation, on a new
+     * request, and once the attempt cap below destroys it.
+     */
+    phoneCodeHash: text(),
+    /** Absolute expiry of that code, so a config change can't extend one in flight. */
+    phoneCodeExpiresAt: timestamp({ withTimezone: true }),
+    /**
+     * Wrong guesses against the CURRENT code. A six-digit code is a keyspace of
+     * one million, so the cap this feeds is the control that makes it a secret;
+     * it lives in the row beside the code rather than in Redis because
+     * `LoginThrottleService` is deliberately fail-open and a lost counter here
+     * would mean no cap at all for the code's whole life.
+     */
+    phoneCodeAttempts: integer().notNull().default(0),
     /** Per-user override of the org timezone; IANA name (US-SET-01). */
     timezone: text(),
     /** Attendee-profile fields (US-DISC-11); unused for the admin persona. */

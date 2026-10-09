@@ -491,6 +491,20 @@
       "when": 1787500000019,
       "tag": "0069_attendee_audit_type",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1787500000020,
+      "tag": "0070_phone_verification",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1787500000020,
+      "tag": "0071_surveys_version",
+      "breakpoints": true
     }
   ]
 }

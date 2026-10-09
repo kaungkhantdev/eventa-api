@@ -16,7 +16,7 @@ import { VerifyEmailResponseDto } from './dto/verify-email-response.dto';
 import { emailVerificationRequestedEvent } from './events/email-verification-requested.event';
 import { PasswordService } from '../auth-password/auth-password.service';
 import { SignupRepository } from './auth-signup.repository';
-import { ResendThrottleService } from './resend-throttle.service';
+import { ResendThrottleService } from '../../common/throttle/resend-throttle.service';
 import { TokenService } from '../auth/token.service';
 
 const CHECK_INBOX_MESSAGE =

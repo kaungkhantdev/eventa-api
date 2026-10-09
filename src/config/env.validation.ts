@@ -54,12 +54,28 @@ export const envSchema = z.object({
 
   // How long before a confirmation link can be asked for again. Long enough
   // that a slow mail server is not mistaken for a lost message, short enough
-  // that somebody who really did lose one is not stuck waiting.
+  // that somebody who really did lose one is not stuck waiting. Shared with
+  // the phone-confirmation code (US-DISC-11), which has the same shape of
+  // problem and should not grow a second knob to answer it.
   VERIFY_RESEND_COOLDOWN_SECONDS: z.coerce
     .number()
     .int()
     .positive()
     .default(60),
+
+  // How long a texted phone-confirmation code stays usable (US-DISC-11 AC3).
+  //
+  // Short on purpose: this is the window in which six digits can be guessed,
+  // and shortening it is the one control that costs nothing. Not as short as a
+  // TOTP step, because the code arrives by SMS — carrier delivery is seconds
+  // to minutes, and a code that dies before it lands is a loop the member
+  // cannot escape. Ten minutes is long enough for a slow carrier and a member
+  // who had to go and find their phone.
+  PHONE_VERIFY_CODE_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(600), // 10m
 
   // Public web app base URL — used to build shareable/public event links.
   PUBLIC_WEB_URL: z

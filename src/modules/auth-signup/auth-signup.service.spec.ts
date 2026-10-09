@@ -6,7 +6,7 @@ import type { OutboxPort } from '../platform/outbox.port';
 import type { PasswordService } from '../auth-password/auth-password.service';
 import { SignupService } from './auth-signup.service';
 import type { SignupRepository } from './auth-signup.repository';
-import type { ResendThrottleService } from './resend-throttle.service';
+import type { ResendThrottleService } from '../../common/throttle/resend-throttle.service';
 import type { TokenService } from '../auth/token.service';
 import { IDENTITY_EMAIL_VERIFICATION_REQUESTED } from './events/email-verification-requested.event';
 import { outboxDouble } from '../../../test/support/outbox-double';

@@ -13,7 +13,24 @@ export class ProfileResponseDto {
   pendingEmail!: string | null;
   @ApiProperty({ description: 'False while an email change is unconfirmed' })
   emailVerified!: boolean;
-  @ApiProperty({ nullable: true }) phone!: string | null;
+  @ApiProperty({
+    nullable: true,
+    example: '+66812345678',
+    description: 'The number Eventa texts — only ever a confirmed one',
+  })
+  phone!: string | null;
+  @ApiProperty({
+    description:
+      'False until a code texted to the number has been typed back. ' +
+      'While false the number is never used for texts and SMS alerts stay unavailable.',
+  })
+  phoneVerified!: boolean;
+  @ApiProperty({
+    nullable: true,
+    example: '+66899999999',
+    description: 'A requested number awaiting its code',
+  })
+  pendingPhone!: string | null;
   @ApiProperty({ nullable: true }) timezone!: string | null;
   @ApiProperty({ nullable: true, enum: ['en', 'th'] })
   locale!: string | null;

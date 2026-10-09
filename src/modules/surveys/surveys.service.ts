@@ -18,6 +18,11 @@ export interface SurveyInput {
   questions: DraftQuestion[];
 }
 
+/** A save, carrying the version the editor loaded. */
+export interface SurveyUpdate extends SurveyInput {
+  version: number;
+}
+
 /** Marks a duplicate as the fresh draft it is, rather than a second original. */
 const COPY_SUFFIX = ' (copy)';
 
@@ -59,14 +64,36 @@ export class SurveysService {
     return this.require(auth, id);
   }
 
+  /**
+   * Save a survey, refusing a save built on a version somebody has moved past.
+   *
+   * Authoring replaces the whole question set, so a lost update here is not a
+   * clobbered title — it is a deleted question. Two organizers with the editor
+   * open both submit the list their browser loaded, and without this the second
+   * save silently wrote the first one's addition out of existence.
+   *
+   * The refusal says "reload", which is the whole remedy, so it is a plain
+   * conflict rather than its own error code — the same way
+   * `TicketingService.stale()` reports the identical situation.
+   */
   async update(
     auth: AuthContext,
     surveyId: number,
-    input: SurveyInput,
+    input: SurveyUpdate,
   ): Promise<SurveyWithQuestions> {
     await this.require(auth, surveyId);
     assertAnswerable(input);
-    await this.repo.update(auth.organizationId, surveyId, input);
+    const saved = await this.repo.update(
+      auth.organizationId,
+      surveyId,
+      input,
+      input.version,
+    );
+    if (!saved) {
+      throw DomainException.conflict(
+        'This survey changed elsewhere. Reload and try again.',
+      );
+    }
     return this.require(auth, surveyId);
   }
 

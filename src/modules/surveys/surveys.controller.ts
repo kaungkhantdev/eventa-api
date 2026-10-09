@@ -29,7 +29,7 @@ import { SurveyDto } from './dto/survey.dto';
 import {
   CreateSurveyDto,
   SetSurveyStatusDto,
-  WriteSurveyDto,
+  UpdateSurveyDto,
 } from './dto/write-survey.dto';
 import { toSurvey } from './surveys.mapper';
 import { SurveyResponsesService } from './responses.service';
@@ -137,7 +137,7 @@ export class SurveysController {
   async update(
     @CurrentAuth() auth: AuthContext,
     @Param('id', ParseIntPipe) id: number,
-    @Body() dto: WriteSurveyDto,
+    @Body() dto: UpdateSurveyDto,
   ): Promise<SurveyDto> {
     return toSurvey(await this.surveys.update(auth, id, dto));
   }

@@ -4,9 +4,11 @@ import {
   ArrayMaxSize,
   IsArray,
   IsIn,
+  IsInt,
   IsString,
   IsUUID,
   MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { surveyQuestionTypeEnum, surveyStatusEnum } from '../../../db/schema';
@@ -48,6 +50,28 @@ export class WriteSurveyDto {
   @ValidateNested({ each: true })
   @Type(() => SurveyQuestionInputDto)
   questions!: SurveyQuestionInputDto[];
+}
+
+/**
+ * A save of an existing survey, carrying the version the editor loaded.
+ *
+ * Required, and deliberately not defaulted. Authoring replaces the whole
+ * question set, so a save with no version would be a save that cannot be
+ * refused — and the thing it silently overwrites is somebody else's question,
+ * not a field. A client that has not read the survey has no business saving it.
+ *
+ * Not on `WriteSurveyDto` itself, because `CreateSurveyDto` extends that and a
+ * survey being created has no prior version to compare against.
+ */
+export class UpdateSurveyDto extends WriteSurveyDto {
+  @ApiProperty({
+    example: 4,
+    description:
+      'The `version` from the survey you loaded. The save is refused with 409 if it has moved on.',
+  })
+  @IsInt()
+  @Min(1)
+  version!: number;
 }
 
 export class CreateSurveyDto extends WriteSurveyDto {

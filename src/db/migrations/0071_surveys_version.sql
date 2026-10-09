@@ -1,0 +1,19 @@
+-- Optimistic locking for survey authoring.
+--
+-- `SurveysRepository.update` replaced a survey's questions by DELETEing every
+-- row in `survey_questions` for it and re-inserting the submitted set. With no
+-- version check, two organizers editing one survey did not merely overwrite a
+-- title: whoever saved second replaced the whole question list with the one
+-- their browser had loaded, so the other's added question was gone — with no
+-- error, no conflict, and nothing in the response to notice it had happened.
+--
+-- `version` is the same compare-and-swap column twenty other tables already
+-- carry, and `ticket_types` already uses it this way: the UPDATE carries the
+-- version the editor loaded, matches on it, and a zero-row result is the
+-- concurrent change. It is checked BEFORE the delete, so a refused save leaves
+-- the questions untouched rather than reporting a conflict after destroying
+-- them.
+--
+-- DEFAULT 1 so existing rows get a baseline; NOT NULL because an absent version
+-- would silently disable the check for whichever rows had one.
+ALTER TABLE "surveys" ADD COLUMN "version" integer NOT NULL DEFAULT 1;

@@ -11,7 +11,7 @@ import {
   unique,
   uuid,
 } from 'drizzle-orm/pg-core';
-import { createdAt, idPk, updatedAt } from './_columns';
+import { createdAt, idPk, updatedAt, version } from './_columns';
 import { surveyQuestionTypeEnum, surveyStatusEnum } from './enums';
 import { users } from './identity';
 import { organizations } from './organizations';
@@ -38,6 +38,12 @@ export const surveys = pgTable(
     status: surveyStatusEnum().notNull().default('draft'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
+    /**
+     * Optimistic lock. Authoring replaces the whole question set, so a save
+     * built on a stale read did not overwrite a field — it deleted somebody
+     * else's question. The write matches on this and refuses when it has moved.
+     */
+    version: version(),
   },
   (t) => [index('ix_surveys_org_event').on(t.organizationId, t.eventId)],
 );

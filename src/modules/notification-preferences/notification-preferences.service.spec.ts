@@ -12,8 +12,8 @@ describe('NotificationPreferencesService (US-SET-06)', () => {
   let profile: jest.Mocked<ProfileService>;
   let service: NotificationPreferencesService;
 
-  const withPhone = (phone: string | null) =>
-    profile.get.mockResolvedValue({ phone } as Awaited<
+  const withPhone = (phone: string | null, phoneVerified = phone !== null) =>
+    profile.get.mockResolvedValue({ phone, phoneVerified } as Awaited<
       ReturnType<ProfileService['get']>
     >);
 
@@ -58,6 +58,21 @@ describe('NotificationPreferencesService (US-SET-06)', () => {
 
   it('refuses to turn SMS on without a phone number', async () => {
     withPhone(null);
+    await expect(
+      service.set(auth, 'payment', { smsEnabled: true }),
+    ).rejects.toBeInstanceOf(DomainException);
+    expect(repo.set).not.toHaveBeenCalled();
+  });
+
+  // US-DISC-11 AC3: a number nobody has proved is not a number to text.
+  it('marks SMS unavailable while the number is unconfirmed', async () => {
+    withPhone('+66812345678', false);
+    const res = await service.list(auth);
+    expect(res.every((p) => !p.smsAvailable)).toBe(true);
+  });
+
+  it('refuses to turn SMS on against an unconfirmed number', async () => {
+    withPhone('+66812345678', false);
     await expect(
       service.set(auth, 'payment', { smsEnabled: true }),
     ).rejects.toBeInstanceOf(DomainException);
