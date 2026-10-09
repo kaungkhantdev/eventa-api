@@ -46,7 +46,7 @@ export class MessageTemplateDto {
   @ApiProperty({
     enum: TEMPLATE_DELIVERY,
     description:
-      '`controlled` — sent, and the switch is honoured. `always` — sent regardless. `planned` — nothing sends it yet. Only `controlled` may be switched.',
+      '`controlled` — sent, and the switch is honoured. `planned` — nothing sends it yet. Only `controlled` may be switched: there is deliberately no "sent, but you cannot stop it" state.',
   })
   delivery!: TemplateDelivery;
 
