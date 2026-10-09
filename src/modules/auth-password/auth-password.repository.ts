@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, ne } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
   authSessions,
@@ -11,6 +11,7 @@ import {
 } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
 import type { Persona } from '../auth/auth.types';
+import { OutboxPort, type OutboxEventInput } from '../platform/outbox.port';
 
 export type AccountStatus = (typeof memberStatusEnum.enumValues)[number];
 export type LinkedProvider = (typeof socialProviderEnum.enumValues)[number];
@@ -40,10 +41,27 @@ export interface ResetLinkAccount {
   passwordHash: string | null;
 }
 
+/**
+ * The signed-in account a change acts on (US-ACC-05). `name` and `email` are
+ * here because the change has to announce itself, and the notice is addressed
+ * to the account holder — read in the same breath as the hash that authorizes
+ * the change, so the address can never be a later lookup that finds a different
+ * row.
+ */
+export interface ChangeAccount {
+  /** What the submitted current password is verified against. */
+  passwordHash: string | null;
+  name: string;
+  email: string;
+}
+
 /** Data access for password reset (US-ACC-04) and change (US-ACC-05). */
 @Injectable()
 export class PasswordRepository {
-  constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: Database,
+    private readonly outbox: OutboxPort,
+  ) {}
 
   /**
    * Every account an address holds in one audience, across workspaces
@@ -134,13 +152,23 @@ export class PasswordRepository {
     return row ?? null;
   }
 
-  /** The current password hash for a signed-in user (used by change-password). */
-  async currentHash(
+  /**
+   * The signed-in account a change acts on: the hash to verify against, and the
+   * name and address the notice goes to (used by change-password).
+   *
+   * Scoped by both ids, as every other read here is, so a token minted for one
+   * workspace can neither authorize nor address a change in another.
+   */
+  async findChangeAccount(
     organizationId: number,
     userId: string,
-  ): Promise<string | null> {
+  ): Promise<ChangeAccount | null> {
     const [row] = await this.db
-      .select({ passwordHash: users.passwordHash })
+      .select({
+        passwordHash: users.passwordHash,
+        name: users.name,
+        email: users.email,
+      })
       .from(users)
       .where(
         and(
@@ -150,35 +178,74 @@ export class PasswordRepository {
         ),
       )
       .limit(1);
-    return row?.passwordHash ?? null;
+    return row ?? null;
   }
 
   /**
    * Set a new password and sign out sessions. `keepSessionId` stays signed in
    * (change-password keeps the current device); omit it to revoke every session
    * (reset signs out everywhere).
+   *
+   * `buildNotice` queues the "your password was changed" mail in the SAME
+   * transaction as the write, which is the whole point of it being a builder
+   * rather than a finished event: the sentence about devices can only be
+   * written once the revoke has said how many there were, and the row must
+   * still live or die with the change. A notice enqueued after the commit is a
+   * second write that can be lost, and the one it loses is the only signal a
+   * stolen session gives its owner. Reset passes none — the link it already
+   * sent is that flow's notice.
    */
   async setPassword(
     organizationId: number,
     userId: string,
     passwordHash: string,
     keepSessionId?: string,
+    buildNotice?: (otherSessionsSignedOut: number) => OutboxEventInput,
   ): Promise<void> {
     await withTenant(this.db, organizationId, async (tx) => {
       await tx
         .update(users)
         .set({ passwordHash, updatedAt: new Date() })
-        .where(eq(users.id, userId));
-      await tx
+        .where(
+          and(eq(users.id, userId), eq(users.organizationId, organizationId)),
+        );
+      // Scoped by organization_id as well as RLS, the house rule everywhere
+      // else here — and now load-bearing rather than only hygiene, because the
+      // rows this returns become a sentence in the member's email.
+      const revoked = await tx
         .update(authSessions)
         .set({ revokedAt: new Date() })
         .where(
           and(
             eq(authSessions.userId, userId),
+            eq(authSessions.organizationId, organizationId),
             isNull(authSessions.revokedAt),
+            // Unexpired too, which is what the rest of this codebase means by a
+            // live session — `AuthSessionsRepository.listLive` and
+            // `AuthRepository.findValidSession` both pair these two.
+            //
+            // It was missing, and the omission reached the member. Nothing
+            // purges a lapsed row and `createSession` inserts one per sign-in,
+            // so somebody who signs in monthly for a year and never signs out
+            // accumulates twelve rows with `revoked_at IS NULL, expires_at <
+            // now()`. Changing their password from their only live device then
+            // counted all twelve and told them twelve other devices had been
+            // signed out — while their own Sessions page, which does check
+            // expiry, showed none. The one number in a security notice, whose
+            // whole job is to say how far an intruder already was, was inflated
+            // by rows that could not authenticate anything.
+            //
+            // Revoking a lapsed row would change nothing — `findValidSession`
+            // rejects it on expiry anyway — so narrowing the predicate costs no
+            // security and makes the count mean what the sentence claims.
+            gt(authSessions.expiresAt, new Date()),
             keepSessionId ? ne(authSessions.id, keepSessionId) : undefined,
           ),
-        );
+        )
+        .returning({ id: authSessions.id });
+      if (buildNotice) {
+        await this.outbox.enqueueIn(tx, buildNotice(revoked.length));
+      }
     });
   }
 }

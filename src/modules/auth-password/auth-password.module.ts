@@ -12,6 +12,11 @@ import { PasswordService } from './auth-password.service';
  * (US-ACC-04) and change-while-signed-in (US-ACC-05). Both flows revoke sessions,
  * so they depend on AuthModule's TokenService/AuthRepository (`forwardRef` — auth
  * also verifies passwords on sign-in).
+ *
+ * PlatformModule supplies the `OutboxPort` both flows' mail rides: the reset
+ * link, and the confirmation a change queues in the SAME transaction as the
+ * password write (US-DISC-12 AC4), which is why the repository holds the port
+ * rather than only the services.
  */
 @Module({
   imports: [forwardRef(() => AuthModule), PlatformModule],

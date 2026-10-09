@@ -91,6 +91,38 @@ describe('AuditService (US-SET-05)', () => {
     );
   });
 
+  describe('one attendee’s trail (US-REG-08 AC5)', () => {
+    it('filters by the meta prefix the contact writer records', async () => {
+      await service.list(auth, { subjectType: 'attendee', subjectId: 42 });
+      const [, query] = repo.page.mock.calls[0];
+      expect(query.subject).toEqual({
+        auditType: 'attendee',
+        metaPrefix: 'attendee #42 ·',
+      });
+    });
+
+    it('passes a bare type filter through', async () => {
+      await service.list(auth, { type: 'attendee' });
+      const [, query] = repo.page.mock.calls[0];
+      expect(query.type).toBe('attendee');
+      expect(query.subject).toBeUndefined();
+    });
+
+    it('cannot widen a non-Admin past their own entries', async () => {
+      asAdmin(false);
+      await service.list(auth, { subjectType: 'attendee', subjectId: 42 });
+      const [, query] = repo.page.mock.calls[0];
+      expect(query.actorUserId).toBe('u1');
+      expect(query.subject?.metaPrefix).toBe('attendee #42 ·');
+    });
+
+    it('ignores a half-specified subject rather than guessing one', async () => {
+      await service.list(auth, { subjectId: 42 });
+      const [, query] = repo.page.mock.calls[0];
+      expect(query.subject).toBeUndefined();
+    });
+  });
+
   it('exposes no way to edit or delete an entry', () => {
     const surface = Object.getOwnPropertyNames(AuditRepository.prototype);
     expect(surface).not.toContain('update');
