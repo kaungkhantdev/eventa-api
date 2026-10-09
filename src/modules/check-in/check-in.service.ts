@@ -2,14 +2,18 @@ import { Injectable } from '@nestjs/common';
 import { DomainException } from '../../common/errors/domain.exception';
 import { Clock } from '../../common/time/clock';
 import type { AuthContext } from '../auth/auth.types';
+import { admissionOutcome } from './admission-outcome';
 import { isCheckInOpen } from './check-in-window';
 import { CheckInRepository } from './check-in.repository';
+import { fingerprintScanToken } from './scan-token-fingerprint';
 import type {
   AdmissibleTicket,
   AttendanceCounts,
   AttendanceQuery,
   AttendanceRow,
   CheckInMethod,
+  ScanContext,
+  ScanOutcome,
   ScanResult,
 } from './check-in.types';
 import { CheckInEventPort } from './ports/check-in-event.port';
@@ -47,6 +51,11 @@ const DENIED_STATUSES = new Set(['void', 'refunded', 'transferred']);
  * HTTP error would collapse all three into "no". Only conditions that stop the
  * station working at all — a shut door, an event from another workspace —
  * throw.
+ *
+ * Every one of those five outcomes also writes a `scan_attempts` row, so a
+ * refusal leaves a trace instead of vanishing (0068). An admission's row is
+ * written inside `admit`'s own transaction, atomically with the `check_ins`
+ * row; a refusal touches nothing else, so it is its own statement.
  */
 @Injectable()
 export class CheckInService {
@@ -67,7 +76,13 @@ export class CheckInService {
       auth.organizationId,
       input.qrToken,
     );
-    return this.admit(auth, eventId, ticket, 'qr', input.stationId ?? null);
+    return this.admit(auth, eventId, ticket, {
+      method: 'qr',
+      stationId: input.stationId ?? null,
+      // The ledger gets the digest and never the token itself; the reasoning
+      // is in `scan-token-fingerprint.ts`.
+      tokenFingerprint: fingerprintScanToken(input.qrToken),
+    });
   }
 
   /** Admit someone found by hand when the QR will not scan (US-REG-13). */
@@ -81,13 +96,14 @@ export class CheckInService {
       auth.organizationId,
       input.ticketId,
     );
-    return this.admit(
-      auth,
-      eventId,
-      ticket,
-      input.method ?? 'manual',
-      input.stationId ?? null,
-    );
+    return this.admit(auth, eventId, ticket, {
+      method: input.method ?? 'manual',
+      stationId: input.stationId ?? null,
+      // Null, and that is the record: this route is reached by ticket id, so
+      // no code was presented. An `upload` is decoded in the client, which
+      // then looks the ticket up — the token never crosses the wire here.
+      tokenFingerprint: null,
+    });
   }
 
   /** Reverse an admission made in error (US-REG-11). */
@@ -137,31 +153,62 @@ export class CheckInService {
     auth: AuthContext,
     eventId: string,
     ticket: AdmissibleTicket | null,
-    method: CheckInMethod,
-    stationId: string | null,
+    scan: ScanContext,
   ): Promise<ScanResult> {
-    if (!ticket) return refused('invalid');
-    if (ticket.eventId !== eventId) return refused('wrong_event', ticket);
+    if (!ticket) return this.refuse(auth, eventId, scan, 'invalid', null);
+    if (ticket.eventId !== eventId) {
+      return this.refuse(auth, eventId, scan, 'wrong_event', ticket);
+    }
     if (DENIED_STATUSES.has(ticket.status)) {
-      return refused('cancelled', ticket);
+      return this.refuse(auth, eventId, scan, 'cancelled', ticket);
     }
     const { checkedInAt, inserted } = await this.repo.admit({
       organizationId: auth.organizationId,
       eventId,
       ticketId: ticket.id,
       attendeeId: ticket.attendeeId,
-      method,
       checkedInBy: auth.userId,
-      stationId,
       now: this.clock.now(),
+      ...scan,
     });
     return {
-      outcome: inserted ? 'admitted' : 'already_checked_in',
+      // `admit` wrote the ledger row from this same value, inside its own
+      // transaction, so the station and the ledger cannot disagree.
+      outcome: admissionOutcome(inserted),
       ticketId: ticket.id,
       holderName: ticket.holderName,
       ticketLabel: ticket.ticketLabel,
       checkedInAt,
     };
+  }
+
+  /**
+   * Turn somebody away, and record that it happened (0068).
+   *
+   * The ledger write is awaited and NOT swallowed. A refusal that fails to log
+   * would be invisible, and a scan ledger with holes in it is worse than none
+   * because the holes read as a quiet night — which is the very thing the
+   * ledger exists to distinguish from a broken scanner. If the ledger cannot
+   * be written the station should hear about it.
+   */
+  private async refuse(
+    auth: AuthContext,
+    eventId: string,
+    scan: ScanContext,
+    outcome: ScanOutcome,
+    ticket: AdmissibleTicket | null,
+  ): Promise<ScanResult> {
+    await this.repo.recordScanAttempt({
+      organizationId: auth.organizationId,
+      eventId,
+      outcome,
+      ticketId: ticket?.id ?? null,
+      ticketEventId: otherEventId(eventId, ticket),
+      scannedBy: auth.userId,
+      scannedAt: this.clock.now(),
+      ...scan,
+    });
+    return refused(outcome, ticket);
   }
 
   private async requireOpenDoor(
@@ -190,7 +237,7 @@ export class CheckInService {
 
 function refused(
   outcome: ScanResult['outcome'],
-  ticket?: AdmissibleTicket,
+  ticket: AdmissibleTicket | null,
 ): ScanResult {
   return {
     outcome,
@@ -199,4 +246,22 @@ function refused(
     ticketLabel: ticket?.ticketLabel ?? null,
     checkedInAt: null,
   };
+}
+
+/**
+ * Which event a refused pass actually belonged to — recorded ONLY when it is
+ * not this station's.
+ *
+ * That is the entire question `wrong_event` asks, and erd.md proposed it as
+ * `check_ins.other_event_id`, where `UNIQUE(ticket_id)` left no room for it.
+ * Null everywhere else so `ticket_event_id IS NOT NULL` reads as "a pass for
+ * somewhere else turned up here", which it could not if a cancelled ticket's
+ * row filled the column in with the event we already know.
+ */
+function otherEventId(
+  eventId: string,
+  ticket: AdmissibleTicket | null,
+): string | null {
+  const ticketEventId = ticket?.eventId ?? null;
+  return ticketEventId === eventId ? null : ticketEventId;
 }

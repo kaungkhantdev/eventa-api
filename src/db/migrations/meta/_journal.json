@@ -477,6 +477,20 @@
       "when": 1787500000017,
       "tag": "0067_backfill_system_role_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1787500000018,
+      "tag": "0068_scan_attempts",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1787500000019,
+      "tag": "0069_attendee_audit_type",
+      "breakpoints": true
     }
   ]
 }

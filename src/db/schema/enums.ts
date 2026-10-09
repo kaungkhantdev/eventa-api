@@ -154,6 +154,10 @@ export const auditTypeEnum = pgEnum('audit_type', [
   'payout',
   // Check-in (E8): a manual admit and an undo are both auditable acts.
   'checkin',
+  // The attendee CRM (US-REG-08): a corrected name, email or phone changes
+  // where somebody's ticket and every future reminder are sent, and nothing
+  // else in the schema remembers that it happened.
+  'attendee',
 ]);
 
 export const webhookStatusEnum = pgEnum('webhook_status', [

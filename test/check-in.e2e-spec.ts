@@ -84,6 +84,12 @@ describe('Check-in at the door (e2e — US-REG-11/12/13)', () => {
   }, 30000);
 
   afterEach(async () => {
+    // Before `events`: 0068 gives `scan_attempts.event_id` the same ON DELETE
+    // RESTRICT `check_ins` has, so a leftover scan row would block the teardown.
+    await pool.query(
+      `DELETE FROM scan_attempts WHERE organization_id = ANY($1)`,
+      [[orgId, otherOrgId]],
+    );
     await pool.query(`DELETE FROM check_ins WHERE organization_id = ANY($1)`, [
       [orgId, otherOrgId],
     ]);
@@ -644,8 +650,10 @@ async function cleanup(pool: Pool): Promise<void> {
        (SELECT id FROM organizations WHERE slug = ANY($1))`,
     [[ORG.slug, ORG2.slug]],
   );
-  // Order matters: check_ins and tickets reference events ON DELETE RESTRICT.
+  // Order matters: scan_attempts, check_ins and tickets reference events
+  // ON DELETE RESTRICT.
   for (const table of [
+    'scan_attempts',
     'check_ins',
     'tickets',
     'order_items',

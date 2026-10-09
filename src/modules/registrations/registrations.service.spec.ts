@@ -45,11 +45,17 @@ describe('RegistrationsService (US-REG-01)', () => {
     repo = {
       page: jest.fn().mockResolvedValue({ items: [row()], total: 1 }),
       countByStatus: jest.fn().mockResolvedValue({
+        // `all` is counted by the repository rather than summed from the
+        // buckets (`tallyByStatus`). With all six present it agrees with their
+        // total, which is the ordinary case; what matters here is that the
+        // service hands it on, because the queue's All pill reads it.
+        all: 18,
         pending: 3,
         confirmed: 9,
         waitlisted: 1,
         cancelled: 2,
         rejected: 1,
+        expired: 2,
       }),
     } as unknown as jest.Mocked<RegistrationsRepository>;
     permissions = {
@@ -75,6 +81,28 @@ describe('RegistrationsService (US-REG-01)', () => {
       ORG,
       expect.objectContaining({ search: 'Anan' }),
     );
+  });
+
+  it('narrows the counts by everything EXCEPT the status being filtered on', async () => {
+    // The tabs describe the whole queue, so the status goes and every other
+    // narrowing stays, or All stops describing the table. Pinned on the whole
+    // argument rather than a subset so dropping one is a failure — it cannot
+    // catch a filter added to the list and never passed here, which is a
+    // standing obligation noted over `countFilters` instead.
+    await list({ status: 'pending', eventId: 'e-1', search: 'Anan', page: 2 });
+    expect(repo.countByStatus).toHaveBeenCalledWith(ORG, {
+      page: 2,
+      limit: 20,
+      eventId: 'e-1',
+      search: 'Anan',
+    });
+  });
+
+  it('reports the queue total the API counted, which the All pill reads', async () => {
+    const { counts } = await list({ status: 'pending' });
+    expect(counts.all).toBe(18);
+    // And the bucket that used to be missing entirely.
+    expect(counts.expired).toBe(2);
   });
 
   it('passes the event filter through', async () => {

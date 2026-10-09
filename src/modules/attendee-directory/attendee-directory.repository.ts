@@ -1,10 +1,20 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
-import { withTenant } from '../../db/tenant';
+import { attendees, auditEvents, orders } from '../../db/schema';
+import { withTenant, type Tx } from '../../db/tenant';
+import {
+  CONTACT_AUDIT_TYPE,
+  CONTACT_AUDIT_TITLE,
+  contactAuditMeta,
+} from './attendee-contact.audit';
 import type {
+  AttendeeContactRow,
   AttendeeRow,
+  ContactChanges,
   DirectoryFilters,
+  EmailHolder,
+  SaveContactInput,
   SegmentCounts,
 } from './attendee-directory.types';
 
@@ -69,6 +79,195 @@ export class AttendeeDirectoryRepository {
         vip: Number(row.vip_count),
       };
     });
+  }
+
+  /** One directory row, with the same aggregates the list carries. */
+  async findDirectoryEntry(
+    organizationId: number,
+    attendeeId: number,
+  ): Promise<AttendeeRow | null> {
+    return withTenant(this.db, organizationId, (tx) =>
+      this.entry(tx, organizationId, attendeeId),
+    );
+  }
+
+  /** The editable contact fields, plus the version a write is guarded by. */
+  async findContact(
+    organizationId: number,
+    attendeeId: number,
+  ): Promise<AttendeeContactRow | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({
+          id: attendees.id,
+          name: attendees.name,
+          email: attendees.email,
+          phone: attendees.phone,
+          version: attendees.version,
+        })
+        .from(attendees)
+        .where(
+          and(
+            eq(attendees.organizationId, organizationId),
+            eq(attendees.id, attendeeId),
+            // A removed record is not editable: correcting one would bring a
+            // departed person's details back into a directory that hides them.
+            isNull(attendees.deletedAt),
+          ),
+        );
+      return rows[0] ?? null;
+    });
+  }
+
+  /**
+   * Who in this workspace already holds an address (US-REG-08 AC3).
+   *
+   * **Soft-deleted attendees count**, and that is the decision this method
+   * exists to make. `uq_attendees_org_email` carries no `WHERE deleted_at IS
+   * NULL` predicate, so a removed record still owns its address: were this
+   * lookup to skip removed rows, the service would approve the change and the
+   * index would then reject the UPDATE with a bare SQLSTATE 23505 — the
+   * organizer would get a failure where the story promises a merge prompt.
+   * Checkout agrees: its `onConflictDoUpdate` on the same pair adopts a
+   * soft-deleted row rather than inserting beside it, so in this schema a
+   * removed attendee's address is taken, not free.
+   *
+   * The equality is Postgres's. `attendees.email` is `citext`, so this matches
+   * `Rio@x.co` against a stored `rio@x.co` — which is what the question means.
+   */
+  async findAttendeeIdByEmail(
+    organizationId: number,
+    email: string,
+  ): Promise<EmailHolder | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({ id: attendees.id, deletedAt: attendees.deletedAt })
+        .from(attendees)
+        .where(
+          and(
+            eq(attendees.organizationId, organizationId),
+            eq(attendees.email, email),
+          ),
+        );
+      const row = rows[0];
+      return row ? { id: row.id, removed: row.deletedAt !== null } : null;
+    });
+  }
+
+  /**
+   * Correct the record, re-point what messaging routes off, and record it —
+   * in one transaction (US-REG-08 AC1, AC2, AC5).
+   *
+   * Returns null when the guarded UPDATE matches nothing, which means the row
+   * moved between the service's read and this write.
+   */
+  async saveContact(
+    organizationId: number,
+    attendeeId: number,
+    input: SaveContactInput,
+  ): Promise<AttendeeRow | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .update(attendees)
+        .set({
+          ...input.changes,
+          updatedAt: input.now,
+          // A literal, not `version + 1`: the WHERE below already pins the row
+          // to this exact version, so the two cannot disagree.
+          version: input.expectedVersion + 1,
+        })
+        .where(
+          and(
+            eq(attendees.organizationId, organizationId),
+            eq(attendees.id, attendeeId),
+            isNull(attendees.deletedAt),
+            eq(attendees.version, input.expectedVersion),
+          ),
+        )
+        .returning({ id: attendees.id });
+      if (!rows[0]) return null;
+      await this.repointMessageRouting(tx, organizationId, attendeeId, input);
+      await this.recordContactEdit(tx, organizationId, attendeeId, input);
+      return this.entry(tx, organizationId, attendeeId);
+    });
+  }
+
+  /**
+   * AC2 — "future confirmations and reminders go to the new number".
+   *
+   * It does NOT fall out of the messaging path for free: nothing downstream
+   * reads `attendees`. Every send resolves its recipient from the order —
+   * `EventRecipientsRepository.confirmedRecipients` groups reminders and
+   * broadcasts by `orders.buyer_email`, and the confirmation SMS is addressed
+   * from `orders.buyer_phone` (carried onto the `registration.confirmed`
+   * payload). Those three columns are a denormalised copy of the contact
+   * details, so correcting only the attendee row would leave the directory
+   * right and every future message going to the old number.
+   *
+   * It is safe to rewrite them because the finance trail does not read through:
+   * `invoices.buyer_name`/`buyer_email` are snapshotted at issue precisely so a
+   * later correction cannot restate an issued tax invoice. `tickets.holder_name`
+   * is left alone — an issued pass is a credential, not a routing copy — and so
+   * is `discount_redemptions.buyer_email`, which is a ledger of what happened
+   * and whose per-person limit must not be re-opened by a change of address.
+   *
+   * Every live order of this attendee's is re-pointed, cancelled ones included:
+   * a cancelled or refunded order still mails its buyer, and that notice has to
+   * reach the address they now have.
+   */
+  private async repointMessageRouting(
+    tx: Tx,
+    organizationId: number,
+    attendeeId: number,
+    input: SaveContactInput,
+  ): Promise<void> {
+    const routing = toBuyerColumns(input.changes);
+    if (Object.keys(routing).length === 0) return;
+    await tx
+      .update(orders)
+      .set({ ...routing, updatedAt: input.now })
+      .where(
+        and(
+          eq(orders.organizationId, organizationId),
+          eq(orders.attendeeId, attendeeId),
+          isNull(orders.deletedAt),
+        ),
+      );
+  }
+
+  /**
+   * The audit entry both AC1 and AC5 ask for — one row, through the trail this
+   * codebase already keeps, written inside `withTenant` because the
+   * `audit_events` RLS policy compares `organization_id` against
+   * `app.current_org` and refuses the insert when it is unset.
+   */
+  private async recordContactEdit(
+    tx: Tx,
+    organizationId: number,
+    attendeeId: number,
+    input: SaveContactInput,
+  ): Promise<void> {
+    await tx.insert(auditEvents).values({
+      organizationId,
+      type: CONTACT_AUDIT_TYPE,
+      title: CONTACT_AUDIT_TITLE,
+      meta: contactAuditMeta(attendeeId, input.fields),
+      actorUserId: input.actorUserId,
+    });
+  }
+
+  /** The directory row for one attendee, inside a caller's transaction. */
+  private async entry(
+    tx: Tx,
+    organizationId: number,
+    attendeeId: number,
+  ): Promise<AttendeeRow | null> {
+    const result = await tx.execute<Record<string, unknown>>(sql`
+      WITH stats AS (${this.statsCte(organizationId)})
+      SELECT s.* FROM stats s WHERE s.id = ${attendeeId}
+    `);
+    const row = result.rows[0];
+    return row ? toRow(row) : null;
   }
 
   /** One pass over the attendee's registrations, reused by page and counts. */
@@ -138,6 +337,19 @@ export class AttendeeDirectoryRepository {
     `);
     return Number(result.rows[0].total);
   }
+}
+
+/** The corrected fields, named as the columns messaging reads them from. */
+function toBuyerColumns(changes: ContactChanges): Partial<{
+  buyerName: string;
+  buyerEmail: string;
+  buyerPhone: string | null;
+}> {
+  return {
+    ...(changes.name !== undefined ? { buyerName: changes.name } : {}),
+    ...(changes.email !== undefined ? { buyerEmail: changes.email } : {}),
+    ...(changes.phone !== undefined ? { buyerPhone: changes.phone } : {}),
+  };
 }
 
 function toRow(row: Record<string, unknown>): AttendeeRow {
