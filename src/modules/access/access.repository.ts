@@ -6,6 +6,7 @@ import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
   authSessions,
   memberships,
+  organizations,
   permissions,
   rolePermissions,
   roles,
@@ -253,6 +254,18 @@ export class AccessRepository {
   }
 
   /** Is this email already a console member of the org? */
+  /** The workspace's name, for a mail that has to say which one. */
+  async organizationName(organizationId: number): Promise<string> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({ name: organizations.name })
+        .from(organizations)
+        .where(eq(organizations.id, organizationId))
+        .limit(1);
+      return row?.name ?? '';
+    });
+  }
+
   /**
    * The teammate already holding this address, with the status that decides
    * what a second invite means.

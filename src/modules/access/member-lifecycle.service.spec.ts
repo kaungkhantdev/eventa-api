@@ -27,6 +27,10 @@ describe('AccessService — member lifecycle & escalation (US-SET-11/12)', () =>
       repo,
       {} as unknown as TokenService,
       permissions,
+      // Suspend/reactivate/remove send nothing; only the invite does.
+      { enqueue: jest.fn(), enqueueIn: jest.fn() },
+      { now: () => new Date('2026-10-10T08:00:00.000Z') },
+      { getOrThrow: () => 'https://app.eventa.test' } as never,
     );
   });
 
