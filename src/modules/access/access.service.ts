@@ -25,6 +25,9 @@ export class AccessService {
   ) {}
 
   /** Invite a teammate: create an Invited user + membership, return an invite token. */
+  /** The membership status that means "asked, not yet joined". */
+  private static readonly INVITED = 'Invited';
+
   async inviteMember(
     organizationId: number,
     input: InviteMemberInput,
@@ -34,15 +37,21 @@ export class AccessService {
         `Role ${input.roleId} not found in this workspace.`,
       );
     }
-    if (await this.repo.emailInOrg(organizationId, input.email)) {
+    // US-SET-11: a second invite to an email already INVITED re-sends rather
+    // than duplicating; only an ACTIVE member is refused. Both used to be
+    // refused, so a teammate who lost their join link was stuck.
+    const existing = await this.repo.findMemberByEmail(
+      organizationId,
+      input.email,
+    );
+    if (existing && existing.status !== AccessService.INVITED) {
       throw DomainException.conflict(
         'A member with this email already exists in the workspace.',
       );
     }
-    const { membershipId, userId } = await this.repo.createInvitedMember(
-      organizationId,
-      input,
-    );
+    const { membershipId, userId } = existing
+      ? { membershipId: existing.membershipId, userId: existing.userId }
+      : await this.repo.createInvitedMember(organizationId, input);
     const inviteToken = await this.tokens.signInvite({
       userId,
       organizationId,

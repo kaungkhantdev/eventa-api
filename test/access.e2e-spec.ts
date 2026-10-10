@@ -364,9 +364,35 @@ describe('Access / RBAC management (e2e)', () => {
       inviteToken = data.inviteToken;
     });
 
-    it('rejects a duplicate invite with 409', async () => {
+    /*
+     * US-SET-11: "Given an email that's already INVITED, when I invite it
+     * again, then the invitation is simply RE-SENT rather than duplicated."
+     *
+     * This asserted a 409 — the behaviour the criterion contradicts — because
+     * `emailInOrg` answered a plain yes/no and never looked at status. A
+     * teammate who lost their join link was refused with "already exists in
+     * the workspace" and there was no way to give them another; the console's
+     * "Send the invitation again" button had nothing it could call.
+     */
+    it('re-sends to an address that is still Invited, without duplicating', async () => {
       const jwt = await token(ADMIN);
-      expect((await invite(jwt, INVITEE)).status).toBe(409);
+      const res = await invite(jwt, INVITEE);
+
+      expect(res.status).toBe(201);
+      const data = (res.body as Success<InviteData>).data;
+      expect(data.member.status).toBe('Invited');
+      // A fresh token against the same person, not a second member.
+      expect(typeof data.inviteToken).toBe('string');
+
+      const members = await request(server)
+        .get('/api/v1/members')
+        .set('Authorization', `Bearer ${jwt}`)
+        .query({ search: INVITEE });
+      const rows = (members.body as Success<{ email: string }[]>).data;
+      expect(rows.filter((m) => m.email === INVITEE)).toHaveLength(1);
+
+      // The newest token is the one that works from here.
+      inviteToken = data.inviteToken;
     });
 
     it('cannot log in before accepting', async () => {
@@ -415,6 +441,17 @@ describe('Access / RBAC management (e2e)', () => {
           startAt: '2026-09-01T02:00:00Z',
         })
         .expect(201);
+    });
+
+    /** The other half of the same criterion: an ACTIVE member is refused. */
+    it('rejects re-inviting somebody who has already joined (409)', async () => {
+      const jwt = await token(ADMIN);
+      const res = await invite(jwt, INVITEE);
+
+      expect(res.status).toBe(409);
+      expect((res.body as { message: string }).message).toMatch(
+        /already exists in the workspace/i,
+      );
     });
 
     it('rejects reusing an already-accepted invite token (401)', async () => {
