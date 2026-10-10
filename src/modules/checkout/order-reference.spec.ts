@@ -43,11 +43,39 @@ describe('generateQrToken', () => {
   });
 });
 
+/**
+ * THE FIXTURES HERE WERE THE BUG.
+ *
+ * They built `{ code, constraint_name }` on a bare Error — which is the shape
+ * `isReferenceCollision` read, and a shape Postgres never produces. So these
+ * tests passed against a guard that was ALWAYS false in production, and the
+ * retry they describe never once happened: a reference collision was rethrown
+ * on the first attempt and the buyer got a 500 for something the design
+ * retries silently. (It also fed the 5xx log, which is how the buyer's name,
+ * email and phone reached it.)
+ *
+ * Two things are wrong with that shape, the same two that made
+ * `isUniqueViolation` always false before it was fixed:
+ *
+ * - `pg-protocol` builds the error with `message.constraint = fields.n`.
+ *   There is no `constraint_name` on it anywhere.
+ * - Drizzle wraps every query rejection, so the pg error sits at `.cause` and
+ *   the object actually caught carries no `code` at all.
+ *
+ * The fixtures below are now shaped as drizzle really hands them over, which
+ * is the only reason these tests mean anything.
+ */
 describe('withFreshReference', () => {
-  const collision = Object.assign(new Error('duplicate'), {
-    code: '23505',
-    constraint_name: 'uq_orders_org_reference',
-  });
+  /** As drizzle hands it over: its own wrapper, pg's error at `.cause`. */
+  const pgCollision = (constraint: string) =>
+    Object.assign(new Error('Failed query: insert into "orders" …'), {
+      cause: Object.assign(new Error('duplicate key value'), {
+        code: '23505',
+        constraint,
+      }),
+    });
+
+  const collision = pgCollision('uq_orders_org_reference');
 
   it('tries another reference when the first one is taken', async () => {
     const tried: string[] = [];
@@ -65,10 +93,7 @@ describe('withFreshReference', () => {
   it('does not retry any other failure', async () => {
     // A retried idempotency-key clash would place a second order; only the
     // reference is safe to change blind.
-    const other = Object.assign(new Error('other'), {
-      code: '23505',
-      constraint_name: 'uq_orders_org_idem',
-    });
+    const other = pgCollision('uq_orders_org_idem');
     const place = jest.fn().mockRejectedValue(other);
     await expect(withFreshReference(place)).rejects.toBe(other);
     expect(place).toHaveBeenCalledTimes(1);

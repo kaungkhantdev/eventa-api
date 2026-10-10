@@ -274,6 +274,7 @@ export class AttendeeDirectoryRepository {
   private statsCte(organizationId: number) {
     return sql`
       SELECT a.id, a.name, a.email, a.phone, a.company, a.tag, a.first_seen_at,
+             a.version,
              agg.last_activity_at,
              coalesce(agg.event_count, 0)      AS event_count,
              coalesce(agg.ticket_count, 0)     AS ticket_count,
@@ -367,5 +368,6 @@ function toRow(row: Record<string, unknown>): AttendeeRow {
     eventCount: Number(row.event_count),
     ticketCount: Number(row.ticket_count),
     checkedInCount: Number(row.checked_in_count),
+    version: Number(row.version),
   };
 }

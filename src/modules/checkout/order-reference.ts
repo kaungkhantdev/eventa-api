@@ -1,4 +1,5 @@
 import { randomInt } from 'node:crypto';
+import { isUniqueViolation } from '../../common/errors/unique-violation';
 
 /** Crockford base32 minus I, L, O, U — no character a person can mis-copy. */
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -6,7 +7,6 @@ const LENGTH = 8;
 const PREFIX = 'ORD';
 /** How many fresh references to try before admitting defeat (32^8 collisions). */
 const REFERENCE_ATTEMPTS = 3;
-const UNIQUE_VIOLATION = '23505';
 const REFERENCE_CONSTRAINT = 'uq_orders_org_reference';
 
 /**
@@ -65,9 +65,17 @@ export async function withFreshReference<T>(
   }
 }
 
+/**
+ * Through the shared guard, not by reading the caught object directly.
+ *
+ * This asked for `error.constraint_name` and `error.code` on the thing it
+ * caught, and both are wrong in the same two ways `isUniqueViolation` was
+ * before it was fixed: `pg-protocol` names the field `constraint`, and
+ * Drizzle wraps every rejection so the pg error sits at `.cause`. Both wrong
+ * at once made this ALWAYS false — the three attempts above never happened,
+ * and a reference collision became a 500 for something the design retries
+ * silently.
+ */
 function isReferenceCollision(error: unknown): boolean {
-  const code = (error as { code?: string } | null)?.code;
-  const constraint = (error as { constraint_name?: string } | null)
-    ?.constraint_name;
-  return code === UNIQUE_VIOLATION && constraint === REFERENCE_CONSTRAINT;
+  return isUniqueViolation(error, REFERENCE_CONSTRAINT);
 }

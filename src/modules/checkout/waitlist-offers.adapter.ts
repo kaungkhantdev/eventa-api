@@ -10,6 +10,7 @@ import { CheckoutRepository, type WaitlistEntry } from './checkout.repository';
 import { CheckoutEventPort } from './ports/checkout-event.port';
 import { RegistrationApprovalAdapter } from './registration-approval.adapter';
 import { autoOffersWaitlist, confirmsOnOffer } from './waitlist-rules';
+import { safeError } from '../../common/errors/safe-error';
 
 /**
  * How long a free registration's place is held while its approval runs. The
@@ -90,9 +91,9 @@ export class WaitlistOffersAdapter extends WaitlistOffersPort {
     context: { eventId: string; ticketTypeId: string; offered: number },
   ): void {
     if (err instanceof DomainException) {
-      this.logger.warn({ err, ...context }, STOPPED_EARLY);
+      this.logger.warn({ err: safeError(err), ...context }, STOPPED_EARLY);
     } else {
-      this.logger.error({ err, ...context }, STOPPED_EARLY);
+      this.logger.error({ err: safeError(err), ...context }, STOPPED_EARLY);
     }
   }
 

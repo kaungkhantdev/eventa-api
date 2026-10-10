@@ -99,6 +99,20 @@ export class AttendeeEntryDto {
 
   @ApiProperty({ example: 2, description: 'Tickets actually used at a door.' })
   checkedInCount!: number;
+
+  /**
+   * Without this the PATCH's `version` guard is unreachable: it refuses a
+   * stale save, but a client that is never told the version can only guess
+   * one, so the stale-form overwrite the refusal exists to prevent stays
+   * possible through every real caller.
+   */
+  @ApiProperty({
+    example: 1,
+    description:
+      'Send this back on PATCH to have a save refused with 409 rather than ' +
+      'overwrite a row someone else changed while the form was open.',
+  })
+  version!: number;
 }
 
 export class SegmentCountsDto {

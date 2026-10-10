@@ -15,5 +15,6 @@ export function toAttendeeEntry(row: AttendeeRow): AttendeeEntryDto {
     eventCount: row.eventCount,
     ticketCount: row.ticketCount,
     checkedInCount: row.checkedInCount,
+    version: row.version,
   };
 }

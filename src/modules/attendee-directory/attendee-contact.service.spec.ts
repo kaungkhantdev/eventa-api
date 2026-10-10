@@ -42,6 +42,9 @@ function directoryRow(overrides: Partial<AttendeeRow> = {}): AttendeeRow {
     eventCount: 1,
     ticketCount: 2,
     checkedInCount: 1,
+    // The version the row is read at, which the entry now carries out so the
+    // next save can be guarded by it.
+    version: 3,
     ...overrides,
   };
 }

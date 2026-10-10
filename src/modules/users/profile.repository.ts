@@ -5,8 +5,8 @@ import { users } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
 import { OutboxPort, type OutboxEventInput } from '../platform/outbox.port';
 import type {
+  ClaimedPhoneCode,
   PhoneChallengeInput,
-  PhoneChallengeRow,
   ProfileRow,
 } from './users.types';
 
@@ -26,19 +26,6 @@ const PROFILE_COLUMNS = {
   dateOfBirth: users.dateOfBirth,
   bio: users.bio,
   displayCurrency: users.displayCurrency,
-};
-
-/**
- * The code state behind a pending phone change. Selected on its own, never as
- * part of `PROFILE_COLUMNS` — the profile projection feeds a response DTO, and
- * a code hash has no business being one field away from the thing that is
- * serialised to the client.
- */
-const PHONE_CHALLENGE_COLUMNS = {
-  pendingPhone: users.pendingPhone,
-  phoneCodeHash: users.phoneCodeHash,
-  phoneCodeExpiresAt: users.phoneCodeExpiresAt,
-  phoneCodeAttempts: users.phoneCodeAttempts,
 };
 
 /** Clears every trace of a code in flight. */
@@ -183,39 +170,6 @@ export class ProfileRepository {
     });
   }
 
-  /** The pending number and its code state — never returned past the service. */
-  async findPhoneChallenge(
-    organizationId: number,
-    userId: string,
-  ): Promise<PhoneChallengeRow | null> {
-    return withTenant(this.db, organizationId, async (tx) => {
-      const [row] = await tx
-        .select(PHONE_CHALLENGE_COLUMNS)
-        .from(users)
-        .where(
-          and(
-            eq(users.organizationId, organizationId),
-            eq(users.id, userId),
-            isNull(users.deletedAt),
-          ),
-        )
-        .limit(1);
-      return row ?? null;
-    });
-  }
-
-  /**
-   * Count a wrong guess and, once `maxAttempts` is reached, destroy the code —
-   * in ONE statement. Returns the number of wrong guesses now standing against
-   * it.
-   *
-   * One statement because two would race: between a read-then-increment a
-   * second request reads the same count, and the cap a six-digit code depends
-   * on becomes advisory. The limit is passed in rather than read here because
-   * it is a rule, and rules live in the service — the repository only has to
-   * apply it in the same breath as the increment, which is the part that
-   * cannot be done from outside SQL.
-   */
   /**
    * Spend one guess and hand back the code to compare against, atomically.
    *
@@ -232,10 +186,10 @@ export class ProfileRepository {
    * `maxAttempts` of them get a hash back — the rest see no row and have
    * nothing to compare.
    *
-   * The hash is deliberately NOT nulled when the cap is reached, unlike
-   * `recordPhoneCodeFailure`: leaving it costs nothing because the predicate
-   * above already refuses, and nulling it in the same statement would return a
-   * null hash to the very caller that just claimed the right to compare one.
+   * The hash is deliberately NOT nulled once the cap is reached: the
+   * predicate above already refuses, and nulling it in the same statement
+   * would hand a null hash to the very caller that just claimed the right to
+   * compare one.
    *
    * Null means there is nothing to guess against — no code in flight, or the
    * budget is spent. The caller says which, and deliberately says the same
@@ -245,11 +199,7 @@ export class ProfileRepository {
     organizationId: number,
     userId: string,
     maxAttempts: number,
-  ): Promise<{
-    phoneCodeHash: string;
-    phoneCodeExpiresAt: Date | null;
-    pendingPhone: string | null;
-  } | null> {
+  ): Promise<ClaimedPhoneCode | null> {
     return withTenant(this.db, organizationId, async (tx) => {
       const [row] = await tx
         .update(users)
@@ -270,40 +220,16 @@ export class ProfileRepository {
           phoneCodeHash: users.phoneCodeHash,
           phoneCodeExpiresAt: users.phoneCodeExpiresAt,
           pendingPhone: users.pendingPhone,
+          // Post-increment, which is what `UPDATE … RETURNING` yields.
+          attempts: users.phoneCodeAttempts,
         });
       if (!row?.phoneCodeHash) return null;
       return {
         phoneCodeHash: row.phoneCodeHash,
         phoneCodeExpiresAt: row.phoneCodeExpiresAt,
         pendingPhone: row.pendingPhone,
+        attempts: row.attempts,
       };
-    });
-  }
-
-  async recordPhoneCodeFailure(
-    organizationId: number,
-    userId: string,
-    maxAttempts: number,
-  ): Promise<number> {
-    return withTenant(this.db, organizationId, async (tx) => {
-      const spent = sql`${users.phoneCodeAttempts} + 1 >= ${maxAttempts}`;
-      const [row] = await tx
-        .update(users)
-        .set({
-          phoneCodeAttempts: sql`${users.phoneCodeAttempts} + 1`,
-          phoneCodeHash: sql`case when ${spent} then null else ${users.phoneCodeHash} end`,
-          phoneCodeExpiresAt: sql`case when ${spent} then null else ${users.phoneCodeExpiresAt} end`,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(users.organizationId, organizationId),
-            eq(users.id, userId),
-            isNull(users.deletedAt),
-          ),
-        )
-        .returning({ attempts: users.phoneCodeAttempts });
-      return row?.attempts ?? maxAttempts;
     });
   }
 

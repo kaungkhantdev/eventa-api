@@ -33,6 +33,22 @@ export type PhoneChallengeRow = Pick<
   'pendingPhone' | 'phoneCodeHash' | 'phoneCodeExpiresAt' | 'phoneCodeAttempts'
 >;
 
+/**
+ * What one spent guess buys: the code to compare against, and how many guesses
+ * now stand against it.
+ *
+ * `attempts` is the count AFTER the increment, because the caller has to be
+ * able to tell that it just spent the LAST guess — a miss on that one kills
+ * the code, and saying "retype it" would send the member back to a code that
+ * can no longer work.
+ */
+export type ClaimedPhoneCode = {
+  phoneCodeHash: string;
+  phoneCodeExpiresAt: Date | null;
+  pendingPhone: string | null;
+  attempts: number;
+};
+
 /** A requested number and the code that will prove it (US-DISC-11 AC3). */
 export interface PhoneChallengeInput {
   /** E.164, already normalised — see `toThaiMobileE164`. */

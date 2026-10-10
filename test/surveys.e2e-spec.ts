@@ -42,6 +42,8 @@ interface Survey {
   title: string;
   status: 'draft' | 'live' | 'closed';
   questions: { id: string; type: string; prompt: string; options: string[] }[];
+  /** The optimistic lock, round-tripped by the editor on every save. */
+  version: number;
 }
 
 const RATING = { type: 'rating', prompt: 'How was it?', options: [] };
@@ -115,11 +117,21 @@ describe('Surveys (e2e — US-MSG-09)', () => {
       .set('Authorization', `Bearer ${jwt}`)
       .send(body);
 
+  /**
+   * A save carries the version it was read at; a status change does not.
+   *
+   * `UpdateSurveyDto.version` is REQUIRED — authoring replaces the whole
+   * question set, so a save with no version is a save that cannot be refused,
+   * and what it silently overwrites is another organizer's question. Defaulted
+   * to 1 here because almost every case saves a survey it just created; a case
+   * about the lock passes its own. The status route takes a different DTO and
+   * rejects unknown keys, so only the bare `:id` path gets one.
+   */
   const patch = (jwt: string, path: string, body: object) =>
     request(server)
       .patch(`/api/v1/surveys/${path}`)
       .set('Authorization', `Bearer ${jwt}`)
-      .send(body);
+      .send(path.includes('/') ? body : { version: 1, ...body });
 
   const body = (res: { body: unknown }) => (res.body as Success<Survey>).data;
 
@@ -214,6 +226,48 @@ describe('Surveys (e2e — US-MSG-09)', () => {
         title: 'Reworked',
         questions: [],
       }).expect(422);
+    });
+
+    /**
+     * Two organizers with the editor open, and what a lost update costs here.
+     *
+     * Authoring REPLACES the question set — every row deleted, the submitted
+     * list re-inserted — so a save built on a stale read did not overwrite a
+     * title, it deleted the other editor's question, with no error and nothing
+     * in the response to notice. This is the whole reason `surveys.version`
+     * exists.
+     *
+     * The second assertion is the one that matters: a refused save must leave
+     * the questions ALONE. The compare-and-swap runs before the delete for
+     * exactly this reason, and checking afterwards would report the conflict
+     * having already destroyed them.
+     */
+    it('refuses a save built on a version somebody has moved past', async () => {
+      const survey = await create();
+      const first = body(
+        await patch(adminJwt, survey.id, {
+          title: 'Saved first',
+          questions: [
+            RATING,
+            CHOICE,
+            { type: 'text', prompt: 'Mine', options: [] },
+          ],
+        }).expect(200),
+      );
+      expect(first.version).toBe(2);
+
+      // The second organizer still holds version 1.
+      await patch(adminJwt, survey.id, {
+        version: 1,
+        title: 'Saved second',
+        questions: [RATING],
+      }).expect(409);
+
+      const kept = await pool.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM survey_questions WHERE survey_id = $1`,
+        [Number(survey.id)],
+      );
+      expect(kept.rows[0].n).toBe(3);
     });
   });
 

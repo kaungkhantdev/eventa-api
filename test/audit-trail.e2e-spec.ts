@@ -326,10 +326,16 @@ async function seedMember(
 ): Promise<void> {
   for (const key of grants) {
     // 0052 already seeded the catalogue; this is a no-op on a migrated DB.
+    //
+    // `label` takes its own parameter rather than reusing `$1`. `key` is the
+    // `permission_key` enum and `label` is `text`, so one placeholder in both
+    // positions makes Postgres deduce a single type from two incompatible
+    // contexts: "inconsistent types deduced for parameter $1", which failed
+    // every test in this suite.
     await pool.query(
-      `INSERT INTO permissions (key, "group", label) VALUES ($1,$2,$1)
+      `INSERT INTO permissions (key, "group", label) VALUES ($1,$2,$3)
        ON CONFLICT (key) DO NOTHING`,
-      [key, PERMISSION_GROUP],
+      [key, PERMISSION_GROUP, key],
     );
   }
   const role = await pool.query<{ id: string }>(

@@ -21,6 +21,11 @@ export interface AttendeeRow {
   eventCount: number;
   ticketCount: number;
   checkedInCount: number;
+  /**
+   * The optimistic-concurrency token, carried out to the reader so the next
+   * write can be guarded by the value the form was opened on (US-REG-08).
+   */
+  version: number;
 }
 
 export interface DirectoryFilters {

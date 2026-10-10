@@ -114,12 +114,22 @@ describe('Checking a password-reset link (US-ACC-04, e2e)', () => {
     return tokenFor(email, RESET_REQUESTED);
   }
 
-  /** The refusal carries the invalid-link words and nothing else. */
+  /**
+   * The refusal carries the invalid-link words and nothing else.
+   *
+   * Matched whole rather than field by field, because what this asserts is an
+   * ABSENCE: every way a link can be bad — spent, malformed, signed by
+   * somebody else, past its expiry — has to answer identically, or the
+   * difference tells an enumerator which guesses were close. The generic
+   * `VALIDATION_ERROR` is part of that: a code of its own for any one of these
+   * reasons would be the leak this helper exists to prevent.
+   */
   function expectRefusedAsInvalid(res: request.Response): void {
     expect(res.status).toBe(422);
     expect(res.body).toEqual({
       success: false,
       statusCode: 422,
+      code: 'VALIDATION_ERROR',
       message: INVALID_LINK,
       timestamp: expect.any(String) as unknown,
     });

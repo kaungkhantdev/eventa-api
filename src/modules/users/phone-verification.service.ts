@@ -12,7 +12,7 @@ import { ProfileResponseDto } from './dto/profile-response.dto';
 import { phoneVerificationRequestedEvent } from './events/phone-verification-requested.event';
 import { toProfileResponse } from './profile.mapper';
 import { ProfileRepository } from './profile.repository';
-import type { PhoneChallengeRow, ProfileRow } from './users.types';
+import type { ProfileRow } from './users.types';
 
 /** Six digits: what a person will retype off a lock screen without a mistake. */
 const CODE_DIGITS = 6;
@@ -22,8 +22,6 @@ const NOT_A_MOBILE_MESSAGE =
   'Enter a Thai mobile number — for example 0812345678. Eventa can only text Thai mobiles.';
 const ALREADY_CONFIRMED_MESSAGE =
   'That is already the confirmed number on your account.';
-const NOTHING_PENDING_MESSAGE =
-  'There is no number waiting to be confirmed. Ask for a code first.';
 const WRONG_CODE_MESSAGE =
   "That code didn't match. Check the text and retype it.";
 const CODE_GONE_MESSAGE =
@@ -150,9 +148,7 @@ export class PhoneVerificationService {
     // a new one", and that is a distinction an attacker benefits from.
     if (!challenge) throw this.codeGone(TOO_MANY_MESSAGE);
     this.assertLive(challenge);
-    if (!matches(challenge.phoneCodeHash, code)) {
-      throw DomainException.invalidField('code', WRONG_CODE_MESSAGE);
-    }
+    if (!matches(challenge.phoneCodeHash, code)) throw this.refuse(challenge);
     // A live code with no number held behind it cannot be completed. It should
     // not happen — they are written and cleared together — so it is refused
     // rather than papered over with a guess at what was meant.
@@ -184,15 +180,21 @@ export class PhoneVerificationService {
     return toProfileResponse(saved);
   }
 
-  /** Count the miss, then refuse — differently once the cap has eaten the code. */
-  private async refuseCode(auth: AuthContext): Promise<never> {
-    const attempts = await this.repo.recordPhoneCodeFailure(
-      auth.organizationId,
-      auth.userId,
-      this.maxAttempts,
-    );
-    if (attempts >= this.maxAttempts) throw this.codeGone(TOO_MANY_MESSAGE);
-    throw DomainException.invalidField('code', WRONG_CODE_MESSAGE);
+  /**
+   * Refuse a miss — differently when that miss spent the last guess.
+   *
+   * The cap and the message have to move together. The claim that handed back
+   * this hash was the last one the predicate will allow, so the code is
+   * already dead; answering "check the text and retype it" would send the
+   * member to retype something that cannot work, and they would only find out
+   * on the attempt after. Same refusal either way, and no extra guess — the
+   * budget was spent before the comparison.
+   */
+  private refuse(claimed: { attempts: number }): DomainException {
+    if (claimed.attempts >= this.maxAttempts) {
+      return this.codeGone(TOO_MANY_MESSAGE);
+    }
+    return DomainException.invalidField('code', WRONG_CODE_MESSAGE);
   }
 
   private assertNotAlreadyConfirmed(
@@ -233,17 +235,6 @@ export class PhoneVerificationService {
     return normalized;
   }
 
-  private async requireChallenge(auth: AuthContext): Promise<LiveChallenge> {
-    const challenge = await this.repo.findPhoneChallenge(
-      auth.organizationId,
-      auth.userId,
-    );
-    if (!challenge?.pendingPhone) {
-      throw DomainException.validation(NOTHING_PENDING_MESSAGE);
-    }
-    return challenge as LiveChallenge;
-  }
-
   private async load(auth: AuthContext): Promise<ProfileRow> {
     const row = await this.repo.find(auth.organizationId, auth.userId);
     if (!row) throw DomainException.notFound('Profile not found.');
@@ -262,9 +253,6 @@ export class PhoneVerificationService {
     );
   }
 }
-
-/** A challenge known to name a pending number. */
-type LiveChallenge = PhoneChallengeRow & { pendingPhone: string };
 
 /**
  * Keyed on the ACCOUNT, not the number: what is rationed is paid sends on this

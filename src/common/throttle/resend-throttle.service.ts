@@ -4,6 +4,7 @@ import type Redis from 'ioredis';
 import { DomainException } from '../errors/domain.exception';
 import { REDIS } from '../redis/redis.constants';
 import type { Env } from '../../config/env.validation';
+import { safeError } from '../../common/errors/safe-error';
 
 /**
  * What was sent, so the refusal names the thing the member is waiting for.
@@ -207,7 +208,10 @@ export class ResendThrottleService {
         this.cooldownSeconds,
       );
     } catch (err) {
-      this.logger.warn({ err }, 'resend throttle unavailable — not recorded');
+      this.logger.warn(
+        { err: safeError(err) },
+        'resend throttle unavailable — not recorded',
+      );
     }
   }
 

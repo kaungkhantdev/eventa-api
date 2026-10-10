@@ -45,6 +45,7 @@ interface Attendee {
   email: string;
   phone: string | null;
   ticketCount: number;
+  version: number;
 }
 interface Failure {
   statusCode: number;
@@ -146,6 +147,49 @@ describe('Keep attendee contact details current (e2e — US-REG-08)', () => {
       const stale = await patch(ananId, { name: 'Someone Else', version: 1 });
       expect(stale.status).toBe(409);
       expect(failed(stale).message).toMatch(/reload/i);
+    });
+
+    /*
+     * The guard above is only reachable by a caller that already knows the
+     * version — this spec does, because it seeded the row at 1. A console does
+     * not: `version` was accepted on the PATCH and refused when stale, but no
+     * response carried it, so the only way to send a correct one was to guess.
+     * The stale-form overwrite the 409 exists to stop was therefore still
+     * possible through every real client.
+     *
+     * So the round-trip is the test: whatever a reader is given back has to be
+     * enough to make the next write safe, with nothing read out of the
+     * database.
+     */
+    it('hands the version to the reader, so the next save can be guarded', async () => {
+      const listed = await request(server)
+        .get(`/api/v1/attendees?search=${encodeURIComponent(ANAN.email)}`)
+        .set('Authorization', `Bearer ${jwt}`);
+      const [row] = (listed.body as Success<Attendee[]>).data;
+      expect(row.version).toBe(1);
+
+      // Saved with the version it was read at, the write goes through and the
+      // answer carries the next one.
+      const saved = await patch(ananId, {
+        name: NEW_NAME,
+        version: row.version,
+      });
+      expect(saved.status).toBe(200);
+      expect(ok(saved).version).toBe(row.version + 1);
+
+      // And that one is immediately usable, without a re-read.
+      const again = await patch(ananId, {
+        phone: NEW_PHONE,
+        version: ok(saved).version,
+      });
+      expect(again.status).toBe(200);
+
+      // While the version the form was opened on is now refused.
+      const stale = await patch(ananId, {
+        name: 'Someone Else',
+        version: row.version,
+      });
+      expect(stale.status).toBe(409);
     });
   });
 
@@ -494,9 +538,14 @@ async function seedMember(
 ): Promise<void> {
   for (const key of grants) {
     await pool.query(
-      `INSERT INTO permissions (key, "group", label) VALUES ($1,$2,$1)
+      // `label` takes its own parameter rather than reusing `$1`. `key` is the
+      // `permission_key` enum and `label` is `text`, so one placeholder in both
+      // positions makes Postgres deduce a single type from two incompatible
+      // contexts: "inconsistent types deduced for parameter $1", which failed
+      // this whole suite in `beforeAll`.
+      `INSERT INTO permissions (key, "group", label) VALUES ($1,$2,$3)
        ON CONFLICT (key) DO NOTHING`,
-      [key, PERMISSION_GROUP],
+      [key, PERMISSION_GROUP, key],
     );
   }
   const role = await pool.query<{ id: string }>(

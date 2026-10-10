@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Gauge, Registry, collectDefaultMetrics } from 'prom-client';
 import { OutboxLagRepository } from './outbox-lag.repository';
+import { safeError } from '../../common/errors/safe-error';
 
 const PREFIX = 'eventa_';
 
@@ -53,7 +54,10 @@ export class MetricsService {
         // read the whole target as unreachable and lose every other series in
         // the same response. -1 is outside any real value, so a dashboard shows
         // "cannot measure" rather than a reassuring zero.
-        this.logger.warn({ err }, 'Could not read outbox backlog for metrics');
+        this.logger.warn(
+          { err: safeError(err) },
+          'Could not read outbox backlog for metrics',
+        );
         return -1;
       }
     };

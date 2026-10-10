@@ -96,6 +96,9 @@ describe('PhoneVerificationService (US-DISC-11 AC3)', () => {
           phoneCodeHash: row.phoneCodeHash,
           phoneCodeExpiresAt: row.phoneCodeExpiresAt,
           pendingPhone: row.pendingPhone,
+          // `UPDATE … RETURNING` hands back the incremented value, which is
+          // what lets the caller know it just spent the last guess.
+          attempts: claimed,
         });
       }),
       promotePhone: jest
@@ -311,11 +314,33 @@ describe('PhoneVerificationService (US-DISC-11 AC3)', () => {
       });
     });
 
+    /**
+     * The miss that spends the last guess kills the code, so answering it with
+     * "check the text and retype it" sends the member to retype a code that
+     * cannot work any more — they only learn it is dead on the NEXT attempt.
+     * The cap and the message have to move together.
+     */
+    it('says the code is gone on the miss that spends the last guess', async () => {
+      for (let i = 1; i < MAX_ATTEMPTS; i++) {
+        await expect(service.confirm(auth, '000000')).rejects.toMatchObject({
+          code: 'VALIDATION_ERROR',
+        });
+      }
+
+      await expect(service.confirm(auth, '000000')).rejects.toMatchObject({
+        code: 'PHONE_CODE_EXPIRED',
+      });
+      // Still exactly the cap: the distinct answer is a better-worded refusal,
+      // not an extra guess.
+      expect(claimed).toBe(MAX_ATTEMPTS);
+    });
+
     it('refuses an expired code and asks for a new one', async () => {
       repo.claimPhoneCodeAttempt.mockResolvedValue({
         phoneCodeHash: challenge().phoneCodeHash ?? '',
         phoneCodeExpiresAt: new Date(NOW.getTime() - 1),
         pendingPhone: NEW_PHONE,
+        attempts: 1,
       });
       await expect(service.confirm(auth, '123456')).rejects.toMatchObject({
         code: 'PHONE_CODE_EXPIRED',

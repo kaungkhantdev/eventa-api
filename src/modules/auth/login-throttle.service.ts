@@ -5,6 +5,7 @@ import { DomainException } from '../../common/errors/domain.exception';
 import { REDIS } from '../../common/redis/redis.constants';
 import type { Env } from '../../config/env.validation';
 import { lockedMessage, type LockedAttempt } from './lock-message';
+import { safeError } from '../../common/errors/safe-error';
 
 /**
  * Where each kind of attempt keeps its count.
@@ -64,7 +65,7 @@ export class LoginThrottleService {
       secondsLeft = await this.redis.ttl(this.lockKey(identity, attempt));
     } catch (err) {
       this.logger.warn(
-        { err },
+        { err: safeError(err) },
         'login throttle unavailable — allowing sign-in',
       );
       return;
@@ -94,7 +95,10 @@ export class LoginThrottleService {
         );
       }
     } catch (err) {
-      this.logger.warn({ err }, 'login throttle could not record a failure');
+      this.logger.warn(
+        { err: safeError(err) },
+        'login throttle could not record a failure',
+      );
     }
   }
 
@@ -106,7 +110,10 @@ export class LoginThrottleService {
         this.lockKey(identity, 'sign-in'),
       );
     } catch (err) {
-      this.logger.warn({ err }, 'login throttle could not clear counters');
+      this.logger.warn(
+        { err: safeError(err) },
+        'login throttle could not clear counters',
+      );
     }
   }
 
