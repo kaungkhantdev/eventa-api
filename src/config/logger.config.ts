@@ -48,7 +48,36 @@ function safeRequest(req: unknown): ReturnType<typeof stdSerializers.req> {
   return Object.assign(serialized, {
     url: maskUrl(serialized.url),
     query: maskQuery(serialized.query as unknown),
+    headers: maskReferer(serialized.headers),
   });
+}
+
+/**
+ * The Referer names the page that made the call — and carries its whole URL.
+ *
+ * Masking `url` alone was half a fix. Whether the other half shows depends on
+ * deployment: a browser's default `strict-origin-when-cross-origin` sends
+ * only the origin to a DIFFERENT origin, so a console on app.eventa calling
+ * an API on api.eventa leaks nothing. Serve both from one origin — which
+ * `VITE_API_URL` leaves entirely open — and the same policy sends the full
+ * URL, query and all, on every request. The same search would be back in the
+ * log under a different field.
+ *
+ * The path survives, because which page called is worth knowing; only the
+ * query is masked, by the same rule as the request's own URL.
+ */
+function maskReferer(
+  headers: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!headers) return headers;
+  const masked = { ...headers };
+  // Both spellings: the HTTP header is the historical misspelling, but a
+  // proxy or a test client may use the other.
+  for (const name of ['referer', 'referrer']) {
+    const value = masked[name];
+    if (typeof value === 'string') masked[name] = maskUrl(value);
+  }
+  return masked;
 }
 
 function maskUrl(url: string | undefined): string | undefined {

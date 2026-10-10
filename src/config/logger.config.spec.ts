@@ -28,16 +28,24 @@ function options(): Record<string, unknown> {
   return buildLoggerOptions(config).pinoHttp as Record<string, unknown>;
 }
 
-type ReqSerializer = (req: unknown) => { url?: string; query?: unknown };
+type ReqSerializer = (req: unknown) => {
+  url?: string;
+  query?: unknown;
+  headers?: Record<string, unknown>;
+};
 
-function serializeReq(url: string, query: Record<string, string>) {
+function serializeReq(
+  url: string,
+  query: Record<string, string>,
+  headers: Record<string, string> = {},
+) {
   const serializers = options().serializers as { req: ReqSerializer };
   return serializers.req({
     method: 'GET',
     url,
     originalUrl: url,
     query,
-    headers: { host: 'api.test' },
+    headers: { host: 'api.test', ...headers },
     socket: {},
   });
 }
@@ -94,5 +102,70 @@ describe('the HTTP access log', () => {
 
     expect(redact.paths).toContain('req.headers.authorization');
     expect(redact.paths).toContain('req.headers.cookie');
+  });
+
+  /**
+   * The Referer carries the WHOLE page URL, so masking `url` alone was half a
+   * fix — my own, a commit earlier.
+   *
+   * Which half shows depends on deployment. A browser's default policy
+   * (`strict-origin-when-cross-origin`) sends only the origin to a different
+   * origin, so a console on app.eventa and an API on api.eventa leak nothing
+   * here. Serve both from one origin — which `VITE_API_URL` leaves entirely
+   * open — and the same policy sends the full URL, query string included, on
+   * every XHR. The access log would then hold `?q=<email>` again, by a
+   * different field, for the same search.
+   */
+  describe('the Referer header', () => {
+    it('masks the query of the page that made the call', () => {
+      const line = serializeReq(
+        '/api/v1/attendees',
+        {},
+        {
+          referer: `https://app.eventa.test/admin/attendees?q=${EMAIL}`,
+        },
+      );
+
+      expect(JSON.stringify(line)).not.toContain(EMAIL);
+    });
+
+    /** Which page called is worth keeping; what was typed into it is not. */
+    it('keeps the page it came from', () => {
+      const line = serializeReq(
+        '/api/v1/attendees',
+        {},
+        {
+          referer: `https://app.eventa.test/admin/attendees?q=${EMAIL}`,
+        },
+      );
+
+      expect(JSON.stringify(line)).toContain('/admin/attendees');
+    });
+
+    it('handles the misspelling the standard baked in', () => {
+      const line = serializeReq(
+        '/api/v1/attendees',
+        {},
+        {
+          referrer: `https://app.eventa.test/admin/attendees?q=${EMAIL}`,
+        },
+      );
+
+      expect(JSON.stringify(line)).not.toContain(EMAIL);
+    });
+
+    it('leaves a Referer with no query alone', () => {
+      const line = serializeReq(
+        '/api/v1/attendees',
+        {},
+        {
+          referer: 'https://app.eventa.test/admin/attendees',
+        },
+      );
+
+      expect(line.headers?.referer).toBe(
+        'https://app.eventa.test/admin/attendees',
+      );
+    });
   });
 });
