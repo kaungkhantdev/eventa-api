@@ -91,21 +91,49 @@ export class SurveysRepository {
    * statement and cannot half-apply. It is safe precisely because answers live
    * in their own tables and never point at a question row.
    */
+  /**
+   * Replace a survey's title and questions, if nobody else has saved since.
+   *
+   * Returns false when the version has moved on; the caller 409s. The survey is
+   * known to exist by then, because the service reads it first and 404s.
+   *
+   * **The order of the three statements is the fix.** The questions are stored
+   * by replacement — every row deleted, the submitted set re-inserted — so
+   * without a version check two organizers editing one survey did not overwrite
+   * a title, they deleted each other's questions: whoever saved second wrote
+   * back the list their browser had loaded, and the other's addition was gone
+   * with no error and nothing in the response to notice.
+   *
+   * So the compare-and-swap comes FIRST and the delete only happens if it
+   * matched. Checking afterwards would report the conflict having already
+   * destroyed the rows, and `withTenant` runs this in one transaction, so a
+   * rollback would be the only thing standing between a refusal and data loss.
+   * The same shape as `TicketingRepository.update`, which this follows.
+   */
   update(
     organizationId: number,
     surveyId: number,
     input: { title: string; questions: DraftQuestion[] },
-  ): Promise<void> {
+    currentVersion: number,
+  ): Promise<boolean> {
     return withTenant(this.db, organizationId, async (tx) => {
-      await tx
+      const claimed = await tx
         .update(surveys)
-        .set({ title: input.title.trim(), updatedAt: new Date() })
+        .set({
+          title: input.title.trim(),
+          version: currentVersion + 1,
+          updatedAt: new Date(),
+        })
         .where(
           and(
             eq(surveys.organizationId, organizationId),
             eq(surveys.id, surveyId),
+            eq(surveys.version, currentVersion),
           ),
-        );
+        )
+        .returning({ id: surveys.id });
+      if (claimed.length === 0) return false;
+
       await tx
         .delete(surveyQuestions)
         .where(
@@ -115,6 +143,7 @@ export class SurveysRepository {
           ),
         );
       await this.writeQuestions(tx, organizationId, surveyId, input.questions);
+      return true;
     });
   }
 

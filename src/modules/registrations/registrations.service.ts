@@ -51,6 +51,14 @@ export class RegistrationsService {
     const filters: RegistrationFilters = { ...query, page, limit };
     // Counts deliberately ignore the status filter: the tabs describe the whole
     // queue, so page 2 of "Pending" still shows how many are Confirmed.
+    //
+    // Every OTHER narrowing must be repeated here, or the tabs stop describing
+    // the table — the same failure, from the other direction, as a total summed
+    // from named buckets. A filter added to `RegistrationFilters` and threaded
+    // into `filters` above is NOT carried here automatically, and nothing
+    // fails if it is forgotten: keep this list complete. (Deriving it as
+    // `const { status, ...rest } = filters` says that in the type system, but
+    // leaves `status` bound and unused, which `no-unused-vars` rejects.)
     const countFilters: Omit<RegistrationFilters, 'status'> = {
       page,
       limit,

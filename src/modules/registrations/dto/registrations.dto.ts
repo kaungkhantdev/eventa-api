@@ -12,6 +12,7 @@ import {
 } from 'class-validator';
 import { orderStatusEnum, paymentStatusEnum } from '../../../db/schema';
 import type {
+  RegistrationCounts,
   RegistrationPayment,
   RegistrationStatus,
 } from '../registrations.types';
@@ -163,11 +164,32 @@ export class RegistrationEntryDto {
   rejectRefunds!: boolean;
 }
 
-/** Live tab totals across the whole filtered queue. */
-export class RegistrationCountsDto {
+/**
+ * Live tab totals across the whole filtered queue.
+ *
+ * `implements RegistrationCounts`, whose per-status fields are a `Record` over
+ * the `order_status` enum. A seventh member added to that enum therefore stops
+ * this class compiling — `TS2420: incorrectly implements` — until it publishes
+ * a field for it, rather than letting the API ship a breakdown that silently
+ * no longer accounts for every row. That is the guarantee the five fields this
+ * replaces did not have.
+ */
+export class RegistrationCountsDto implements RegistrationCounts {
+  @ApiProperty({
+    description:
+      'Every registration the same filters match, counted. NOT the sum of the fields below: a status with no tab of its own is still a row in the list, so All is counted rather than added up and cannot read smaller than the table.',
+  })
+  all!: number;
+
   @ApiProperty() pending!: number;
   @ApiProperty() confirmed!: number;
   @ApiProperty() waitlisted!: number;
   @ApiProperty() cancelled!: number;
   @ApiProperty() rejected!: number;
+
+  @ApiProperty({
+    description:
+      'Nobody paid and the payment window closed. No tab of its own, but counted — and in All.',
+  })
+  expired!: number;
 }

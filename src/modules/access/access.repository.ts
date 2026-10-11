@@ -6,6 +6,7 @@ import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
   authSessions,
   memberships,
+  organizations,
   permissions,
   rolePermissions,
   roles,
@@ -253,11 +254,50 @@ export class AccessRepository {
   }
 
   /** Is this email already a console member of the org? */
-  async emailInOrg(organizationId: number, email: string): Promise<boolean> {
+  /** The workspace's name, for a mail that has to say which one. */
+  async organizationName(organizationId: number): Promise<string> {
     return withTenant(this.db, organizationId, async (tx) => {
       const [row] = await tx
-        .select({ id: users.id })
+        .select({ name: organizations.name })
+        .from(organizations)
+        .where(eq(organizations.id, organizationId))
+        .limit(1);
+      return row?.name ?? '';
+    });
+  }
+
+  /**
+   * The teammate already holding this address, with the status that decides
+   * what a second invite means.
+   *
+   * It used to answer a plain yes/no, which made both halves of US-SET-11's
+   * third criterion the same answer: an ALREADY-INVITED colleague who lost
+   * their link was refused with "already exists in the workspace" exactly as
+   * an active one is, and nothing could re-send to them.
+   */
+  async findMemberByEmail(
+    organizationId: number,
+    email: string,
+  ): Promise<{
+    membershipId: number;
+    userId: string;
+    status: string;
+  } | null> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({
+          membershipId: memberships.id,
+          userId: users.id,
+          status: memberships.status,
+        })
         .from(users)
+        .innerJoin(
+          memberships,
+          and(
+            eq(memberships.userId, users.id),
+            eq(memberships.organizationId, organizationId),
+          ),
+        )
         .where(
           and(
             eq(users.organizationId, organizationId),
@@ -267,7 +307,7 @@ export class AccessRepository {
           ),
         )
         .limit(1);
-      return row !== undefined;
+      return row ?? null;
     });
   }
 

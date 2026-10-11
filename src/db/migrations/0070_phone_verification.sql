@@ -1,0 +1,76 @@
+-- A changed phone number must be confirmed by a texted code before anything
+-- is sent to it (US-DISC-11 AC3).
+--
+-- Until now `PATCH /me/profile` wrote `users.phone` straight through, and
+-- `notification_preferences` would happily switch SMS alerts on against
+-- whatever had been typed. So a digit mistyped into the profile form pointed
+-- somebody else's phone at this account's alerts, and a number typed on
+-- purpose by an attacker who had a session did the same deliberately. The
+-- story exists to close that, and closing it needs state: a number held aside,
+-- the code that proves it, when that code dies, and how many wrong guesses it
+-- has taken.
+--
+-- WHY COLUMNS ON `users`, NOT A `phone_verifications` TABLE. The obvious
+-- comparison is `two_factors`, which IS a table — but it is one because it has
+-- a child (`recovery_codes`) and a lifecycle of its own that outlives any
+-- single edit. A pending phone has neither: it is at most one per user, it is
+-- born and dies inside one profile edit, and the page that shows it is reading
+-- the user row anyway. `pending_email` already settled this shape for exactly
+-- the same problem one field over, and a 1:1 table would buy a FK, an index,
+-- an RLS policy and a join in the hottest read in the product to hold four
+-- values. The real cost of the column choice is transient credential
+-- bookkeeping on the identity row — which that row already carries in
+-- `password_hash`, `pending_email` and `two_factor_enabled`, and which is
+-- bounded: every one of these is cleared the moment a code is confirmed.
+--
+-- WHY `phone_verified_at` AS WELL AS `pending_phone`. For email, "verified" is
+-- *derived* (`pending_email IS NULL`) and that works because nothing but
+-- `promoteEmail` can write `email`. `phone` has no such history: every number
+-- already in it was typed into a form that never asked for proof. Deriving
+-- verified-ness here would therefore declare all of them confirmed and leave
+-- the story half closed for every account that already has a number. An
+-- explicit timestamp instead says the honest thing — NULL, never proven — and
+-- records WHEN consent to text was established, which is the question PDPA
+-- asks.
+--
+-- THE BACKFILL IS DELIBERATELY NOTHING. `phone_verified_at` starts NULL on
+-- every existing row, so every number on file today becomes unconfirmed: the
+-- profile still shows it, `smsAvailable` goes false, and the member confirms
+-- it by asking for a code against the number already there (the service
+-- allows re-requesting the number on file precisely so this is a one-tap fix).
+-- The alternative — moving those values into `pending_phone` — would hide a
+-- number the member can still see from them, and promote nothing, since no
+-- code was ever issued for it. Nothing is lost by leaving them: no SMS is sent
+-- from `users.phone` anywhere in the product yet (the registration text reads
+-- the order's own number), so this flips no live delivery off.
+--
+-- THE CODE IS STORED AS A DIGEST, NEVER IN THE CLEAR. `phone_code_hash` is
+-- SHA-256 of the six digits, matching `recovery_codes.code_hash` — the
+-- codebase's answer for a secret that is only ever compared, as against the
+-- TOTP seed in `two_factors.secret_encrypted`, which is encrypted because it
+-- must be read back. Being honest about what the digest buys: six digits is
+-- ~20 bits, so this is no barrier to anyone who can run a dictionary against
+-- it offline. What it does buy is that the row, a backup, a replica or a
+-- `SELECT *` in a support session is not itself a working credential. The
+-- controls that actually make the code a secret are its short TTL and
+-- `phone_code_attempts`.
+--
+-- WHY THE ATTEMPT COUNTER IS HERE AND NOT IN REDIS. `LoginThrottleService`
+-- counts sign-in failures in Redis and is explicitly fail-open — if Redis is
+-- down, sign-in still works, because locking real people out is the worse
+-- harm. That trade is right for a password and wrong for this: a six-digit
+-- code with no cap is not a secret at all, and a Redis outage would remove the
+-- cap for the entire life of every code in flight. So the count lives in the
+-- same row and the same transaction as the code it protects, where it cannot
+-- fail open. The LIMIT is still `LOGIN_MAX_ATTEMPTS` — this codebase's
+-- established number for tries at a credential — and the remedy once it is
+-- spent is the existing resend cool-off, so no new knob was invented.
+--
+-- No RLS or index work: `users` is already a tenant table with its policy from
+-- 0002, and every one of these columns is read by primary key.
+ALTER TABLE "users"
+  ADD COLUMN IF NOT EXISTS "phone_verified_at" timestamptz,
+  ADD COLUMN IF NOT EXISTS "pending_phone" text,
+  ADD COLUMN IF NOT EXISTS "phone_code_hash" text,
+  ADD COLUMN IF NOT EXISTS "phone_code_expires_at" timestamptz,
+  ADD COLUMN IF NOT EXISTS "phone_code_attempts" integer NOT NULL DEFAULT 0;

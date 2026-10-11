@@ -17,10 +17,12 @@ import {
   checkIns,
   events,
   orders,
+  scanAttempts,
   ticketTypes,
   tickets,
 } from '../../db/schema';
-import { withTenant } from '../../db/tenant';
+import { withTenant, type Tx } from '../../db/tenant';
+import { admissionOutcome } from './admission-outcome';
 import type {
   AdmissibleTicket,
   AdmitInput,
@@ -28,6 +30,7 @@ import type {
   AttendanceCounts,
   AttendanceQuery,
   AttendanceRow,
+  ScanAttemptRecord,
 } from './check-in.types';
 
 const AUDIT_TYPE = 'checkin' as const;
@@ -58,6 +61,13 @@ export class CheckInRepository {
    *
    * The `tickets` projection is updated in the same transaction so the
    * attendee's ticket view agrees with the ledger.
+   *
+   * The `scan_attempts` row goes in that SAME transaction. Written afterwards
+   * as its own call it could be lost to a crash or a failed second commit,
+   * leaving an admission the door has no record of making — and a scan ledger
+   * with holes in it is worse than none, because the holes read as a quiet
+   * night. Its outcome comes from `inserted`, so the ledger says `admitted` or
+   * `already_checked_in` for exactly the reason the station was told so.
    */
   async admit(input: AdmitInput): Promise<AdmitOutcome> {
     return withTenant(this.db, input.organizationId, async (tx) => {
@@ -78,6 +88,7 @@ export class CheckInRepository {
       // A raw `execute` hands back the timestamp as the driver sees it, not as
       // a Date — the projection update below needs a real one.
       const checkedInAt = new Date(row.checked_in_at);
+      const inserted = Boolean(row.inserted);
       await tx
         .update(tickets)
         .set({ status: 'checked_in', checkedInAt })
@@ -87,7 +98,56 @@ export class CheckInRepository {
             eq(tickets.organizationId, input.organizationId),
           ),
         );
-      return { checkedInAt, inserted: Boolean(row.inserted) };
+      await this.appendScanAttempt(tx, {
+        organizationId: input.organizationId,
+        eventId: input.eventId,
+        outcome: admissionOutcome(inserted),
+        method: input.method,
+        ticketId: input.ticketId,
+        // Null by definition: a pass only reaches the admit once the service
+        // has established it is for THIS event.
+        ticketEventId: null,
+        tokenFingerprint: input.tokenFingerprint,
+        stationId: input.stationId,
+        scannedBy: input.checkedInBy,
+        scannedAt: input.now,
+      });
+      return { checkedInAt, inserted };
+    });
+  }
+
+  /**
+   * Record a scan that admitted nobody (US-REG-12).
+   *
+   * One table, so one statement — the admitting path writes its own ledger row
+   * inside its transaction instead of calling this, because there it has a
+   * `check_ins` row and a `tickets` update to stay atomic with.
+   */
+  async recordScanAttempt(record: ScanAttemptRecord): Promise<void> {
+    await withTenant(this.db, record.organizationId, (tx) =>
+      this.appendScanAttempt(tx, record),
+    );
+  }
+
+  /**
+   * The ONLY write to `scan_attempts`, and an insert alone — the table is
+   * append-only, so there is deliberately no update or delete path to it here.
+   */
+  private async appendScanAttempt(
+    tx: Tx,
+    record: ScanAttemptRecord,
+  ): Promise<void> {
+    await tx.insert(scanAttempts).values({
+      organizationId: record.organizationId,
+      eventId: record.eventId,
+      outcome: record.outcome,
+      method: record.method,
+      ticketId: record.ticketId,
+      ticketEventId: record.ticketEventId,
+      tokenFingerprint: record.tokenFingerprint,
+      stationId: record.stationId,
+      scannedBy: record.scannedBy,
+      scannedAt: record.scannedAt,
     });
   }
 

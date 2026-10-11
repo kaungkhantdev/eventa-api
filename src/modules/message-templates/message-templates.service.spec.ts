@@ -1,5 +1,9 @@
 import { DomainException } from '../../common/errors/domain.exception';
-import { MESSAGE_TEMPLATE_CATALOG } from './message-template-catalog';
+import {
+  MESSAGE_TEMPLATE_CATALOG,
+  templateBySlug,
+  type MessageTemplateDefinition,
+} from './message-template-catalog';
 import { MessageTemplatesRepository } from './message-templates.repository';
 import {
   MessageTemplatesService,
@@ -114,9 +118,10 @@ describe('MessageTemplatesService (US-MSG-01/02)', () => {
     });
 
     it('refuses a message nothing sends yet', () => {
-      // Every message in today's catalog is sent, so this is proved on one
-      // made up for the purpose: the rule has to outlive the day the last
-      // planned message shipped, because the next one will be added planned.
+      // Proved on a message made up for the purpose, so the rule outlives any
+      // particular catalog: the real planned entries are pinned below, and the
+      // day their handlers land and they turn `controlled` this must still
+      // guard the next one that is added planned.
       const planned = {
         ...MESSAGE_TEMPLATE_CATALOG[0],
         slug: 'birthday-card',
@@ -185,6 +190,117 @@ describe('MessageTemplatesService (US-MSG-01/02)', () => {
       expect(others.every((t) => t.channels.every((c) => c === 'email'))).toBe(
         true,
       );
+    });
+  });
+
+  /**
+   * The three messages whose handlers eventa-worker is gaining next
+   * (US-REG-02 rejection, US-REG-06 invitation, US-PROG-03 session change).
+   *
+   * The API has been publishing `registration.rejected`, `invitation.sent` and
+   * `program.session_changed` with nothing bound to them, so the topic exchange
+   * discarded each one — no failure, no retry, no dead-letter, no trace. The
+   * slug is what a handler reads before it sends, so it has to exist BEFORE the
+   * handler does: eventa-worker answers a slug it has never heard of with ON
+   * (see `defaultActive` below), which is the difference between a kill switch
+   * an organizer can find and mail they cannot explain.
+   */
+  describe('the messages whose handlers are being built', () => {
+    const SENDING_SLUGS = [
+      'rejection-notice',
+      'event-invitation',
+      'session-change',
+    ];
+
+    const definitionOf = (slug: string): MessageTemplateDefinition => {
+      const found = templateBySlug(slug);
+      if (!found) throw new Error(`No catalog entry for ${slug}`);
+      return found;
+    };
+
+    it.each(SENDING_SLUGS)('has an entry for %s', (slug) => {
+      expect(templateBySlug(slug)).toBeDefined();
+    });
+
+    /*
+     * These assertions used to say the opposite, and that is the lesson worth
+     * leaving here. They pinned `planned` and pinned `assertSwitchable`
+     * THROWING — written while no handler existed, and left standing after the
+     * handlers landed in the same body of work. So both repos stayed green
+     * while the organizer's switch was dead: `assertSwitchable` gates
+     * `setActive`, `setActive` is the only writer of `message_templates.active`
+     * in this API, so no row could ever be created, `activeWhenUnset` always
+     * answered true, and all three emails sent unconditionally and could not be
+     * stopped — under a list view that told the organizer nothing sends them.
+     *
+     * A test that asserts the state of the world at the moment it was written
+     * does not protect the rule; it freezes the bug and then blocks the fix.
+     */
+    it.each(SENDING_SLUGS)(
+      'calls %s controlled, because a handler sends it and reads the switch',
+      (slug) => {
+        expect(definitionOf(slug).delivery).toBe('controlled');
+      },
+    );
+
+    it.each(SENDING_SLUGS)('lets an organizer switch %s off', (slug) => {
+      expect(() => assertSwitchable(definitionOf(slug))).not.toThrow();
+    });
+
+    /*
+     * The invariant rather than the snapshot: nothing in the catalog may claim
+     * to be switchable without being switchable, and nothing may be called
+     * `planned` while this API is willing to write its row. This fires on the
+     * CONDITION, so it keeps holding as slugs are added.
+     */
+    it('refuses a switch exactly when nothing sends it, for every entry', () => {
+      for (const definition of MESSAGE_TEMPLATE_CATALOG) {
+        if (definition.delivery === 'planned') {
+          expect(() => assertSwitchable(definition)).toThrow(DomainException);
+        } else {
+          expect(() => assertSwitchable(definition)).not.toThrow();
+        }
+      }
+    });
+
+    it.each(SENDING_SLUGS)(
+      'starts %s on, which is what eventa-worker already answers',
+      (slug) => {
+        // The reason adding these slugs is not cosmetic. eventa-worker's
+        // `activeWhenUnset` is a DENY-list — `!OFF_UNTIL_SWITCHED_ON_SLUGS
+        // .includes(slug)` — so a slug it has never seen is ON and
+        // `isActive(org, slug)` answers true for every workspace with no row.
+        // `defaultActive: false` here would print "Inactive" on the page while
+        // the worker mailed attendees, and fixing that would mean editing that
+        // deny-list in a repo this change must not touch.
+        expect(definitionOf(slug).defaultActive).toBe(true);
+      },
+    );
+
+    it.each(SENDING_SLUGS)(
+      'gives %s no merge fields until a handler fills them',
+      (slug) => {
+        // A field listed here that the worker does not substitute reaches an
+        // attendee as literal braces — and `setWording` is refused for a
+        // planned message anyway, so there is nothing to fill it with yet.
+        expect(definitionOf(slug).tags).toEqual([]);
+      },
+    );
+
+    it.each(SENDING_SLUGS)('sends %s by email only', (slug) => {
+      // A channel badge is a promise that something sends on it. Nothing texts
+      // these; the confirmation is still the only message with an SMS badge.
+      expect(definitionOf(slug).channels).toEqual(['email']);
+    });
+
+    it('owes the attendee a rejection, and only that one of the three', () => {
+      // Somebody who signed up — and may have paid — is owed the news that
+      // their place was refused, the same way they are owed the news that an
+      // event is off. An invitation nobody asked for, and a session that moved,
+      // are not debts, so switching them off needs no warning.
+      expect(definitionOf('rejection-notice').expected).toBe(true);
+      expect(definitionOf('event-invitation').expected).toBe(false);
+      expect(definitionOf('session-change').expected).toBe(false);
     });
   });
 });

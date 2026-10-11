@@ -54,12 +54,53 @@ export const envSchema = z.object({
 
   // How long before a confirmation link can be asked for again. Long enough
   // that a slow mail server is not mistaken for a lost message, short enough
-  // that somebody who really did lose one is not stuck waiting.
+  // that somebody who really did lose one is not stuck waiting. Shared with
+  // the phone-confirmation code (US-DISC-11), which has the same shape of
+  // problem and should not grow a second knob to answer it.
   VERIFY_RESEND_COOLDOWN_SECONDS: z.coerce
     .number()
     .int()
     .positive()
     .default(60),
+
+  // How many confirmation CODES one account may be issued per rolling window,
+  // and how long that window is (US-DISC-11 AC3). The cool-off above bounds the
+  // RATE; these bound the TOTAL, which is a different quantity and was missing.
+  //
+  // Without them the only limit was one code a minute, for ever: ~1,440 codes a
+  // day, and since each issuance resets `phone_code_attempts`, ~7,200 guesses a
+  // day against a six-digit secret — ~0.7% a day, near-certainty inside two
+  // months — plus 1,440 paid texts a day to numbers the requester chose.
+  //
+  // FIVE A DAY is what an honest member actually needs, counted out: one that
+  // works; one more because they mistyped a digit; one more because the carrier
+  // was slow; one more for a different phone; and one spare. A sixth does not
+  // help — if five texts have not arrived, the number cannot receive them, and
+  // the refusal says so instead of sending a sixth. Five also matches
+  // LOGIN_MAX_ATTEMPTS, which is this codebase's existing answer to "how many
+  // tries is a person owed", and the daily window matches nothing in sign-in on
+  // purpose: a lockout measured in minutes is right for a password somebody can
+  // retype, and wrong for a text that either arrives or does not.
+  //
+  // At five (ten across a window boundary, since the window is anchored on the
+  // first send) that is ≤50 guesses a day — ~0.005% a day, ~38 years to even
+  // odds — and ≤10 paid texts a day per account. The window is a day: 86400s.
+  VERIFY_CODE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(5),
+  VERIFY_CODE_WINDOW_SECONDS: z.coerce.number().int().positive().default(86400),
+
+  // How long a texted phone-confirmation code stays usable (US-DISC-11 AC3).
+  //
+  // Short on purpose: this is the window in which six digits can be guessed,
+  // and shortening it is the one control that costs nothing. Not as short as a
+  // TOTP step, because the code arrives by SMS — carrier delivery is seconds
+  // to minutes, and a code that dies before it lands is a loop the member
+  // cannot escape. Ten minutes is long enough for a slow carrier and a member
+  // who had to go and find their phone.
+  PHONE_VERIFY_CODE_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(600), // 10m
 
   // Public web app base URL — used to build shareable/public event links.
   PUBLIC_WEB_URL: z

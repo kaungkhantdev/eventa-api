@@ -27,7 +27,45 @@ export interface AdmitInput {
   method: CheckInMethod;
   checkedInBy: string;
   stationId: string | null;
+  /**
+   * Digest of the code presented, for the `scan_attempts` row written in the
+   * same transaction; null when nobody presented one (a manual admission).
+   */
+  tokenFingerprint: string | null;
   now: Date;
+}
+
+/**
+ * What the door was holding when it decided — everything a scan needs except
+ * the outcome and the ticket, which the decision itself produces.
+ */
+export interface ScanContext {
+  method: CheckInMethod;
+  stationId: string | null;
+  /** Null when no code was presented at all; never the raw token. */
+  tokenFingerprint: string | null;
+}
+
+/**
+ * One row of the append-only scan ledger (`scan_attempts`).
+ *
+ * Every outcome writes one, admissions included — a table of refusals alone
+ * has no denominator, and the refusal rate is what tells a busy door from a
+ * broken one.
+ */
+export interface ScanAttemptRecord extends ScanContext {
+  organizationId: number;
+  eventId: string;
+  outcome: ScanOutcome;
+  /** Null for an unrecognised code, which has no ticket to point at. */
+  ticketId: string | null;
+  /**
+   * Which event the presented pass actually belonged to, recorded only when it
+   * differs from `eventId` — the one thing `wrong_event` is about.
+   */
+  ticketEventId: string | null;
+  scannedBy: string;
+  scannedAt: Date;
 }
 
 /** What the single-statement admit reported back. */

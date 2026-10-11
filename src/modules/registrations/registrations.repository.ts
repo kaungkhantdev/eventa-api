@@ -3,6 +3,7 @@ import { type SQL, and, desc, eq, ilike, or, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { events, orderItems, orders, ticketTypes } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
+import { tallyByStatus } from './registration-counts';
 import type {
   RegistrationCounts,
   RegistrationFilters,
@@ -41,24 +42,32 @@ export class RegistrationsRepository {
     });
   }
 
-  /** All five tab totals in ONE scan, so they describe the same instant. */
+  /**
+   * Every tab total in ONE scan, so they describe the same instant.
+   *
+   * Grouped by status rather than one `count(*) FILTER (…)` per named status:
+   * a filter list has to be edited whenever `order_status` grows, and when it
+   * was not, the queue listed expired orders that no tab counted. A `GROUP BY`
+   * returns a row for whatever the column actually holds, and `tallyByStatus`
+   * turns that into the published shape — All included, counted rather than
+   * summed. The predicate is `queueWhere`, the same one `page()` filters by,
+   * so All describes precisely the rows the table is about to show.
+   */
   async countByStatus(
     organizationId: number,
     filters: Omit<RegistrationFilters, 'status'>,
   ): Promise<RegistrationCounts> {
     return withTenant(this.db, organizationId, async (tx) => {
-      const [row] = await tx
+      const rows = await tx
         .select({
-          pending: sql<number>`count(*) FILTER (WHERE ${orders.status} = 'pending')::int`,
-          confirmed: sql<number>`count(*) FILTER (WHERE ${orders.status} = 'confirmed')::int`,
-          waitlisted: sql<number>`count(*) FILTER (WHERE ${orders.status} = 'waitlisted')::int`,
-          cancelled: sql<number>`count(*) FILTER (WHERE ${orders.status} = 'cancelled')::int`,
-          rejected: sql<number>`count(*) FILTER (WHERE ${orders.status} = 'rejected')::int`,
+          status: orders.status,
+          count: sql<number>`count(*)::int`,
         })
         .from(orders)
         .innerJoin(events, eq(events.id, orders.eventId))
-        .where(this.queueWhere(organizationId, filters));
-      return row;
+        .where(this.queueWhere(organizationId, filters))
+        .groupBy(orders.status);
+      return tallyByStatus(rows);
     });
   }
 

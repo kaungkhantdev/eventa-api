@@ -21,6 +21,8 @@ function profileRow(overrides: Partial<ProfileRow> = {}): ProfileRow {
     email: 'somchai@acme.test',
     pendingEmail: null,
     phone: null,
+    phoneVerifiedAt: null,
+    pendingPhone: null,
     timezone: null,
     locale: null,
     city: null,
@@ -94,17 +96,31 @@ describe('ProfileService (US-SET-01)', () => {
   });
 
   describe('update', () => {
-    it('saves the name and phone', async () => {
-      const res = await service.update(auth, {
-        name: 'Somchai S.',
-        phone: '+66812345678',
-      });
+    it('saves the name', async () => {
+      const res = await service.update(auth, { name: 'Somchai S.' });
       expect(repo.update).toHaveBeenCalledWith(
         orgId,
         userId,
-        expect.objectContaining({ name: 'Somchai S.', phone: '+66812345678' }),
+        expect.objectContaining({ name: 'Somchai S.' }),
       );
       expect(res.name).toBe('Somchai S.');
+    });
+
+    /**
+     * US-DISC-11 AC3. A phone number that this save could write would be used
+     * for texts the instant it was typed, which is the whole of what the
+     * criterion forbids — so it goes through PhoneVerificationService instead,
+     * exactly as `email` goes through `requestEmailChange`. The route refuses
+     * the field outright (`forbidNonWhitelisted`); this guards the layer under
+     * it, in case a caller reaches the service directly.
+     */
+    it('never writes a phone number, even when one is passed', async () => {
+      await service.update(auth, {
+        name: 'Somchai S.',
+        phone: '+66812345678',
+      } as never);
+      const [, , values] = repo.update.mock.calls[0];
+      expect(values).not.toHaveProperty('phone');
     });
 
     it('keeps the timezone and language the console renders in', async () => {
@@ -117,9 +133,9 @@ describe('ProfileService (US-SET-01)', () => {
     });
 
     it('only writes the keys provided, so a partial save keeps the rest', async () => {
-      await service.update(auth, { phone: '+66800000000' });
+      await service.update(auth, { city: 'Bangkok' });
       const [, , values] = repo.update.mock.calls[0];
-      expect(Object.keys(values)).toEqual(['phone']);
+      expect(Object.keys(values)).toEqual(['city']);
     });
 
     it('ignores a hand-written avatarUrl — a photo only arrives through a verified upload', async () => {

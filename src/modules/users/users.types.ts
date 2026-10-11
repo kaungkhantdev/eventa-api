@@ -9,6 +9,8 @@ export type ProfileRow = Pick<
   | 'email'
   | 'pendingEmail'
   | 'phone'
+  | 'phoneVerifiedAt'
+  | 'pendingPhone'
   | 'timezone'
   | 'locale'
   | 'avatarUrl'
@@ -18,10 +20,55 @@ export type ProfileRow = Pick<
   | 'displayCurrency'
 >;
 
-/** Fields a member may change on their OWN profile. */
+/**
+ * The code state behind a pending phone change (US-DISC-11 AC3).
+ *
+ * Deliberately NOT part of `ProfileRow`: the hash and the attempt count are
+ * credential bookkeeping, and the profile projection is what the page and the
+ * `/me/profile` response are built from. Keeping them in separate types is
+ * what stops a code hash riding along into a DTO by accident.
+ */
+export type PhoneChallengeRow = Pick<
+  typeof users.$inferSelect,
+  'pendingPhone' | 'phoneCodeHash' | 'phoneCodeExpiresAt' | 'phoneCodeAttempts'
+>;
+
+/**
+ * What one spent guess buys: the code to compare against, and how many guesses
+ * now stand against it.
+ *
+ * `attempts` is the count AFTER the increment, because the caller has to be
+ * able to tell that it just spent the LAST guess — a miss on that one kills
+ * the code, and saying "retype it" would send the member back to a code that
+ * can no longer work.
+ */
+export type ClaimedPhoneCode = {
+  phoneCodeHash: string;
+  phoneCodeExpiresAt: Date | null;
+  pendingPhone: string | null;
+  attempts: number;
+};
+
+/** A requested number and the code that will prove it (US-DISC-11 AC3). */
+export interface PhoneChallengeInput {
+  /** E.164, already normalised — see `toThaiMobileE164`. */
+  pendingPhone: string;
+  /** SHA-256 of the six digits. The code itself is never written here. */
+  codeHash: string;
+  expiresAt: Date;
+}
+
+/**
+ * Fields a member may change on their OWN profile.
+ *
+ * `phone` is absent, exactly as `email` is: both are contact details that must
+ * be proven before Eventa will send to them, so both move through their own
+ * endpoint (`POST /me/profile/phone`, `POST /me/profile/email`) rather than
+ * through the generic save. A number that could be written here would be used
+ * for texts the instant it was typed, which is the hole US-DISC-11 AC3 closes.
+ */
 export interface UpdateProfileInput {
   name?: string;
-  phone?: string | null;
   timezone?: string | null;
   locale?: 'en' | 'th' | null;
   avatarUrl?: string | null;

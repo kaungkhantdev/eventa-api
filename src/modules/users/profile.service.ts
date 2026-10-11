@@ -8,18 +8,24 @@ import { TokenService } from '../auth/token.service';
 import { OutboxPort } from '../platform/outbox.port';
 import { ProfileResponseDto } from './dto/profile-response.dto';
 import { emailChangeRequestedEvent } from './events/email-change-requested.event';
+import { toProfileResponse } from './profile.mapper';
 import { ProfileRepository } from './profile.repository';
 import type { ProfileRow, UpdateProfileInput } from './users.types';
 
 /**
- * Fields a member may change on their own profile. `avatarUrl` is deliberately
- * ABSENT: a photo is only ever set by `setAvatarUrl`, after the profile-photo
- * module has verified an upload it issued. Accepting a hand-written URL here
- * would let anyone point their avatar at any address on the internet.
+ * Fields a member may change on their own profile.
+ *
+ * Two are deliberately ABSENT. `avatarUrl`: a photo is only ever set by
+ * `setAvatarUrl`, after the profile-photo module has verified an upload it
+ * issued — accepting a hand-written URL here would let anyone point their
+ * avatar at any address on the internet. `phone`: a number must be confirmed
+ * by a texted code before Eventa sends to it (US-DISC-11 AC3), so it moves
+ * through `PhoneVerificationService` exactly as `email` moves through
+ * `requestEmailChange`. A number writable here would be textable the instant
+ * it was typed, which is the whole of what that criterion forbids.
  */
 const UPDATABLE_KEYS = [
   'name',
-  'phone',
   'timezone',
   'locale',
   'city',
@@ -181,22 +187,4 @@ function pickProvided(input: UpdateProfileInput): Partial<ProfileRow> {
     if (input[key] !== undefined) values[key] = input[key];
   }
   return values;
-}
-
-function toProfileResponse(row: ProfileRow): ProfileResponseDto {
-  return {
-    id: row.id,
-    name: row.name,
-    email: row.email,
-    pendingEmail: row.pendingEmail,
-    emailVerified: row.pendingEmail === null,
-    phone: row.phone,
-    timezone: row.timezone,
-    locale: row.locale,
-    avatarUrl: row.avatarUrl,
-    city: row.city,
-    dateOfBirth: row.dateOfBirth,
-    bio: row.bio,
-    displayCurrency: row.displayCurrency,
-  };
 }

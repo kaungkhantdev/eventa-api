@@ -1,10 +1,15 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { DomainException } from '../../common/errors/domain.exception';
 import { Paginated } from '../../common/http/paginated';
 import { Permission } from '../../common/decorators/require-permissions.decorator';
 import { TokenService } from '../auth/token.service';
 import { PermissionsService } from './permissions.service';
 import { AccessRepository } from './access.repository';
+import { Clock } from '../../common/time/clock';
+import type { Env } from '../../config/env.validation';
+import { OutboxPort } from '../platform/outbox.port';
+import { memberInvitedEvent } from './events/member-invited.event';
 import type {
   InviteMemberInput,
   ListMembersQuery,
@@ -22,9 +27,26 @@ export class AccessService {
     private readonly repo: AccessRepository,
     private readonly tokens: TokenService,
     private readonly permissions: PermissionsService,
-  ) {}
+    private readonly outbox: OutboxPort,
+    private readonly clock: Clock,
+    config: ConfigService<Env, true>,
+  ) {
+    this.publicWebUrl = config.getOrThrow('PUBLIC_WEB_URL', { infer: true });
+  }
 
-  /** Invite a teammate: create an Invited user + membership, return an invite token. */
+  /** The membership status that means "asked, not yet joined". */
+  private static readonly INVITED = 'Invited';
+
+  private readonly publicWebUrl: string;
+
+  /**
+   * Invite a teammate (US-SET-11): an Invited user + membership, a join link
+   * by email, and an invite token returned to the caller.
+   *
+   * A second invite to an address that is still Invited RE-SENDS — a fresh
+   * link against the same membership — rather than duplicating. Only an
+   * already-active member is refused.
+   */
   async inviteMember(
     organizationId: number,
     input: InviteMemberInput,
@@ -34,21 +56,42 @@ export class AccessService {
         `Role ${input.roleId} not found in this workspace.`,
       );
     }
-    if (await this.repo.emailInOrg(organizationId, input.email)) {
+    // US-SET-11: a second invite to an email already INVITED re-sends rather
+    // than duplicating; only an ACTIVE member is refused. Both used to be
+    // refused, so a teammate who lost their join link was stuck.
+    const existing = await this.repo.findMemberByEmail(
+      organizationId,
+      input.email,
+    );
+    if (existing && existing.status !== AccessService.INVITED) {
       throw DomainException.conflict(
         'A member with this email already exists in the workspace.',
       );
     }
-    const { membershipId, userId } = await this.repo.createInvitedMember(
-      organizationId,
-      input,
-    );
+    const { membershipId, userId } = existing
+      ? { membershipId: existing.membershipId, userId: existing.userId }
+      : await this.repo.createInvitedMember(organizationId, input);
     const inviteToken = await this.tokens.signInvite({
       userId,
       organizationId,
       membershipId,
     });
     const member = await this.repo.getMember(organizationId, membershipId);
+    // US-SET-11: "they appear as 'Invited' and receive a join link by email."
+    // A URL rather than the bare token, as the sign-up confirmation and the
+    // password reset both do — the only thing the worker should be able to do
+    // with it is put it in a mail.
+    await this.outbox.enqueue(
+      memberInvitedEvent({
+        organizationId,
+        userId,
+        name: member.name,
+        email: member.email,
+        organizationName: await this.repo.organizationName(organizationId),
+        acceptUrl: `${this.publicWebUrl}/accept-invite?token=${inviteToken}`,
+        occurredAt: this.clock.now().toISOString(),
+      }),
+    );
     return { member, inviteToken };
   }
 

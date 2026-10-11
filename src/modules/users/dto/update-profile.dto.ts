@@ -22,12 +22,12 @@ export class UpdateProfileDto {
   @MaxLength(200)
   name?: string;
 
-  @ApiPropertyOptional({ nullable: true, example: '+66812345678' })
-  @IsOptional()
-  @ValidateIf((_o, v) => v !== null)
-  @IsString()
-  @MaxLength(32)
-  phone?: string | null;
+  // NO `phone`, and no `email` — both are contact details Eventa must prove
+  // before it sends to them, so both have their own endpoint:
+  // `POST /me/profile/phone` + `/phone/confirm` (US-DISC-11 AC3) and
+  // `POST /me/profile/email` + `/email/confirm` (US-SET-01). The validation
+  // pipe runs `forbidNonWhitelisted`, so a client still PATCHing one gets a
+  // 400 naming the field rather than a quietly dropped change.
 
   @ApiPropertyOptional({ nullable: true, example: 'Asia/Bangkok' })
   @IsOptional()

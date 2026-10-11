@@ -4,6 +4,12 @@ import { Paginated } from '../../common/http/paginated';
 import type { AuthContext } from '../auth/auth.types';
 import { PermissionsService } from '../access/permissions.service';
 import { AuditRepository, type AuditRecord } from './audit.repository';
+import {
+  type AuditSubjectFilter,
+  type AuditSubjectType,
+  type AuditType,
+  toSubjectFilter,
+} from './audit-subject';
 import { AuditEntryDto, toAuditEntry } from './dto/audit-entry.dto';
 
 const DEFAULT_LIMIT = 50;
@@ -14,6 +20,11 @@ export interface ListAuditQuery {
   limit?: number;
   from?: string;
   to?: string;
+  /** One kind of act. */
+  type?: AuditType;
+  /** Which record to read the trail of — both halves, or neither. */
+  subjectType?: AuditSubjectType;
+  subjectId?: number;
 }
 
 /**
@@ -22,7 +33,10 @@ export interface ListAuditQuery {
  * product edits or deletes an entry.
  *
  * Visibility: an Admin (`setUsers`) sees the whole workspace; anyone else sees
- * only their own security events.
+ * only their own security events. The route itself carries no
+ * `@RequirePermissions`, so that narrowing is the whole of the authorization —
+ * which is why every filter here is applied as an additional AND and the actor
+ * pin is spread last, where nothing can overwrite it.
  */
 @Injectable()
 export class AuditService {
@@ -41,8 +55,9 @@ export class AuditService {
       Math.max(1, query.limit ?? DEFAULT_LIMIT),
     );
     const { items, total } = await this.repo.page(auth.organizationId, {
-      ...(await this.scope(auth)),
       ...parseRange(query),
+      ...parseFilters(query),
+      ...(await this.scope(auth)),
       limit,
       offset: (page - 1) * limit,
     });
@@ -59,8 +74,9 @@ export class AuditService {
   ): Promise<{ filename: string; csv: string }> {
     const range = parseRange(query);
     const rows = await this.repo.all(auth.organizationId, {
-      ...(await this.scope(auth)),
       ...range,
+      ...parseFilters(query),
+      ...(await this.scope(auth)),
     });
     await this.repo.recordExport(
       auth.organizationId,
@@ -80,6 +96,30 @@ export class AuditService {
       ? {}
       : { actorUserId: auth.userId };
   }
+}
+
+/**
+ * The act/subject filters, resolved once for both the page and the export.
+ *
+ * A half-given subject is dropped rather than guessed. `subjectId` alone could
+ * only mean "any record with this id", which across subject kinds is not a
+ * question with an answer; answering it as an unfiltered workspace list is how
+ * a panel meant for one attendee would quietly render everyone's trail. The DTO
+ * refuses the half pair at the edge, so this is the second line of that defence
+ * for any caller that reaches the service directly.
+ */
+function parseFilters(query: ListAuditQuery): {
+  type?: AuditType;
+  subject?: AuditSubjectFilter;
+} {
+  const subject =
+    query.subjectType !== undefined && query.subjectId !== undefined
+      ? toSubjectFilter({ type: query.subjectType, id: query.subjectId })
+      : undefined;
+  return {
+    ...(query.type ? { type: query.type } : {}),
+    ...(subject ? { subject } : {}),
+  };
 }
 
 function parseRange(query: ListAuditQuery): { from?: Date; to?: Date } {

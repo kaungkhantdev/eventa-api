@@ -49,11 +49,20 @@ export interface RegistrationFilters {
   search?: string;
 }
 
-/** Live tab totals across the whole filtered queue. */
-export interface RegistrationCounts {
-  pending: number;
-  confirmed: number;
-  waitlisted: number;
-  cancelled: number;
-  rejected: number;
+/**
+ * Live tab totals across the whole filtered queue.
+ *
+ * One field per member of the `order_status` enum, derived from it rather than
+ * typed out: a status added to the column gets a bucket here the moment the
+ * migration ships, and the places that have to publish or seed one stop
+ * compiling until they do. Five hand-written fields against a six-member enum
+ * are how `expired` came to be listed by the queue and counted by nobody.
+ */
+export interface RegistrationCounts extends Record<RegistrationStatus, number> {
+  /**
+   * Every row the same filters list, counted — NOT the sum of the fields
+   * above. See `tallyByStatus`: a total derived from the rows cannot fall
+   * behind the statuses the database holds, and a summed one always can.
+   */
+  all: number;
 }

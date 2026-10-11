@@ -1,3 +1,5 @@
+import { pgFields } from './pg-error';
+
 /** Postgres SQLSTATE for a unique constraint or index violation. */
 const UNIQUE_VIOLATION = '23505';
 
@@ -15,15 +17,19 @@ const UNIQUE_VIOLATION = '23505';
  * somebody to change a field that was never the problem.
  */
 export function isUniqueViolation(error: unknown, constraint: string): boolean {
-  const fields = error as
-    { code?: unknown; constraint_name?: unknown } | null | undefined;
-  return (
-    typeof fields === 'object' &&
-    fields !== null &&
-    fields.code === UNIQUE_VIOLATION &&
-    fields.constraint_name === constraint
-  );
+  const pg = pgFields(error);
+  return pg?.code === UNIQUE_VIOLATION && pg.constraint === constraint;
 }
 
 /** The index that keeps workspace names unique across the platform. */
 export const UQ_ORGANIZATIONS_NAME = 'uq_organizations_name';
+
+/**
+ * One email address per attendee per workspace.
+ *
+ * It carries NO `WHERE deleted_at IS NULL` predicate, so a removed attendee
+ * still owns its address — which is why US-REG-08's collision check counts
+ * soft-deleted records too, and why this name is needed to turn the index's own
+ * refusal of a racing write back into the same merge prompt.
+ */
+export const UQ_ATTENDEES_ORG_EMAIL = 'uq_attendees_org_email';

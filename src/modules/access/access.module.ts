@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { AuthModule } from '../auth/auth.module';
+import { PlatformModule } from '../platform/platform.module';
 import { AccessRepository } from './access.repository';
 import { AccessService } from './access.service';
 import { MembersController } from './members.controller';
@@ -15,7 +16,7 @@ import { RolesService } from './roles.service';
  * (AuthModule), which in turn resolves permissions here — wired with `forwardRef`.
  */
 @Module({
-  imports: [forwardRef(() => AuthModule)],
+  imports: [forwardRef(() => AuthModule), PlatformModule],
   controllers: [RolesController, MembersController],
   providers: [
     AccessService,

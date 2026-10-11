@@ -1,0 +1,17 @@
+-- An attendee-CRM act is auditable (US-REG-08).
+--
+-- Correcting a name, email or phone changes where somebody's ticket and every
+-- future reminder are sent, and no other table remembers that it happened:
+-- `attendees` keeps only the current values, and `orders` keeps only the
+-- current routing copy. `audit_events` is where it lands, which needs a type
+-- of its own — `audit_type` is add-only and has been extended this way before
+-- (0034 `invoice`, 0036 `payout`, 0041 `checkin`).
+--
+-- The same row serves both halves of the story's trail: AC1's "recorded for
+-- audit" and AC5's "Updated contact details" entry on the profile's activity
+-- timeline. There is one mechanism, not two, because a second activity table
+-- would be a parallel record that could disagree with this one.
+--
+-- ADD VALUE only, and the value is not used in this transaction: Postgres
+-- cannot reference a newly-added enum label in the transaction that added it.
+ALTER TYPE "public"."audit_type" ADD VALUE IF NOT EXISTS 'attendee';

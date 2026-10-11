@@ -12,7 +12,10 @@ import { Pool, type PoolClient } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
-import { MESSAGE_TEMPLATE_CATALOG } from '../src/modules/message-templates/message-template-catalog';
+import {
+  MESSAGE_TEMPLATE_CATALOG,
+  type TemplateDelivery,
+} from '../src/modules/message-templates/message-template-catalog';
 import { listenOnLoopback } from './support/loopback';
 
 /**
@@ -56,7 +59,14 @@ interface Template {
   title: string;
   description: string;
   channels: string[];
-  delivery: 'controlled' | 'always' | 'planned';
+  /**
+   * Taken from the catalog rather than re-typed, so this fixture cannot
+   * outlive the vocabulary it describes. It had drifted to three members,
+   * naming an `always` the API has never been able to send: the catalog is
+   * explicit that there are two, because a switch that moves without
+   * changing anything is worse than no switch.
+   */
+  delivery: TemplateDelivery;
   expected: boolean;
   active: boolean;
 }

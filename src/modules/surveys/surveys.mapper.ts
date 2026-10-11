@@ -9,6 +9,9 @@ export function toSurvey(survey: SurveyWithQuestions): SurveyDto {
     title: survey.title,
     status: survey.status,
     createdAt: survey.createdAt.toISOString(),
+    // Round-tripped by the editor; without it on the way out there is nothing
+    // for a save to carry back, and the optimistic lock cannot be checked.
+    version: survey.version,
     questions: survey.questions.map((question) => ({
       id: String(question.id),
       type: question.type,

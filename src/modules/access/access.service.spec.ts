@@ -10,6 +10,11 @@ describe('AccessService', () => {
   let repo: jest.Mocked<AccessRepository>;
   let tokens: jest.Mocked<TokenService>;
   let service: AccessService;
+  let outbox: { enqueue: jest.Mock; enqueueIn: jest.Mock };
+  const clock = { now: () => new Date('2026-10-10T08:00:00.000Z') };
+  const config = {
+    getOrThrow: () => 'https://app.eventa.test',
+  } as never;
 
   beforeEach(() => {
     repo = {
@@ -18,8 +23,9 @@ describe('AccessService', () => {
       memberExists: jest.fn(),
       updateMemberRole: jest.fn().mockResolvedValue(undefined),
       getMember: jest.fn(),
-      emailInOrg: jest.fn(),
+      findMemberByEmail: jest.fn(),
       createInvitedMember: jest.fn(),
+      organizationName: jest.fn().mockResolvedValue('Acme Events'),
     } as unknown as jest.Mocked<AccessRepository>;
     tokens = {
       signInvite: jest.fn().mockResolvedValue('invite.jwt'),
@@ -28,7 +34,18 @@ describe('AccessService', () => {
     const permissions = {
       getFor: jest.fn().mockResolvedValue([]),
     } as unknown as jest.Mocked<PermissionsService>;
-    service = new AccessService(repo, tokens, permissions);
+    outbox = {
+      enqueue: jest.fn().mockResolvedValue(undefined),
+      enqueueIn: jest.fn().mockResolvedValue(undefined),
+    };
+    service = new AccessService(
+      repo,
+      tokens,
+      permissions,
+      outbox,
+      clock,
+      config,
+    );
   });
 
   describe('changeMemberRole', () => {
@@ -92,9 +109,93 @@ describe('AccessService', () => {
       expect(repo.createInvitedMember).not.toHaveBeenCalled();
     });
 
-    it('rejects a duplicate email with 409 (no create)', async () => {
+    /*
+     * US-SET-11: "they appear as 'Invited' and RECEIVE A JOIN LINK BY EMAIL."
+     *
+     * The token used to be handed back in the response and nothing was ever
+     * sent — `InviteResponseDto` said so itself, "Returned here for now;
+     * emailed once the mail provider is wired up". An invitation nobody
+     * receives is not an invitation.
+     */
+    it('enqueues the join link, with the workspace it is for', async () => {
       repo.roleExists.mockResolvedValue(true);
-      repo.emailInOrg.mockResolvedValue(true);
+      repo.findMemberByEmail.mockResolvedValue(null);
+      repo.createInvitedMember.mockResolvedValue({
+        membershipId: 11,
+        userId: 'u9',
+      });
+      repo.getMember.mockResolvedValue({
+        id: 11,
+        userId: 'u9',
+        name: 'New Person',
+        email: 'new@acme.test',
+        roleId: 7,
+        role: 'Organizer',
+        status: 'Invited',
+      });
+
+      await service.inviteMember(orgId, input);
+
+      const [event] = outbox.enqueue.mock.calls[0] as [
+        { routingKey: string; payload: Record<string, unknown> },
+      ];
+      expect(event.routingKey).toBe('identity.member_invited');
+      expect(event.payload).toMatchObject({
+        email: 'new@acme.test',
+        name: 'New Person',
+        organizationName: 'Acme Events',
+        acceptUrl: 'https://app.eventa.test/accept-invite?token=invite.jwt',
+      });
+    });
+
+    /** A re-send is a second link, or it is not a re-send. */
+    it('enqueues a fresh link when re-sending to an invited address', async () => {
+      repo.roleExists.mockResolvedValue(true);
+      repo.findMemberByEmail.mockResolvedValue({
+        membershipId: 11,
+        userId: 'u9',
+        status: 'Invited',
+      });
+      repo.getMember.mockResolvedValue({
+        id: 11,
+        userId: 'u9',
+        name: 'New Person',
+        email: 'new@acme.test',
+        roleId: 7,
+        role: 'Organizer',
+        status: 'Invited',
+      });
+
+      await service.inviteMember(orgId, input);
+
+      expect(outbox.enqueue).toHaveBeenCalledTimes(1);
+    });
+
+    /** Nothing is sent to somebody who is already in the workspace. */
+    it('sends nothing when the invite is refused', async () => {
+      repo.roleExists.mockResolvedValue(true);
+      repo.findMemberByEmail.mockResolvedValue({
+        membershipId: 4,
+        userId: 'u4',
+        status: 'Active',
+      });
+
+      await service.inviteMember(orgId, input).catch(() => undefined);
+
+      expect(outbox.enqueue).not.toHaveBeenCalled();
+    });
+
+    /**
+     * US-SET-11: "an already-active member is rejected as already in the
+     * workspace." Only an ACTIVE one — see the re-send case below.
+     */
+    it('rejects an email that is already an active member with 409', async () => {
+      repo.roleExists.mockResolvedValue(true);
+      repo.findMemberByEmail.mockResolvedValue({
+        membershipId: 4,
+        userId: 'u4',
+        status: 'Active',
+      });
 
       const err = await service
         .inviteMember(orgId, input)
@@ -104,9 +205,50 @@ describe('AccessService', () => {
       expect(repo.createInvitedMember).not.toHaveBeenCalled();
     });
 
+    /*
+     * THE OTHER HALF OF THE SAME CRITERION, which was never built: "Given an
+     * email that's already invited, when I invite it again, then the
+     * invitation is simply RE-SENT rather than duplicated."
+     *
+     * `emailInOrg` answered a plain yes/no and never looked at status, so an
+     * invited teammate who had lost their link was refused with "already
+     * exists in the workspace" and there was no way to give them another.
+     * The console's own "Send the invitation again" button had nothing it
+     * could call.
+     */
+    it('re-issues the invitation for an email that is already invited', async () => {
+      repo.roleExists.mockResolvedValue(true);
+      repo.findMemberByEmail.mockResolvedValue({
+        membershipId: 11,
+        userId: 'u9',
+        status: 'Invited',
+      });
+      repo.getMember.mockResolvedValue({
+        id: 11,
+        userId: 'u9',
+        name: 'New Person',
+        email: 'new@acme.test',
+        roleId: 7,
+        role: 'Organizer',
+        status: 'Invited',
+      });
+
+      const result = await service.inviteMember(orgId, input);
+
+      // Not duplicated: no second user, no second membership.
+      expect(repo.createInvitedMember).not.toHaveBeenCalled();
+      // Re-sent: a fresh token against the SAME membership.
+      expect(tokens.signInvite).toHaveBeenCalledWith({
+        userId: 'u9',
+        organizationId: orgId,
+        membershipId: 11,
+      });
+      expect(result.member.id).toBe(11);
+    });
+
     it('creates an invited member and returns it with an invite token', async () => {
       repo.roleExists.mockResolvedValue(true);
-      repo.emailInOrg.mockResolvedValue(false);
+      repo.findMemberByEmail.mockResolvedValue(null);
       repo.createInvitedMember.mockResolvedValue({
         membershipId: 11,
         userId: 'u9',

@@ -17,6 +17,7 @@ import {
   type PresignedUpload,
   type StoredObject,
 } from '../ports/object-storage.port';
+import { safeError } from '../../../common/errors/safe-error';
 
 /** S3's error name when the key simply is not there. */
 const NOT_FOUND = 'NotFound';
@@ -145,7 +146,7 @@ export class S3ObjectStorageAdapter extends ObjectStoragePort {
         new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
       );
     } catch (err) {
-      this.logger.warn({ err, key }, 'could not delete object');
+      this.logger.warn({ err: safeError(err), key }, 'could not delete object');
     }
   }
 

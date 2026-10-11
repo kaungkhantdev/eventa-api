@@ -42,6 +42,8 @@ interface Survey {
   title: string;
   status: 'draft' | 'live' | 'closed';
   questions: { id: string; type: string; prompt: string; options: string[] }[];
+  /** The optimistic lock, round-tripped by the editor on every save. */
+  version: number;
 }
 
 const RATING = { type: 'rating', prompt: 'How was it?', options: [] };
@@ -115,11 +117,21 @@ describe('Surveys (e2e — US-MSG-09)', () => {
       .set('Authorization', `Bearer ${jwt}`)
       .send(body);
 
+  /**
+   * A save carries the version it was read at; a status change does not.
+   *
+   * `UpdateSurveyDto.version` is REQUIRED — authoring replaces the whole
+   * question set, so a save with no version is a save that cannot be refused,
+   * and what it silently overwrites is another organizer's question. Defaulted
+   * to 1 here because almost every case saves a survey it just created; a case
+   * about the lock passes its own. The status route takes a different DTO and
+   * rejects unknown keys, so only the bare `:id` path gets one.
+   */
   const patch = (jwt: string, path: string, body: object) =>
     request(server)
       .patch(`/api/v1/surveys/${path}`)
       .set('Authorization', `Bearer ${jwt}`)
-      .send(body);
+      .send(path.includes('/') ? body : { version: 1, ...body });
 
   const body = (res: { body: unknown }) => (res.body as Success<Survey>).data;
 
@@ -214,6 +226,160 @@ describe('Surveys (e2e — US-MSG-09)', () => {
         title: 'Reworked',
         questions: [],
       }).expect(422);
+    });
+
+    /**
+     * Two organizers with the editor open, and what a lost update costs here.
+     *
+     * Authoring REPLACES the question set — every row deleted, the submitted
+     * list re-inserted — so a save built on a stale read did not overwrite a
+     * title, it deleted the other editor's question, with no error and nothing
+     * in the response to notice. This is the whole reason `surveys.version`
+     * exists.
+     *
+     * The second assertion is the one that matters: a refused save must leave
+     * the questions ALONE. The compare-and-swap runs before the delete for
+     * exactly this reason, and checking afterwards would report the conflict
+     * having already destroyed them.
+     */
+    it('refuses a save built on a version somebody has moved past', async () => {
+      const survey = await create();
+      const first = body(
+        await patch(adminJwt, survey.id, {
+          title: 'Saved first',
+          questions: [
+            RATING,
+            CHOICE,
+            { type: 'text', prompt: 'Mine', options: [] },
+          ],
+        }).expect(200),
+      );
+      expect(first.version).toBe(2);
+
+      // The second organizer still holds version 1.
+      await patch(adminJwt, survey.id, {
+        version: 1,
+        title: 'Saved second',
+        questions: [RATING],
+      }).expect(409);
+
+      const kept = await pool.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM survey_questions WHERE survey_id = $1`,
+        [Number(survey.id)],
+      );
+      expect(kept.rows[0].n).toBe(3);
+    });
+  });
+
+  /**
+   * Why `survey_questions` carries NO unique constraint on
+   * (`survey_id`, `position`), though the entity catalog once specified one.
+   *
+   * Two facts make it unnecessary, and these tests are what hold them true.
+   * First, the server owns the ordinal: the client sends an ordered list and
+   * never a number, and an edit replaces the whole set, so the stored positions
+   * are `0…n-1` — dense and distinct by construction, in one statement. Second,
+   * every read breaks ties on `id`, so the RENDERED order is total even if the
+   * stored one ever stopped being.
+   *
+   * Together they are the reason a unique index would buy nothing: it would
+   * enforce an invariant the writer already cannot violate, guarding against a
+   * disorder the reader already cannot suffer.
+   */
+  describe('the order of its questions', () => {
+    const TEXT = { type: 'text', prompt: 'Anything else?', options: [] };
+
+    const stored = async (surveyId: string) =>
+      (
+        await pool.query<{ position: number; prompt: string }>(
+          `SELECT position, prompt FROM survey_questions
+            WHERE survey_id = $1 ORDER BY position, id`,
+          [Number(surveyId)],
+        )
+      ).rows;
+
+    const listedPrompts = async (surveyId: string) => {
+      const res = await request(server)
+        .get(`/api/v1/surveys?eventId=${summitId}`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(200);
+      const found = (res.body as Success<Survey[]>).data.find(
+        (s) => s.id === surveyId,
+      );
+      return found?.questions.map((q) => q.prompt);
+    };
+
+    it('assigns a dense 0…n-1 ordinal the client never sends', async () => {
+      const survey = await create({ questions: [RATING, CHOICE, TEXT] });
+      expect(await stored(survey.id)).toEqual([
+        { position: 0, prompt: 'How was it?' },
+        { position: 1, prompt: 'Best session?' },
+        { position: 2, prompt: 'Anything else?' },
+      ]);
+    });
+
+    it('reorders by saving the list anew, so no row crosses another', async () => {
+      const survey = await create({ questions: [RATING, CHOICE, TEXT] });
+      const moved = body(
+        await patch(adminJwt, survey.id, {
+          title: 'Post-event feedback',
+          questions: [TEXT, RATING, CHOICE],
+        }).expect(200),
+      );
+
+      expect(moved.questions.map((q) => q.prompt)).toEqual([
+        'Anything else?',
+        'How was it?',
+        'Best session?',
+      ]);
+      // Still 0,1,2. Moving the last question to the front is a delete of the
+      // whole set and a re-insert of it, not three row-by-row updates — which
+      // is why no question ever has to pass THROUGH another's position, and so
+      // why a unique constraint would not have broken this write either.
+      expect((await stored(survey.id)).map((r) => r.position)).toEqual([
+        0, 1, 2,
+      ]);
+    });
+
+    it('renders one fixed order even when two questions share a position', async () => {
+      const survey = await create({ questions: [RATING, CHOICE, TEXT] });
+      // Forced straight into the table: the service cannot produce this, since
+      // it assigns the ordinal itself. This is precisely the state the absent
+      // unique index would have prevented — and the read is unmoved by it,
+      // because `ORDER BY position, id` stays a TOTAL order while `id` is
+      // unique. The catalog claimed the order here would be "whatever the plan
+      // returns"; it is not, and this is the test that says so.
+      await pool.query(
+        `UPDATE survey_questions SET position = 0 WHERE survey_id = $1`,
+        [Number(survey.id)],
+      );
+
+      // Ties fall to `id`, which is insertion order — so it is still the order
+      // the organizer saved, and it is the SAME order on every read.
+      const expected = ['How was it?', 'Best session?', 'Anything else?'];
+      expect(await listedPrompts(survey.id)).toEqual(expected);
+      expect(await listedPrompts(survey.id)).toEqual(expected);
+    });
+
+    it('renumbers a collapsed set back to 0…n-1 on the next save', async () => {
+      const survey = await create({ questions: [RATING, CHOICE, TEXT] });
+      await pool.query(
+        `UPDATE survey_questions SET position = 0 WHERE survey_id = $1`,
+        [Number(survey.id)],
+      );
+
+      // The duplicate is not sticky: because every edit rewrites the whole set,
+      // one ordinary save is all it takes to make the stored order dense again.
+      // A repair path is the other thing a unique index would be for, and the
+      // write already is one.
+      await patch(adminJwt, survey.id, {
+        title: 'Post-event feedback',
+        questions: [RATING, CHOICE, TEXT],
+      }).expect(200);
+
+      expect((await stored(survey.id)).map((r) => r.position)).toEqual([
+        0, 1, 2,
+      ]);
     });
   });
 

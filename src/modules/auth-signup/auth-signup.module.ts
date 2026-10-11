@@ -5,7 +5,7 @@ import { PlatformModule } from '../platform/platform.module';
 import { AuthSignupController } from './auth-signup.controller';
 import { SignupRepository } from './auth-signup.repository';
 import { SignupService } from './auth-signup.service';
-import { ResendThrottleService } from './resend-throttle.service';
+import { ResendThrottleService } from '../../common/throttle/resend-throttle.service';
 
 /**
  * Organizer sign-up (US-ACC-01): create the workspace + owner and confirm the

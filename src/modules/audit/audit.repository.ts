@@ -1,14 +1,19 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, gte, lte, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, like, lte, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { auditEvents, users } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
+import type { AuditSubjectFilter, AuditType } from './audit-subject';
 
 export type AuditRow = typeof auditEvents.$inferSelect;
 
 export interface AuditQuery {
   /** Restrict to one actor — used to scope a non-Admin to their own events. */
   actorUserId?: string;
+  /** Restrict to one kind of act. */
+  type?: AuditType;
+  /** Restrict to the entries about one record (see `audit-subject.ts`). */
+  subject?: AuditSubjectFilter;
   from?: Date;
   to?: Date;
   limit: number;
@@ -91,13 +96,39 @@ export class AuditRepository {
     });
   }
 
+  /**
+   * Every clause is ANDed onto the tenant predicate, so a filter can only ever
+   * narrow what the caller was already allowed to list — never widen it. The
+   * actor pin is in this same conjunction, which is what keeps a subject filter
+   * from becoming a way around it.
+   */
   private filter(organizationId: number, query: AuditQuery): SQL | undefined {
     const clauses = [eq(auditEvents.organizationId, organizationId)];
     if (query.actorUserId) {
       clauses.push(eq(auditEvents.actorUserId, query.actorUserId));
     }
+    if (query.type) clauses.push(eq(auditEvents.type, query.type));
+    if (query.subject) clauses.push(...this.subjectClauses(query.subject));
     if (query.from) clauses.push(gte(auditEvents.occurredAt, query.from));
     if (query.to) clauses.push(lte(auditEvents.occurredAt, query.to));
     return and(...clauses);
+  }
+
+  /**
+   * The subject match: a type and a left-anchored `LIKE` on `meta`.
+   *
+   * The pattern carries no `%` or `_` to escape because a subject id is a
+   * validated integer and the separators are `#`, a space and `·`. A subject
+   * keyed by a free-text reference instead of an id would have to escape the
+   * wildcards before this is reached.
+   *
+   * Rows whose `meta` is NULL drop out, as `NULL LIKE …` is not true — correct
+   * here, since an entry with no meta records no subject.
+   */
+  private subjectClauses(subject: AuditSubjectFilter): SQL[] {
+    return [
+      eq(auditEvents.type, subject.auditType),
+      like(auditEvents.meta, `${subject.metaPrefix}%`),
+    ];
   }
 }

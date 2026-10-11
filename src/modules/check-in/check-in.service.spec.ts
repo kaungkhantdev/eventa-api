@@ -2,12 +2,14 @@ import type { Clock } from '../../common/time/clock';
 import type { AuthContext } from '../auth/auth.types';
 import { CheckInService } from './check-in.service';
 import type { CheckInRepository } from './check-in.repository';
+import { fingerprintScanToken } from './scan-token-fingerprint';
 import type { AdmissibleTicket } from './check-in.types';
 import type { CheckInEventPort } from './ports/check-in-event.port';
 
 const ORG = 7;
 const EVENT = 'e-1';
 const TICKET = 't-1';
+const TOKEN = 'tok-1';
 /** Mid-event, so the door is open unless a test says otherwise. */
 const NOW = new Date('2026-09-01T14:00:00Z');
 const ARRIVED = new Date('2026-09-01T13:00:00Z');
@@ -40,6 +42,7 @@ describe('CheckInService (US-REG-11/12/13)', () => {
       findTicketById: jest.fn().mockResolvedValue(ticket()),
       admit: jest.fn().mockResolvedValue({ checkedInAt: NOW, inserted: true }),
       undo: jest.fn().mockResolvedValue(true),
+      recordScanAttempt: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<CheckInRepository>;
     events = {
       findForCheckIn: jest.fn().mockResolvedValue({
@@ -54,7 +57,7 @@ describe('CheckInService (US-REG-11/12/13)', () => {
   });
 
   const scan = (o: Record<string, unknown> = {}) =>
-    service.scan(auth, EVENT, { qrToken: 'tok-1', ...o });
+    service.scan(auth, EVENT, { qrToken: TOKEN, ...o });
 
   describe('scanning a ticket (US-REG-12)', () => {
     it('admits a valid unused ticket for this event', async () => {
@@ -195,6 +198,115 @@ describe('CheckInService (US-REG-11/12/13)', () => {
       await expect(service.undo(auth, EVENT, TICKET)).rejects.toMatchObject({
         code: 'NOT_FOUND',
       });
+    });
+
+    it('leaves the ledger alone — an undo is not a scan', async () => {
+      // `scan_attempts` records what the door DID. The `admitted` row stands
+      // because the scan happened; "who undid what" is an `audit_events`
+      // question, and a synthetic ledger row would make the refusal counts lie.
+      await service.undo(auth, EVENT, TICKET);
+      expect(repo.recordScanAttempt).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the refused-scan ledger (`scan_attempts`)', () => {
+    /** The only argument `recordScanAttempt` was given. */
+    const recorded = () => repo.recordScanAttempt.mock.calls[0][0];
+
+    it('records an unknown code with no ticket to point at', async () => {
+      repo.findTicketByToken.mockResolvedValue(null);
+      await scan({ stationId: 'door-2' });
+      expect(repo.recordScanAttempt).toHaveBeenCalledTimes(1);
+      expect(recorded()).toMatchObject({
+        organizationId: ORG,
+        eventId: EVENT,
+        outcome: 'invalid',
+        method: 'qr',
+        ticketId: null,
+        stationId: 'door-2',
+        scannedBy: 'staff-1',
+        scannedAt: NOW,
+      });
+    });
+
+    it('records WHICH event a wrong-event pass belonged to', async () => {
+      // The one datum `wrong_event` is about: erd.md proposed it as
+      // `check_ins.other_event_id`, which the UNIQUE(ticket_id) had no room
+      // for. On the ledger it costs nothing.
+      repo.findTicketByToken.mockResolvedValue(ticket({ eventId: 'other' }));
+      await scan();
+      expect(recorded()).toMatchObject({
+        outcome: 'wrong_event',
+        ticketId: TICKET,
+        ticketEventId: 'other',
+      });
+    });
+
+    it('records a cancelled pass without repeating this station’s event', async () => {
+      // Null, not `EVENT`: `ticket_event_id IS NOT NULL` has to mean "a pass
+      // for somewhere else turned up here", and it cannot if every refusal
+      // fills the column in with the event we already know.
+      repo.findTicketByToken.mockResolvedValue(ticket({ status: 'refunded' }));
+      await scan();
+      expect(recorded()).toMatchObject({
+        outcome: 'cancelled',
+        ticketId: TICKET,
+        ticketEventId: null,
+      });
+    });
+
+    it('records the FINGERPRINT of the code, never the code itself', async () => {
+      // `tickets.qr_token` is a bearer credential. The ledger is append-only,
+      // outlives the ticket and is read by anyone who may review the door, so
+      // a raw token in it would be a working pass.
+      repo.findTicketByToken.mockResolvedValue(null);
+      await scan();
+      const { tokenFingerprint } = recorded();
+      expect(tokenFingerprint).toBe(fingerprintScanToken(TOKEN));
+      expect(JSON.stringify(recorded())).not.toContain(TOKEN);
+    });
+
+    it('records a manual admission with no fingerprint — no code was presented', async () => {
+      // A null fingerprint is how the ledger shows staff found someone by name
+      // rather than reading anything.
+      await service.admitManually(auth, EVENT, { ticketId: TICKET });
+      expect(repo.admit).toHaveBeenCalledWith(
+        expect.objectContaining({ method: 'manual', tokenFingerprint: null }),
+      );
+    });
+
+    it('hands the admitting path the fingerprint, so an ADMISSION is logged too', async () => {
+      // The ledger is every scan, not only the refused ones: without the
+      // admissions in it there is no denominator, and a refusal rate cannot be
+      // read off a table of refusals alone.
+      await scan();
+      expect(repo.admit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tokenFingerprint: fingerprintScanToken(TOKEN),
+        }),
+      );
+      // The admission and its ledger row are written together, inside
+      // `admit`'s own transaction — never as a second call that could be lost.
+      expect(repo.recordScanAttempt).not.toHaveBeenCalled();
+    });
+
+    it('writes nothing when the door is shut — no scan was ever made', async () => {
+      events.findForCheckIn.mockResolvedValue({
+        id: EVENT,
+        status: 'draft',
+        startAt: new Date('2026-09-01T10:00:00Z'),
+        endAt: null,
+      });
+      await expect(scan()).rejects.toMatchObject({ code: 'CONFLICT' });
+      expect(repo.recordScanAttempt).not.toHaveBeenCalled();
+    });
+
+    it('surfaces a failed ledger write instead of swallowing it', async () => {
+      // A ledger that drops rows is worse than none: it reads as a quiet
+      // night. The failure surfaces rather than being swallowed.
+      repo.findTicketByToken.mockResolvedValue(null);
+      repo.recordScanAttempt.mockRejectedValue(new Error('ledger down'));
+      await expect(scan()).rejects.toThrow('ledger down');
     });
   });
 });

@@ -42,6 +42,15 @@ export interface MessageTemplateDefinition {
    * `OFF_UNTIL_SWITCHED_ON_SLUGS` in its src/db/schema/messaging.ts, so change
    * both together: if they disagree, the page says "Inactive" while attendees
    * are mailed, or "Active" while nobody is.
+   *
+   * That copy is a DENY-list (`activeWhenUnset` is
+   * `!OFF_UNTIL_SWITCHED_ON_SLUGS.includes(slug)`), which decides what a slug
+   * ADDED HERE LATER does in a workspace provisioned before it existed: the
+   * worker has never heard of it, so it is not on the deny-list, so it is ON.
+   * Nothing needs seeding for a new message to send — but a new entry that
+   * wants to start off cannot simply say `defaultActive: false` here, because
+   * the worker would mail attendees a page calling "Inactive" until the slug
+   * is added to that list too.
    */
   defaultActive: boolean;
   /**
@@ -124,6 +133,30 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     tags: ['{{first_name}}', '{{event_name}}'],
   },
   {
+    slug: 'rejection-notice',
+    title: 'Rejection notice',
+    // The organizer's note travels on the event for their own audit trail, and
+    // the notice is deliberately not obliged to repeat it back — so unlike the
+    // cancellation notice this description does not promise the reason, and
+    // `{{reason}}` must not appear in `tags` unless a handler substitutes it.
+    description:
+      'Sent when an organizer turns a registration down, telling the attendee their place was not confirmed. The organizer’s note is kept for their own records rather than repeated back.',
+    channels: ['email'],
+    // `controlled` as of the change that bound `registration.rejected`:
+    // eventa-worker's `RegistrationRejectedHandler` both sends this and reads
+    // `message_templates.active`, which is exactly the condition this field
+    // states above. Left at `planned` it would have read "nothing sends this"
+    // to an organizer whose attendees were already being mailed, and
+    // `assertSwitchable` — the only gate on `setActive`, which is in turn the
+    // only writer of that column — would have refused to let them stop it.
+    delivery: 'controlled',
+    // Somebody who signed up, and may have paid, is owed the news that their
+    // place was refused — the same debt as the news that an event is off.
+    expected: true,
+    defaultActive: true,
+    tags: [],
+  },
+  {
     slug: 'cancellation-notice',
     title: 'Cancellation notice',
     // eventa-worker's `cancellationRecipients`: a registration still waiting
@@ -151,6 +184,22 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     tags: ['{{first_name}}', '{{event_name}}'],
   },
   {
+    slug: 'event-invitation',
+    title: 'Event invitation',
+    description:
+      'Sent when an organizer invites someone to an event, with the organizer’s personal note and a link into the registration flow.',
+    channels: ['email'],
+    // `controlled`: `invitation.sent` is now bound, and its handler reads this
+    // switch. See the rejection notice above for why leaving it `planned` would
+    // have made the switch unusable rather than merely inaccurate.
+    delivery: 'controlled',
+    // Nobody is owed an invitation they never asked for, so switching this off
+    // needs no warning — an organizer who stops inviting simply stops.
+    expected: false,
+    defaultActive: true,
+    tags: [],
+  },
+  {
     slug: 'event-reminder',
     title: 'Event reminder',
     description:
@@ -163,6 +212,24 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     // every event, unasked.
     defaultActive: false,
     tags: ['{{first_name}}', '{{event_name}}', '{{event_venue}}'],
+  },
+  {
+    slug: 'session-change',
+    title: 'Session change',
+    // Both the old and the new sitting travel on the event, because
+    // "Hall A → Hall B" is a useful message and "this session changed" is not.
+    description:
+      'Sent to the attendees who added a session to their schedule when its day, time or room moves — saying where it was and where it is now. Only when the organizer chooses to announce the change.',
+    channels: ['email'],
+    // `controlled`: `program.session_changed` is now bound, and its handler
+    // reads this switch. This is the one of the three an organizer is most
+    // likely to want off, so a dead switch would have been felt here first.
+    delivery: 'controlled',
+    // The event still happens and the ticket still works, so this is a
+    // courtesy rather than something an attendee is entitled to.
+    expected: false,
+    defaultActive: true,
+    tags: [],
   },
   {
     slug: 'waitlist-offer',

@@ -23,6 +23,7 @@ import type {
   TicketStatus,
   UpdateTicketInput,
 } from './ticketing.types';
+import { safeError } from '../../common/errors/safe-error';
 
 const UPDATABLE_KEYS: (keyof NewTicketValues & keyof UpdateTicketInput)[] = [
   'name',
@@ -196,7 +197,10 @@ export class TicketingService {
       // This guards the promise, not the adapter: the save above has
       // committed, so a rejection must not reach the organizer as a 500 for
       // a change that stands. How many were offered is then unknown.
-      this.logger.error({ err, ticketTypeId: after.id }, WAITLIST_OFFER_FAILED);
+      this.logger.error(
+        { err: safeError(err), ticketTypeId: after.id },
+        WAITLIST_OFFER_FAILED,
+      );
       return { offered: 0, interrupted: true };
     }
   }
