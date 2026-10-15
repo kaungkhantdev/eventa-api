@@ -1,0 +1,1216 @@
+process.env.NODE_ENV = 'test';
+process.env.DATABASE_URL ??= 'postgres://eventa:eventa@localhost:5432/eventa';
+process.env.JWT_SECRET ??= 'test-secret-at-least-16-characters-long';
+
+import { createHash } from 'node:crypto';
+import type { Server } from 'node:http';
+import type { INestApplication } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { Test } from '@nestjs/testing';
+import Redis from 'ioredis';
+import { Pool } from 'pg';
+import request from 'supertest';
+import { AppModule } from '../src/app.module';
+import { buildValidationPipe } from '../src/common/http/validation';
+import { orderStatusEnum } from '../src/db/schema';
+import { buildOpenApiDocument } from '../src/openapi';
+import { listenOnLoopback } from './support/loopback';
+
+const ORG = { slug: 'bookclaim-e2e', name: 'Booking Claim E2E' };
+const BUYER = { name: 'Anan Suksawat', email: 'anan@bookclaim.test' };
+/** Somebody whose address a stranger booked with — they never asked for this. */
+const VICTIM = { name: 'Malee Wongsa', email: 'malee@bookclaim.test' };
+/**
+ * Addresses that hold SOME account, but none attendee sign-in can find: each
+ * must be treated exactly like an address with no account at all.
+ */
+const OTHER_ACCOUNTS = [
+  {
+    label: 'an organizer account only',
+    buyer: { name: 'Somchai Organizer', email: 'organizer@bookclaim.test' },
+    persona: 'admin',
+    inPlatform: false,
+    deleted: false,
+  },
+  {
+    // Same organization as attendee accounts, different audience: only the
+    // persona tells the two apart.
+    label: 'a staff account in the platform organization',
+    buyer: { name: 'Kanya Staff', email: 'staff@bookclaim.test' },
+    persona: 'admin',
+    inPlatform: true,
+    deleted: false,
+  },
+  {
+    label: 'a deleted attendee account',
+    buyer: { name: 'Pim Returning', email: 'returning@bookclaim.test' },
+    persona: 'attendee',
+    inPlatform: true,
+    deleted: true,
+  },
+  {
+    label: 'an attendee row in another workspace',
+    buyer: { name: 'Niran Elsewhere', email: 'elsewhere@bookclaim.test' },
+    persona: 'attendee',
+    inPlatform: false,
+    deleted: false,
+  },
+] as const;
+/**
+ * An address a stranger signed up with directly, choosing its password, and
+ * never confirmed — then its real owner books with it.
+ */
+const PLANTED = { name: 'Ratana Owner', email: 'planted@bookclaim.test' };
+const STRANGERS_PASSWORD = 'chosen-by-stranger1!';
+/** Somebody who makes the account from the link, then deletes it. */
+const LEAVER = { name: 'Wichai Leaver', email: 'leaver@bookclaim.test' };
+/** Somebody who makes the account from the link, then moves it elsewhere. */
+const MOVER = { name: 'Porntip Mover', email: 'mover@bookclaim.test' };
+const MOVED_TO = 'moved-to@bookclaim.test';
+/** Somebody whose booking a stranger keeps pressing "Create account" on. */
+const PESTERED = { name: 'Suda Pestered', email: 'pestered@bookclaim.test' };
+/** Somebody with bookings standing every way but confirmed — and then one that is. */
+const UNSETTLED = {
+  name: 'Kittisak Unsettled',
+  email: 'unsettled@bookclaim.test',
+};
+/** Every way an order can stand other than confirmed — read from the enum. */
+const NOT_CONFIRMED_STATUSES = orderStatusEnum.enumValues.filter(
+  (status) => status !== 'confirmed',
+);
+/** Longer than `CLAIM_TOKEN_MAX_LENGTH` (2048) — no link this API signs is near it. */
+const OVERSIZED_TOKEN = 'x'.repeat(2049);
+const UNKNOWN_ORDER = '6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b';
+const LINK_ROUTING_KEY = 'identity.booking_account_link_requested';
+const PUBLIC_WEB_URL = 'http://localhost:5173';
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const PASSWORD = 'kept-tickets1!';
+const DEAD_LINK =
+  'This link has expired or is no longer valid. Ask for a new one from your booking confirmation.';
+const SIGN_IN_INSTEAD = 'An account already uses this email. Sign in instead.';
+const BOOKING_NOT_CONFIRMED =
+  "This booking isn't confirmed, so there are no tickets to keep in an account yet.";
+const CLAIM_PATH = '/api/v1/auth/register/from-booking/claim';
+const INSPECT_PATH = '/api/v1/auth/register/from-booking/claim/inspect';
+const PAYLOAD_KEYS = [
+  'claimUrl',
+  'email',
+  'eventName',
+  'expiresAt',
+  'locale',
+  'name',
+  'occurredAt',
+  'orderId',
+  'organizationId',
+  'version',
+];
+
+interface Success<T> {
+  data: T;
+}
+interface Failure {
+  message: string;
+  code?: string;
+  errors?: { field: string; message: string }[];
+}
+interface Session {
+  twoFactorRequired: boolean;
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
+  expiresIn: number;
+  user: { name: string; email: string; persona: string; status: string };
+}
+interface MyEvents {
+  upcoming: { orderId: string }[];
+  past: { orderId: string }[];
+}
+interface OpenApiOperation {
+  requestBody?: {
+    content?: Record<string, { schema?: { $ref?: string } }>;
+  };
+}
+interface OpenApiSchema {
+  properties?: Record<string, unknown>;
+  required?: string[];
+}
+interface OutboxRow {
+  organization_id: string;
+  aggregate_type: string;
+  aggregate_id: string;
+  payload: Record<string, unknown>;
+}
+
+/** The throttle's own key for a booking-claim email, as the service spells it. */
+const coolOffKey = (email: string) =>
+  `verify:resend:booking-claim:${email.toLowerCase()}`;
+/** …and its daily total for the same address. */
+const budgetKey = (email: string) =>
+  `verify:budget:booking-claim:${email.toLowerCase()}`;
+/** Claim emails one address may be sent a day. */
+const CLAIM_LINKS_PER_DAY = 5;
+
+/**
+ * Create my account from my confirmation (US-DISC-15), through the real
+ * checkout and the real AppModule.
+ *
+ * The trust rule under test: the order id is shown in the BOOKER's browser
+ * before anybody reads the buyer's inbox, so it proves nothing about the
+ * address. Holding it can only ask for a one-time link to be emailed to the
+ * booking's address; no account exists, and no password is chosen, until that
+ * link is opened.
+ */
+describe('Account from a booking (e2e — US-DISC-15)', () => {
+  let app: INestApplication;
+  let server: Server;
+  let pool: Pool;
+  let redis: Redis;
+  let platformOrgId: number;
+  let seeded: Seeded;
+  /** The buyer's earlier booking, made before any account existed. */
+  let earlierOrderId: string;
+  /** The booking the buyer turns into an account. */
+  let orderId: string;
+  let orderReference: string;
+  /** A stranger's booking made with the victim's address. */
+  let strangersOrderId: string;
+
+  beforeAll(async () => {
+    pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    redis = process.env.REDIS_URL
+      ? new Redis(process.env.REDIS_URL)
+      : new Redis();
+    await cleanup(pool, redis);
+    seeded = await seed(pool);
+    platformOrgId = seeded.platformOrgId;
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+    app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api/v1');
+    app.useGlobalPipes(buildValidationPipe());
+    await listenOnLoopback(app);
+    server = app.getHttpServer() as Server;
+
+    earlierOrderId = (
+      await placeFreeOrder(server, seeded.earlier, BUYER, 'earlier')
+    ).orderId;
+    ({ orderId, reference: orderReference } = await placeFreeOrder(
+      server,
+      seeded.latest,
+      BUYER,
+      'latest',
+    ));
+    strangersOrderId = (
+      await placeFreeOrder(server, seeded.latest, VICTIM, 'stranger')
+    ).orderId;
+  }, 30000);
+
+  afterAll(async () => {
+    await cleanup(pool, redis);
+    await redis.quit();
+    await pool.end();
+    await app.close();
+  });
+
+  const accountFor = (id: string) =>
+    request(server).get(`/api/v1/auth/register/from-booking/${id}`);
+
+  const requestLink = (id: string) =>
+    request(server).post(`/api/v1/auth/register/from-booking/${id}/link`);
+
+  const linkRows = async (id: string): Promise<OutboxRow[]> => {
+    const { rows } = await pool.query<OutboxRow>(
+      `SELECT organization_id, aggregate_type, aggregate_id, payload
+         FROM outbox_events
+        WHERE routing_key = $1 AND aggregate_id = $2
+        ORDER BY id`,
+      [LINK_ROUTING_KEY, id],
+    );
+    return rows;
+  };
+
+  /** The token in the link the worker would have mailed for this order. */
+  const claimTokenFor = async (id: string): Promise<string> => {
+    const [{ payload }] = await linkRows(id);
+    return new URL(payload.claimUrl as string).searchParams.get('claim') ?? '';
+  };
+
+  /** The token in the most recent link mailed for this order. */
+  const latestClaimTokenFor = async (id: string): Promise<string> => {
+    const { payload } = (await linkRows(id)).at(-1) as OutboxRow;
+    return new URL(payload.claimUrl as string).searchParams.get('claim') ?? '';
+  };
+
+  /** Signs with the app's own secret — what a forged-but-valid token is. */
+  const jwt = new JwtService({ secret: process.env.JWT_SECRET });
+
+  const inspect = (token: unknown) =>
+    request(server).post(INSPECT_PATH).send({ token });
+
+  const claim = (body: Record<string, unknown>) =>
+    request(server).post(CLAIM_PATH).send(body);
+
+  const expectDeadLink = (res: request.Response) => {
+    expect(res.status).toBe(400);
+    expect(res.body as Failure).toMatchObject({
+      message: DEAD_LINK,
+      code: 'CLAIM_LINK_INVALID',
+    });
+  };
+
+  const attendeeAccounts = async (email: string) => {
+    const { rows } = await pool.query<{
+      name: string;
+      email: string;
+      status: string;
+      organization_id: string;
+    }>(
+      `SELECT name, email, status, organization_id FROM users
+        WHERE email = $1 AND persona = 'attendee' AND deleted_at IS NULL`,
+      [email],
+    );
+    return rows;
+  };
+
+  describe('the offer on the confirmation screen', () => {
+    it('says no account uses the booking’s email yet', async () => {
+      const res = await accountFor(orderId);
+
+      expect(res.status).toBe(200);
+      expect((res.body as Success<unknown>).data).toEqual({
+        accountExists: false,
+      });
+    });
+
+    it('answers 404 for an order that does not exist', async () => {
+      expect((await accountFor(UNKNOWN_ORDER)).status).toBe(404);
+      expect((await requestLink(UNKNOWN_ORDER)).status).toBe(404);
+    });
+
+    it('identifies a booking only by its uuid, never its printed reference (400)', async () => {
+      expect(orderReference).toEqual(expect.any(String));
+
+      expect((await accountFor(orderReference)).status).toBe(400);
+      expect((await requestLink(orderReference)).status).toBe(400);
+      expect(await linkRows(orderId)).toHaveLength(0);
+    });
+  });
+
+  describe('asking for the link', () => {
+    it('answers 202 with where it went — the booking’s own address', async () => {
+      const res = await requestLink(orderId);
+
+      expect(res.status).toBe(202);
+      expect((res.body as Success<unknown>).data).toEqual({
+        sentTo: BUYER.email,
+      });
+    });
+
+    it('queues exactly one email, from the platform, in the contract’s exact shape', async () => {
+      const rows = await linkRows(orderId);
+
+      expect(rows).toHaveLength(1);
+      const [row] = rows;
+      expect(Number(row.organization_id)).toBe(platformOrgId);
+      expect(row.aggregate_type).toBe('order');
+      expect(row.aggregate_id).toBe(orderId);
+      expect(Object.keys(row.payload).sort()).toEqual(PAYLOAD_KEYS);
+      expect(row.payload).toMatchObject({
+        version: 1,
+        organizationId: platformOrgId,
+        orderId,
+        name: BUYER.name,
+        email: BUYER.email,
+        eventName: 'Latest Meetup',
+        // The workspace speaks Thai and the event names no language of its
+        // own: the language the booking's own confirmation was written in.
+        locale: 'th',
+      });
+    });
+
+    it('carries a link to the web’s claim page that expires in seven days', async () => {
+      const [{ payload }] = await linkRows(orderId);
+      const claimUrl = new URL(payload.claimUrl as string);
+      const expiresAt = Date.parse(payload.expiresAt as string);
+      const occurredAt = Date.parse(payload.occurredAt as string);
+
+      expect(`${claimUrl.origin}${claimUrl.pathname}`).toBe(
+        `${PUBLIC_WEB_URL}/portal/register`,
+      );
+      expect(claimUrl.searchParams.get('claim')).toMatch(
+        /^[\w-]+\.[\w-]+\.[\w-]+$/,
+      );
+      expect(payload.expiresAt).toBe(new Date(expiresAt).toISOString());
+      expect(payload.occurredAt).toBe(new Date(occurredAt).toISOString());
+      expect(expiresAt - occurredAt).toBeGreaterThan(SEVEN_DAYS_MS - 5000);
+      expect(expiresAt - occurredAt).toBeLessThanOrEqual(SEVEN_DAYS_MS + 1000);
+    });
+
+    it('creates no account and chooses no password', async () => {
+      expect(await attendeeAccounts(BUYER.email)).toHaveLength(0);
+    });
+
+    it('refuses a second link straight after with the throttle’s own words, sending nothing', async () => {
+      const res = await requestLink(orderId);
+
+      expect(res.status).toBe(429);
+      expect((res.body as Failure).message).toBe(
+        'A confirmation link was just sent. Give it a minute before asking for another.',
+      );
+      expect(await linkRows(orderId)).toHaveLength(1);
+    });
+
+    it('caps the links one address is sent at a few a day, whoever asks', async () => {
+      const { orderId: pesteredOrderId } = await placeFreeOrder(
+        server,
+        seeded.latest,
+        PESTERED,
+        'pestered',
+      );
+      const statuses: number[] = [];
+      for (let i = 0; i <= CLAIM_LINKS_PER_DAY; i++) {
+        // Time passing: the one-a-minute cool-off is not what is under test.
+        await redis.del(coolOffKey(PESTERED.email));
+        const res = await requestLink(pesteredOrderId);
+        statuses.push(res.status);
+        if (res.status === 429) {
+          expect((res.body as Failure).message).toContain('as many links');
+        }
+      }
+
+      expect(statuses).toEqual([
+        ...Array<number>(CLAIM_LINKS_PER_DAY).fill(202),
+        429,
+      ]);
+      expect(await linkRows(pesteredOrderId)).toHaveLength(CLAIM_LINKS_PER_DAY);
+    });
+
+    it('rations per address: the same buyer’s other booking waits too', async () => {
+      const res = await requestLink(earlierOrderId);
+
+      expect(res.status).toBe(429);
+      expect(await linkRows(earlierOrderId)).toHaveLength(0);
+    });
+  });
+
+  /**
+   * Only a confirmed booking has tickets to keep in an account. Each order is
+   * placed through the real checkout and then set to one of the other statuses
+   * the orders table allows: where the order stands is what is under test, not
+   * how it came to stand there.
+   */
+  describe('a booking that isn’t confirmed', () => {
+    /** The unconfirmed bookings below, by status. */
+    const unsettled = new Map<string, string>();
+
+    it.each(NOT_CONFIRMED_STATUSES)(
+      'refuses the link when the booking is %s (409), queuing nothing and spending no cool-off',
+      async (status) => {
+        const { orderId: id } = await placeFreeOrder(
+          server,
+          seeded.latest,
+          UNSETTLED,
+          `unsettled-${status}`,
+        );
+        const moved = await pool.query(
+          `UPDATE orders SET status = $2 WHERE id = $1`,
+          [id, status],
+        );
+        expect(moved.rowCount).toBe(1);
+        unsettled.set(status, id);
+
+        const res = await requestLink(id);
+
+        expect(res.status).toBe(409);
+        expect((res.body as Failure).message).toBe(BOOKING_NOT_CONFIRMED);
+        expect(await linkRows(id)).toHaveLength(0);
+        expect(
+          await redis.exists(
+            coolOffKey(UNSETTLED.email),
+            budgetKey(UNSETTLED.email),
+          ),
+        ).toBe(0);
+      },
+    );
+
+    /**
+     * Anybody can place an unpaid order with anybody's address and is handed
+     * its uuid, and an owed order emails nobody — so an answer here would tell
+     * a stranger, silently and as often as they asked, whether the address has
+     * an account. The question is refused exactly as the link is.
+     */
+    it('refuses to say whether the address has an account, as it refuses the link (409)', async () => {
+      expect([...unsettled.keys()]).toEqual(NOT_CONFIRMED_STATUSES);
+      for (const id of unsettled.values()) {
+        const res = await accountFor(id);
+
+        expect(res.status).toBe(409);
+        expect((res.body as Failure).message).toBe(BOOKING_NOT_CONFIRMED);
+        expect(res.body).not.toHaveProperty('data');
+      }
+    });
+
+    it('lets a confirmed booking for the same address have its link straight after', async () => {
+      const { orderId: id } = await placeFreeOrder(
+        server,
+        seeded.latest,
+        UNSETTLED,
+        'unsettled-confirmed',
+      );
+
+      const res = await requestLink(id);
+
+      expect(res.status).toBe(202);
+      expect((res.body as Success<unknown>).data).toEqual({
+        sentTo: UNSETTLED.email,
+      });
+      expect(await linkRows(id)).toHaveLength(1);
+    });
+  });
+
+  describe('a booking made with somebody else’s address', () => {
+    it('can only send that address its own link — the booker never sees it', async () => {
+      const res = await requestLink(strangersOrderId);
+
+      expect(res.status).toBe(202);
+      expect((res.body as Success<unknown>).data).toEqual({
+        sentTo: VICTIM.email,
+      });
+      const [{ payload }] = await linkRows(strangersOrderId);
+      const token = new URL(payload.claimUrl as string).searchParams.get(
+        'claim',
+      );
+      expect(JSON.stringify(res.body)).not.toContain(token);
+      expect(JSON.stringify(res.body)).not.toContain('claim=');
+      expect(await attendeeAccounts(VICTIM.email)).toHaveLength(0);
+    });
+
+    it('cannot create the account from the order id and a password — that route does not exist', async () => {
+      const res = await request(server)
+        .post('/api/v1/auth/register/from-booking')
+        .send({
+          orderId: strangersOrderId,
+          password: 'chosen-by-stranger1!',
+          acceptTerms: true,
+        });
+
+      expect(res.status).toBe(404);
+      expect(await attendeeAccounts(VICTIM.email)).toHaveLength(0);
+    });
+
+    it('cannot pass a password along with the link request', async () => {
+      await redis.del(coolOffKey(VICTIM.email));
+
+      await request(server)
+        .post(`/api/v1/auth/register/from-booking/${strangersOrderId}/link`)
+        .send({ password: 'chosen-by-stranger1!', acceptTerms: true });
+
+      expect(await attendeeAccounts(VICTIM.email)).toHaveLength(0);
+    });
+
+    it('cannot claim it without the emailed link — no route takes a password without one', async () => {
+      for (const body of [
+        { password: PASSWORD, acceptTerms: true },
+        { orderId: strangersOrderId, password: PASSWORD, acceptTerms: true },
+        { token: strangersOrderId, password: PASSWORD, acceptTerms: true },
+        { token: '', password: PASSWORD, acceptTerms: true },
+      ]) {
+        expect((await claim(body)).status).toBe(400);
+      }
+      expect(await attendeeAccounts(VICTIM.email)).toHaveLength(0);
+    });
+
+    it('cannot claim it with a link signed for somebody else’s address', async () => {
+      const forged = await jwt.signAsync({
+        sub: strangersOrderId,
+        email: 'stranger@bookclaim.test',
+        typ: 'booking_claim',
+      });
+
+      expectDeadLink(
+        await claim({ token: forged, password: PASSWORD, acceptTerms: true }),
+      );
+      expect(await attendeeAccounts(VICTIM.email)).toHaveLength(0);
+      expect(await attendeeAccounts('stranger@bookclaim.test')).toHaveLength(0);
+    });
+
+    it('exposes no route under from-booking that takes a password without the token', () => {
+      const document = buildOpenApiDocument(app);
+      const schemas = (document.components?.schemas ?? {}) as Record<
+        string,
+        OpenApiSchema
+      >;
+      const takingPassword: string[] = [];
+      for (const [path, item] of Object.entries(document.paths ?? {})) {
+        if (!path.includes('/auth/register/from-booking')) continue;
+        for (const [method, operation] of Object.entries(
+          item as Record<string, OpenApiOperation>,
+        )) {
+          const ref =
+            operation.requestBody?.content?.['application/json']?.schema?.$ref;
+          const schema = ref ? schemas[ref.split('/').pop() ?? ''] : undefined;
+          if (!schema?.properties?.password) continue;
+          // The document's paths carry the global prefix or not depending on
+          // how it was built; compare without it.
+          takingPassword.push(
+            `${method.toUpperCase()} ${path.replace(/^\/api\/v1/, '')}`,
+          );
+          expect(schema.required).toEqual(
+            expect.arrayContaining(['token', 'password']),
+          );
+          expect(schema.properties).not.toHaveProperty('email');
+          expect(schema.properties).not.toHaveProperty('orderId');
+        }
+      }
+      expect(takingPassword).toEqual([
+        'POST /auth/register/from-booking/claim',
+      ]);
+    });
+  });
+
+  describe('opening the emailed link', () => {
+    it('shows the name from the booking and the address the link was sent to', async () => {
+      const res = await inspect(await claimTokenFor(orderId));
+
+      expect(res.status).toBe(200);
+      expect((res.body as Success<unknown>).data).toEqual({
+        name: BUYER.name,
+        email: BUYER.email,
+        accountExists: false,
+      });
+    });
+
+    it('refuses a link that is not one, in one fixed sentence', async () => {
+      expectDeadLink(await inspect('not-a-link'));
+      expectDeadLink(await inspect(''));
+    });
+
+    it('refuses a token longer than any link carries before verifying it (400)', async () => {
+      for (const res of [
+        await inspect(OVERSIZED_TOKEN),
+        await claim({
+          token: OVERSIZED_TOKEN,
+          password: PASSWORD,
+          acceptTerms: true,
+        }),
+      ]) {
+        expect(res.status).toBe(400);
+        // The validator's refusal, naming the field — not the verifier's.
+        expect((res.body as Failure).errors).toEqual(
+          expect.arrayContaining([expect.objectContaining({ field: 'token' })]),
+        );
+      }
+    });
+
+    it('refuses an expired link', async () => {
+      const expired = await jwt.signAsync({
+        sub: orderId,
+        email: BUYER.email,
+        typ: 'booking_claim',
+        exp: Math.floor(Date.now() / 1000) - 60,
+      });
+
+      expectDeadLink(await inspect(expired));
+    });
+
+    it('refuses any other token signed with the same secret', async () => {
+      const reset = await jwt.signAsync({
+        sub: orderId,
+        email: BUYER.email,
+        typ: 'reset_password',
+      });
+
+      expectDeadLink(await inspect(reset));
+    });
+
+    it('refuses a link once its order is gone or no longer carries that address', async () => {
+      const elsewhere = await jwt.signAsync({
+        sub: orderId,
+        email: 'someone-else@bookclaim.test',
+        typ: 'booking_claim',
+      });
+      const orphan = await jwt.signAsync({
+        sub: UNKNOWN_ORDER,
+        email: BUYER.email,
+        typ: 'booking_claim',
+      });
+
+      expectDeadLink(await inspect(elsewhere));
+      expectDeadLink(await inspect(orphan));
+    });
+
+    it('creates nothing by looking', async () => {
+      expect(await attendeeAccounts(BUYER.email)).toHaveLength(0);
+    });
+  });
+
+  describe('choosing the password', () => {
+    let token: string;
+    let session: Session;
+
+    beforeAll(async () => {
+      token = await claimTokenFor(orderId);
+    });
+
+    it('refuses an address or a name from the client — they come from the link and the order (400)', async () => {
+      for (const extra of [
+        { email: 'someone-else@bookclaim.test' },
+        { name: 'Somebody Else' },
+      ]) {
+        const res = await claim({
+          token,
+          password: PASSWORD,
+          acceptTerms: true,
+          ...extra,
+        });
+        expect(res.status).toBe(400);
+      }
+      expect(await attendeeAccounts(BUYER.email)).toHaveLength(0);
+      expect(
+        await attendeeAccounts('someone-else@bookclaim.test'),
+      ).toHaveLength(0);
+    });
+
+    it('holds the password to the shared rule (400)', async () => {
+      const res = await claim({
+        token,
+        password: 'weakpass',
+        acceptTerms: true,
+      });
+
+      expect(res.status).toBe(400);
+      expect(await attendeeAccounts(BUYER.email)).toHaveLength(0);
+    });
+
+    it('requires the Terms & Privacy, as every attendee sign-up does (400)', async () => {
+      for (const acceptTerms of [false, undefined]) {
+        const res = await claim({ token, password: PASSWORD, acceptTerms });
+        expect(res.status).toBe(400);
+      }
+      expect(await attendeeAccounts(BUYER.email)).toHaveLength(0);
+    });
+
+    it('creates the account and signs it straight in (201)', async () => {
+      const res = await claim({ token, password: PASSWORD, acceptTerms: true });
+
+      expect(res.status).toBe(201);
+      session = (res.body as Success<Session>).data;
+      expect(Object.keys(session).sort()).toEqual([
+        'accessToken',
+        'expiresIn',
+        'refreshToken',
+        'tokenType',
+        'twoFactorRequired',
+        'user',
+      ]);
+      expect(session).toMatchObject({
+        twoFactorRequired: false,
+        accessToken: expect.any(String) as string,
+        refreshToken: expect.any(String) as string,
+        tokenType: 'Bearer',
+        expiresIn: expect.any(Number) as number,
+      });
+      expect(session.user).toMatchObject({
+        name: BUYER.name,
+        email: BUYER.email,
+        persona: 'attendee',
+        status: 'Active',
+      });
+    });
+
+    it('made it Active, in the platform organization, in the booking’s name', async () => {
+      const rows = await attendeeAccounts(BUYER.email);
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        name: BUYER.name,
+        email: BUYER.email,
+        status: 'Active',
+      });
+      expect(Number(rows[0].organization_id)).toBe(platformOrgId);
+      // Opening the link proved the address: no confirmation email is owed.
+      const { rows: verifications } = await pool.query(
+        `SELECT 1 FROM outbox_events
+          WHERE routing_key = 'identity.email_verification_requested'
+            AND payload->>'email' = $1`,
+        [BUYER.email],
+      );
+      expect(verifications).toHaveLength(0);
+    });
+
+    it('the session it returned works', async () => {
+      const res = await request(server)
+        .get('/api/v1/auth/me')
+        .set('Authorization', `Bearer ${session.accessToken}`);
+
+      expect(res.status).toBe(200);
+      expect((res.body as Success<{ email: string }>).data.email).toBe(
+        BUYER.email,
+      );
+    });
+
+    it('lands on My Events with this booking and the one made earlier already there', async () => {
+      const res = await request(server)
+        .get('/api/v1/me/tickets')
+        .set('Authorization', `Bearer ${session.accessToken}`);
+
+      expect(res.status).toBe(200);
+      const mine = (res.body as Success<MyEvents>).data;
+      const orders = [...mine.upcoming, ...mine.past].map((r) => r.orderId);
+      expect(orders).toEqual(expect.arrayContaining([orderId, earlierOrderId]));
+      // Never the stranger's booking made with somebody else's address.
+      expect(orders).not.toContain(strangersOrderId);
+    });
+
+    it('works once: the same link again is told to sign in (409)', async () => {
+      const res = await claim({ token, password: PASSWORD, acceptTerms: true });
+
+      expect(res.status).toBe(409);
+      expect((res.body as Failure).message).toBe(SIGN_IN_INSTEAD);
+      expect(await attendeeAccounts(BUYER.email)).toHaveLength(1);
+    });
+
+    it('refuses the session’s own access token as a link', async () => {
+      expectDeadLink(await inspect(session.accessToken));
+      expectDeadLink(
+        await claim({
+          token: session.accessToken,
+          password: PASSWORD,
+          acceptTerms: true,
+        }),
+      );
+    });
+  });
+
+  describe('once the account exists', () => {
+    it('the link says so, and the confirmation screen offers sign-in', async () => {
+      const inspected = await inspect(await claimTokenFor(orderId));
+      const offered = await accountFor(earlierOrderId);
+
+      expect((inspected.body as Success<unknown>).data).toMatchObject({
+        accountExists: true,
+      });
+      expect((offered.body as Success<unknown>).data).toEqual({
+        accountExists: true,
+      });
+    });
+
+    it('no further link is sent for the address (409)', async () => {
+      await redis.del(coolOffKey(BUYER.email));
+
+      const res = await requestLink(earlierOrderId);
+
+      expect(res.status).toBe(409);
+      expect((res.body as Failure).message).toBe(SIGN_IN_INSTEAD);
+      expect(await linkRows(earlierOrderId)).toHaveLength(0);
+    });
+
+    /**
+     * What a stranger holding an unpaid order for this address sees: the same
+     * refusal an address with no account gets — never that one exists.
+     */
+    it('a booking for the address that isn’t confirmed does not reveal the account (409)', async () => {
+      const { orderId: id } = await placeFreeOrder(
+        server,
+        seeded.latest,
+        BUYER,
+        'buyer-pending',
+      );
+      await pool.query(`UPDATE orders SET status = 'pending' WHERE id = $1`, [
+        id,
+      ]);
+
+      const res = await accountFor(id);
+
+      expect(res.status).toBe(409);
+      expect((res.body as Failure).message).toBe(BOOKING_NOT_CONFIRMED);
+      expect(res.body).not.toHaveProperty('data');
+    });
+  });
+
+  /**
+   * "Sign in instead" is only ever said for an account attendee sign-in can
+   * find: a live attendee in the platform organization (US-DISC-08). An
+   * address that runs a workspace, deleted its attendee account, or appears as
+   * an attendee row in somebody's workspace has no such account — offered only
+   * "Sign in", it would be sent to a sign-in page with nothing to sign in to.
+   */
+  describe('an address whose only account is not one attendee sign-in finds', () => {
+    const orders = new Map<string, string>();
+
+    beforeAll(async () => {
+      for (const other of OTHER_ACCOUNTS) {
+        await pool.query(
+          `INSERT INTO users (organization_id, name, email, persona, status, deleted_at)
+           VALUES ($1, $2, $3, $4, 'Active', $5)`,
+          [
+            other.inPlatform ? platformOrgId : seeded.orgId,
+            other.buyer.name,
+            other.buyer.email,
+            other.persona,
+            other.deleted ? new Date() : null,
+          ],
+        );
+        const placed = await placeFreeOrder(
+          server,
+          seeded.latest,
+          other.buyer,
+          `other-${other.persona}-${other.buyer.email}`,
+        );
+        orders.set(other.buyer.email, placed.orderId);
+      }
+    });
+
+    it.each(OTHER_ACCOUNTS)(
+      '$label: is offered an account, sent the link, and given the account',
+      async ({ buyer }) => {
+        const id = orders.get(buyer.email) ?? '';
+
+        const offered = await accountFor(id);
+        expect((offered.body as Success<unknown>).data).toEqual({
+          accountExists: false,
+        });
+        expect((await requestLink(id)).status).toBe(202);
+        const token = await claimTokenFor(id);
+        expect((await inspect(token)).body).toMatchObject({
+          data: { accountExists: false },
+        });
+        const res = await claim({
+          token,
+          password: PASSWORD,
+          acceptTerms: true,
+        });
+
+        expect(res.status).toBe(201);
+        const { rows } = await pool.query(
+          `SELECT status FROM users
+            WHERE email = $1 AND persona = 'attendee'
+              AND organization_id = $2 AND deleted_at IS NULL`,
+          [buyer.email, platformOrgId],
+        );
+        expect(rows).toEqual([{ status: 'Active' }]);
+      },
+    );
+  });
+
+  /**
+   * Pre-account takeover. Anybody can fill in the attendee sign-up form with
+   * anybody's address and choose its password; the account waits,
+   * `Unconfirmed`, for its owner to open the confirmation link — which would
+   * activate the STRANGER's password. Counting that account as "already
+   * there" would tell the owner to sign in to it and refuse them the one link
+   * that proves the inbox first. It is no account: the claim takes it over.
+   */
+  describe('an address a stranger signed up with and never confirmed', () => {
+    let plantedOrderId: string;
+    let plantedUserId: string;
+    let token: string;
+
+    const login = (password: string) =>
+      request(server)
+        .post('/api/v1/auth/login')
+        .send({ email: PLANTED.email, password, persona: 'attendee' });
+
+    beforeAll(async () => {
+      const signedUp = await request(server)
+        .post('/api/v1/auth/register')
+        .send({
+          persona: 'attendee',
+          name: 'Not The Owner',
+          email: PLANTED.email,
+          password: STRANGERS_PASSWORD,
+          acceptTerms: true,
+        });
+      expect(signedUp.status).toBe(202);
+      const { rows } = await pool.query<{ id: string; status: string }>(
+        `SELECT id, status FROM users
+          WHERE email = $1 AND persona = 'attendee' AND deleted_at IS NULL`,
+        [PLANTED.email],
+      );
+      expect(rows.map((r) => r.status)).toEqual(['Unconfirmed']);
+      plantedUserId = rows[0].id;
+      // Whatever session that account might hold must not outlive the takeover.
+      await pool.query(
+        `INSERT INTO auth_sessions (organization_id, user_id, device, expires_at)
+         VALUES ($1, $2, 'Stranger’s laptop', now() + interval '1 day')`,
+        [platformOrgId, plantedUserId],
+      );
+      plantedOrderId = (
+        await placeFreeOrder(server, seeded.latest, PLANTED, 'planted')
+      ).orderId;
+    });
+
+    it('is still offered "Create account", not "Sign in"', async () => {
+      const res = await accountFor(plantedOrderId);
+
+      expect((res.body as Success<unknown>).data).toEqual({
+        accountExists: false,
+      });
+    });
+
+    it('is sent the link (202)', async () => {
+      expect((await requestLink(plantedOrderId)).status).toBe(202);
+      token = await claimTokenFor(plantedOrderId);
+    });
+
+    it('the link asks for a password, in the booking’s name', async () => {
+      const res = await inspect(token);
+
+      expect((res.body as Success<unknown>).data).toEqual({
+        name: PLANTED.name,
+        email: PLANTED.email,
+        accountExists: false,
+      });
+    });
+
+    it('the claim takes that account over — the owner’s password, the booking’s name, Active (201)', async () => {
+      const res = await claim({ token, password: PASSWORD, acceptTerms: true });
+
+      expect(res.status).toBe(201);
+      expect((res.body as Success<Session>).data.user).toMatchObject({
+        name: PLANTED.name,
+        email: PLANTED.email,
+        status: 'Active',
+      });
+      const { rows } = await pool.query(
+        `SELECT id, name, status FROM users
+          WHERE email = $1 AND persona = 'attendee' AND deleted_at IS NULL`,
+        [PLANTED.email],
+      );
+      expect(rows).toEqual([
+        { id: plantedUserId, name: PLANTED.name, status: 'Active' },
+      ]);
+    });
+
+    it('revokes every session the unconfirmed account had', async () => {
+      const { rows } = await pool.query(
+        `SELECT 1 FROM auth_sessions
+          WHERE user_id = $1 AND device = 'Stranger’s laptop'
+            AND revoked_at IS NULL`,
+        [plantedUserId],
+      );
+
+      expect(rows).toHaveLength(0);
+    });
+
+    it('the stranger’s password no longer opens it; the owner’s does', async () => {
+      expect((await login(STRANGERS_PASSWORD)).status).toBe(401);
+      expect((await login(PASSWORD)).status).toBe(200);
+    });
+
+    it('works once: the same link again is told to sign in (409)', async () => {
+      const res = await claim({ token, password: PASSWORD, acceptTerms: true });
+
+      expect(res.status).toBe(409);
+      expect((res.body as Failure).message).toBe(SIGN_IN_INSTEAD);
+    });
+  });
+
+  /**
+   * "The link works only once" (AC8) — and not only while the account it made
+   * stands. Inside its seven days the old email is still in the inbox, and may
+   * have been forwarded or shared: it must not make the account again once its
+   * owner has deleted it (PDPA) or moved it to another address.
+   */
+  describe('a used link, once the account it made is gone', () => {
+    const live = async (email: string) =>
+      (
+        await pool.query(
+          `SELECT 1 FROM users
+            WHERE email = $1 AND persona = 'attendee' AND deleted_at IS NULL`,
+          [email],
+        )
+      ).rows.length;
+
+    /** Book, ask for the link, and make the account from it. */
+    const madeFromLink = async (buyer: { name: string; email: string }) => {
+      const { orderId: id } = await placeFreeOrder(
+        server,
+        seeded.latest,
+        buyer,
+        `gone-${buyer.email}`,
+      );
+      expect((await requestLink(id)).status).toBe(202);
+      const token = await claimTokenFor(id);
+      const made = await claim({
+        token,
+        password: PASSWORD,
+        acceptTerms: true,
+      });
+      expect(made.status).toBe(201);
+      return { id, token, session: (made.body as Success<Session>).data };
+    };
+
+    it('does not make the account again after its owner deletes it', async () => {
+      const { id, token, session } = await madeFromLink(LEAVER);
+      const deleted = await request(server)
+        .delete('/api/v1/me/account')
+        .set('Authorization', `Bearer ${session.accessToken}`)
+        .send({ confirm: 'DELETE', password: PASSWORD });
+      expect(deleted.status).toBeLessThan(300);
+      expect(await live(LEAVER.email)).toBe(0);
+
+      expectDeadLink(await inspect(token));
+      expectDeadLink(
+        await claim({ token, password: 'another-pass1!', acceptTerms: true }),
+      );
+      expect(await live(LEAVER.email)).toBe(0);
+
+      // Its owner can still choose to come back: a NEW link, to the same inbox.
+      // The cool-off (at least a second) is what separates two links in life;
+      // here it is lifted, so wait out the second the first was signed in.
+      await redis.del(coolOffKey(LEAVER.email));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      expect((await requestLink(id)).status).toBe(202);
+      const again = await claim({
+        token: await latestClaimTokenFor(id),
+        password: PASSWORD,
+        acceptTerms: true,
+      });
+      expect(again.status).toBe(201);
+    });
+
+    it('does not make a second account after the first moves to another address', async () => {
+      const { token } = await madeFromLink(MOVER);
+      await pool.query(
+        `UPDATE users SET email = $2
+          WHERE email = $1 AND persona = 'attendee' AND deleted_at IS NULL`,
+        [MOVER.email, MOVED_TO],
+      );
+
+      expectDeadLink(await inspect(token));
+      expectDeadLink(
+        await claim({ token, password: PASSWORD, acceptTerms: true }),
+      );
+      expect(await live(MOVER.email)).toBe(0);
+    });
+  });
+});
+
+interface Seeded {
+  platformOrgId: number;
+  /** The organizer's workspace — not the platform. */
+  orgId: number;
+  earlier: { eventId: string; tierId: string };
+  latest: { eventId: string; tierId: string };
+}
+
+async function seed(pool: Pool): Promise<Seeded> {
+  const platform = await pool.query<{ id: string }>(
+    `SELECT id FROM organizations WHERE slug = 'eventa'`,
+  );
+  const org = await pool.query<{ id: string }>(
+    `INSERT INTO organizations (name, slug, locale) VALUES ($1,$2,'th') RETURNING id`,
+    [ORG.name, ORG.slug],
+  );
+  const orgId = Number(org.rows[0].id);
+  return {
+    platformOrgId: Number(platform.rows[0].id),
+    orgId,
+    earlier: await insertEvent(pool, orgId, 'bookclaim-first', 'First Meetup'),
+    latest: await insertEvent(pool, orgId, 'bookclaim-latest', 'Latest Meetup'),
+  };
+}
+
+async function insertEvent(
+  pool: Pool,
+  orgId: number,
+  slug: string,
+  name: string,
+): Promise<{ eventId: string; tierId: string }> {
+  const event = await pool.query<{ id: string }>(
+    `INSERT INTO events (organization_id, slug, name, type, bucket, status, visibility,
+                         start_at, end_at, timezone, organizer_name, venue_name, city, published_at)
+     VALUES ($1,$2,$3,'Conference','active','upcoming','public',
+             now() + interval '30 days', now() + interval '30 days 6 hours',
+             'Asia/Bangkok','Acme','QSNCC','Bangkok', now())
+     RETURNING id`,
+    [orgId, slug, name],
+  );
+  const tier = await pool.query<{ id: string }>(
+    `INSERT INTO ticket_types (organization_id, event_id, name, price_satang, is_free,
+                               status, total, sold, min_per_order, max_per_order)
+     VALUES ($1,$2,'RSVP',0,true,'onsale',100,0,1,8) RETURNING id`,
+    [orgId, event.rows[0].id],
+  );
+  return { eventId: event.rows[0].id, tierId: tier.rows[0].id };
+}
+
+/** A guest RSVP through the real checkout — no account anywhere. */
+async function placeFreeOrder(
+  server: Server,
+  at: { eventId: string; tierId: string },
+  buyer: { name: string; email: string },
+  key: string,
+): Promise<{ orderId: string; reference: string }> {
+  const held = await request(server)
+    .post('/api/v1/public/checkout/hold')
+    .send({ eventId: at.eventId, ticketTypeId: at.tierId, quantity: 1 });
+  expect(held.status).toBe(201);
+  const res = await request(server)
+    .post('/api/v1/public/checkout/confirm')
+    .send({
+      eventId: at.eventId,
+      ticketTypeId: at.tierId,
+      quantity: 1,
+      holdIds: (held.body as Success<{ holdIds: number[] }>).data.holdIds,
+      buyer,
+      idempotencyKey: `bookclaim-${key}`,
+    });
+  expect(res.status).toBe(201);
+  return (res.body as Success<{ orderId: string; reference: string }>).data;
+}
+
+async function cleanup(pool: Pool, redis: Redis): Promise<void> {
+  const addresses = [
+    BUYER.email,
+    VICTIM.email,
+    PLANTED.email,
+    PESTERED.email,
+    UNSETTLED.email,
+    LEAVER.email,
+    MOVER.email,
+    ...OTHER_ACCOUNTS.map(({ buyer }) => buyer.email),
+  ];
+  await redis.del(...addresses.flatMap((a) => [coolOffKey(a), budgetKey(a)]));
+  // The used-link ledger, keyed by a digest of each link these tests mailed.
+  const { rows: mailed } = await pool.query<{ claim_url: string }>(
+    `SELECT payload->>'claimUrl' AS claim_url FROM outbox_events
+      WHERE routing_key = $1 AND payload->>'email' LIKE '%@bookclaim.test'`,
+    [LINK_ROUTING_KEY],
+  );
+  for (const { claim_url } of mailed) {
+    const token = new URL(claim_url).searchParams.get('claim') ?? '';
+    await redis.del(
+      `booking-claim:spent:${createHash('sha256').update(token).digest('hex')}`,
+    );
+  }
+  await pool.query(
+    `DELETE FROM outbox_events WHERE routing_key = $1
+        AND payload->>'email' LIKE '%@bookclaim.test'`,
+    [LINK_ROUTING_KEY],
+  );
+  await pool.query(
+    `DELETE FROM outbox_events WHERE organization_id IN
+       (SELECT id FROM organizations WHERE slug = $1)`,
+    [ORG.slug],
+  );
+  await pool.query(
+    `DELETE FROM outbox_events WHERE aggregate_id IN
+       (SELECT id::text FROM users WHERE email LIKE '%@bookclaim.test')`,
+  );
+  // audit_events is ON DELETE RESTRICT (a sign-in writes one), so clear it first.
+  await pool.query(
+    `DELETE FROM audit_events WHERE actor_user_id IN
+       (SELECT id FROM users WHERE email LIKE '%@bookclaim.test')`,
+  );
+  await pool.query(`DELETE FROM users WHERE email LIKE '%@bookclaim.test'`);
+  await pool.query(
+    `DELETE FROM audit_events WHERE organization_id IN
+       (SELECT id FROM organizations WHERE slug = $1)`,
+    [ORG.slug],
+  );
+  await pool.query(`DELETE FROM organizations WHERE slug = $1`, [ORG.slug]);
+}

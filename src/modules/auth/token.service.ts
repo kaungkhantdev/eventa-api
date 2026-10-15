@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import type { Env } from '../../config/env.validation';
 import type {
   AccessTokenClaims,
+  BookingClaimClaims,
   EmailChangeClaims,
   EmailVerificationClaims,
   InviteTokenClaims,
@@ -23,6 +24,9 @@ const EMAIL_CHANGE_TTL_SECONDS = 24 * 60 * 60;
 const PASSWORD_RESET_TTL_SECONDS = 60 * 60;
 /** The window between a correct password and its 2FA code (US-ACC-05). */
 const TWO_FACTOR_CHALLENGE_TTL_SECONDS = 5 * 60;
+/** A booking's create-your-account link is valid for 7 days (US-DISC-15). */
+const BOOKING_CLAIM_TTL_SECONDS = 7 * 24 * 60 * 60;
+const BOOKING_CLAIM_TYPE = 'booking_claim';
 
 export interface TokenSubject {
   userId: string;
@@ -46,6 +50,18 @@ export interface PasswordResetSubject {
   userId: string;
   organizationId: number;
   passwordFingerprint: string;
+}
+
+export interface BookingClaimSubject {
+  orderId: string;
+  /** The booking's buyer email — the only inbox the link is sent to. */
+  email: string;
+}
+
+/** A signed claim link's token, and the moment it stops working. */
+export interface SignedBookingClaim {
+  token: string;
+  expiresAt: Date;
 }
 
 /**
@@ -204,5 +220,46 @@ export class TokenService {
 
   verifyPasswordReset(token: string): Promise<PasswordResetClaims> {
     return this.jwt.verifyAsync<PasswordResetClaims>(token);
+  }
+
+  /**
+   * Sign the link a booking's buyer opens to create their account (US-DISC-15).
+   *
+   * Returns the expiry with the token because the email has to say when the
+   * link stops working, and the token's own `exp` is the authority on that —
+   * a second clock reading here could disagree with it by a second.
+   */
+  async signBookingClaim(s: BookingClaimSubject): Promise<SignedBookingClaim> {
+    const claims: Omit<BookingClaimClaims, 'exp'> = {
+      sub: s.orderId,
+      email: s.email,
+      typ: BOOKING_CLAIM_TYPE,
+    };
+    const token = await this.jwt.signAsync(claims, {
+      expiresIn: BOOKING_CLAIM_TTL_SECONDS,
+    });
+    const { exp } = this.jwt.decode<{ exp: number }>(token);
+    return { token, expiresAt: new Date(exp * 1000) };
+  }
+
+  /**
+   * The `typ` check is the point, as it is for the 2FA challenge: every token
+   * here shares one HS256 secret, so without it an access token — which the
+   * browser holds — or an invite or reset token would verify as a claim. The
+   * address is required too: it is what the account is created for. So is an
+   * expiry: this service never signs a claim without one, and how long a used
+   * link must be remembered is read from it.
+   */
+  async verifyBookingClaim(token: string): Promise<BookingClaimClaims> {
+    const claims = await this.jwt.verifyAsync<BookingClaimClaims>(token);
+    if (
+      claims.typ !== BOOKING_CLAIM_TYPE ||
+      typeof claims.sub !== 'string' ||
+      typeof claims.email !== 'string' ||
+      typeof claims.exp !== 'number'
+    ) {
+      throw new Error('Not a booking claim token');
+    }
+    return claims;
   }
 }

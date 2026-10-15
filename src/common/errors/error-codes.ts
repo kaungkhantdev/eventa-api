@@ -23,6 +23,20 @@ export const ErrorCode = {
    * apart without matching on a sentence.
    */
   PHONE_CODE_EXPIRED: 'PHONE_CODE_EXPIRED',
+  /**
+   * A booking's create-your-account link (US-DISC-15) is malformed, forged,
+   * expired, not a claim link at all, names an order that is gone or no longer
+   * carries the address it was sent to, or was used and its account is gone.
+   * (A used link whose account still stands is not this: it is told to sign
+   * in, 409.) Its own code, not plain `VALIDATION_ERROR`, because the remedy
+   * differs from the one a refused password gets — nothing typed into the page
+   * can fix it; the way forward is a new link from the booking confirmation —
+   * and both answer 400 on the claim route. The contract promises only the
+   * status and the sentence, and eventa-web tells the two apart today by
+   * checking the link again rather than by reading this code; the code is
+   * there for a client that would rather not make that second request.
+   */
+  CLAIM_LINK_INVALID: 'CLAIM_LINK_INVALID',
   RATE_LIMITED: 'RATE_LIMITED',
   EMAIL_NOT_CONFIRMED: 'EMAIL_NOT_CONFIRMED',
   ACCOUNT_SUSPENDED: 'ACCOUNT_SUSPENDED',

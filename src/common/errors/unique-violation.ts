@@ -33,3 +33,11 @@ export const UQ_ORGANIZATIONS_NAME = 'uq_organizations_name';
  * refusal of a racing write back into the same merge prompt.
  */
 export const UQ_ATTENDEES_ORG_EMAIL = 'uq_attendees_org_email';
+
+/**
+ * One LIVE account per address, audience and organization — partial on
+ * `deleted_at IS NULL` since migration 0072. Named so that two claims racing
+ * to create the same attendee account (US-DISC-15) answer the loser with the
+ * same "sign in instead" the check before the write gives.
+ */
+export const UQ_USERS_ORG_EMAIL_PERSONA = 'uq_users_org_email_persona';

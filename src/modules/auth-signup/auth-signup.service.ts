@@ -7,6 +7,7 @@ import {
   UQ_ORGANIZATIONS_NAME,
   isUniqueViolation,
 } from '../../common/errors/unique-violation';
+import { ATTENDEE_ACCOUNTS_UNAVAILABLE } from '../../common/tenancy/platform-org';
 import { slugify } from '../../common/util/slugify';
 import type { Env } from '../../config/env.validation';
 import { Persona } from '../auth/auth.types';
@@ -26,8 +27,6 @@ const INVALID_LINK_MESSAGE =
 const NO_ATTENDEE_WORKSPACE_MESSAGE =
   "An attendee account doesn't have a workspace — leave organizationName out.";
 const NAME_TAKEN_MESSAGE = 'That workspace name is already taken. Try another.';
-const NO_PLATFORM_ORG_MESSAGE =
-  'Attendee accounts are unavailable right now. Please try again later.';
 
 export interface RegisterInput {
   name: string;
@@ -154,7 +153,7 @@ export class SignupService {
     if (!created) {
       throw new DomainException(
         ErrorCode.INTERNAL_ERROR,
-        NO_PLATFORM_ORG_MESSAGE,
+        ATTENDEE_ACCOUNTS_UNAVAILABLE,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
