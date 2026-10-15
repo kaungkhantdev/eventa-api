@@ -691,6 +691,53 @@ describe('StripePaymentAdapter (US-DISC-05)', () => {
   });
 
   /**
+   * US-FIN-05: "when I choose to manage payouts, then I'm taken securely to
+   * the payments provider". A workspace connects its OWN Stripe account with
+   * its own keys — not as a Connect account of a platform — so
+   * `accounts.createLoginLink`, which only exists for a platform's Express
+   * accounts, could never answer. The workspace's own dashboard can.
+   */
+  describe('payoutSettingsLink (US-FIN-05)', () => {
+    function linkHarness(secretKey: string) {
+      const built: string[] = [];
+      const credentials: GatewayCredentialsPort = {
+        secretKeyFor: () => Promise.resolve(secretKey),
+        webhookIdentityFor: () => Promise.resolve(null),
+      };
+      const adapter = new StripePaymentAdapter(
+        clock,
+        config(),
+        credentials,
+        (key) => {
+          built.push(key);
+          return {} as Stripe;
+        },
+      );
+      return { adapter, built };
+    }
+
+    it('sends a test-mode workspace to its own dashboard’s payout settings, without calling Stripe', async () => {
+      const { adapter, built } = linkHarness('sk_test_workspace7');
+      await expect(
+        adapter.payoutSettingsLink(ORG, 'acct_workspace7'),
+      ).resolves.toBe('https://dashboard.stripe.com/test/settings/payouts');
+      expect(built).toEqual([]);
+    });
+
+    it('sends a live workspace to the live dashboard', async () => {
+      const { adapter } = linkHarness('rk_live_workspace7');
+      await expect(
+        adapter.payoutSettingsLink(ORG, 'acct_workspace7'),
+      ).resolves.toBe('https://dashboard.stripe.com/settings/payouts');
+    });
+
+    it('has nothing to link to before an account is connected', async () => {
+      const { adapter } = linkHarness('sk_test_workspace7');
+      await expect(adapter.payoutSettingsLink(ORG, null)).resolves.toBeNull();
+    });
+  });
+
+  /**
    * A refund that did not settle at once (PromptPay) is finished by these
    * events. `gatewayRef` is the REFUND's own `re_…` — what the refund row
    * stored — not the charge's.

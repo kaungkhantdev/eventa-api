@@ -65,7 +65,7 @@ export class PayoutsController {
 
   /**
    * Where to manage bank details, the payout schedule and tax forms — a
-   * one-time link to the provider, because none of that lives here (US-FIN-05).
+   * link to the provider, because none of that lives here (US-FIN-05).
    */
   @Post('settings-link')
   @HttpCode(HttpStatus.OK)

@@ -183,8 +183,8 @@ export abstract class PaymentProviderPort {
   abstract refund(input: RefundPaymentInput): Promise<RefundedPayment>;
 
   /**
-   * A one-time URL onto the provider's own hosted dashboard, where an Admin
-   * manages bank details, the payout schedule and tax forms (US-FIN-05).
+   * A URL onto the provider's own hosted dashboard, where an Admin manages
+   * bank details, the payout schedule and tax forms (US-FIN-05).
    *
    * The link is how bank details stay OUT of this service: Eventa never sees an
    * account number, only that a connected account exists. Returns null when the
