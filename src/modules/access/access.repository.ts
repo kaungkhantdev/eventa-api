@@ -511,6 +511,30 @@ export class AccessRepository {
     });
   }
 
+  /** Does this user hold the Admin role, actively, in this workspace? */
+  async isActiveAdminUser(
+    organizationId: number,
+    userId: string,
+  ): Promise<boolean> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const [row] = await tx
+        .select({ id: memberships.id })
+        .from(memberships)
+        .innerJoin(roles, eq(roles.id, memberships.roleId))
+        .where(
+          and(
+            eq(memberships.userId, userId),
+            eq(memberships.organizationId, organizationId),
+            eq(memberships.status, ACTIVE_STATUS),
+            eq(roles.name, ADMIN_ROLE),
+            isNull(memberships.deletedAt),
+          ),
+        )
+        .limit(1);
+      return row !== undefined;
+    });
+  }
+
   /**
    * Suspend or reactivate: the membership's ROLE is preserved either way, so
    * reactivating restores exactly the access they had. Suspending also flips the

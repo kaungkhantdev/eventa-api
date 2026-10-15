@@ -628,6 +628,30 @@ describe('Access / RBAC management (e2e)', () => {
       const after = (await membersOf(jwt)).data.find((m) => m.email === PEOPLE);
       expect(after?.role).toBe('People');
     });
+
+    /*
+     * US-SET-12: "Admin can do everything." A key taken off the Admin role is
+     * one only an Admin could put back, so checking an Admin against their own
+     * keys would leave it off for good.
+     */
+    it('lets an Admin put back a key they took off the Admin role', async () => {
+      const jwt = await token(ADMIN);
+      const put = (permissions: string[]) =>
+        request(server)
+          .put(`/api/v1/roles/${adminRoleId}/permissions`)
+          .set('Authorization', `Bearer ${jwt}`)
+          .send({ permissions });
+
+      expect((await put(['setUsers', 'evCreate', 'regView'])).status).toBe(200);
+      const restored = await put([
+        'setUsers',
+        'evCreate',
+        'regView',
+        'regCheckin',
+      ]);
+
+      expect(restored.status).toBe(200);
+    });
   });
 });
 

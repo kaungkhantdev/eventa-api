@@ -29,6 +29,7 @@ describe('AccessService — member lifecycle & escalation (US-SET-11/12)', () =>
     repo = {
       memberExists: jest.fn().mockResolvedValue(true),
       isActiveAdmin: jest.fn().mockResolvedValue(false),
+      isActiveAdminUser: jest.fn().mockResolvedValue(false),
       countActiveAdmins: jest.fn().mockResolvedValue(2),
       setMemberStatus: jest.fn().mockResolvedValue(undefined),
       removeMember: jest.fn().mockResolvedValue(undefined),
@@ -168,6 +169,21 @@ describe('AccessService — member lifecycle & escalation (US-SET-11/12)', () =>
       await expect(
         service.assertNoEscalation(orgId, 'u1', ['finRefund']),
       ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    });
+
+    /*
+     * US-SET-12: "Admin can do everything". A key taken off the Admin role is
+     * one only an Admin could ever put back, so an Admin is never refused —
+     * otherwise one unticked box on the Admin role would lock the whole
+     * workspace out of that capability for good.
+     */
+    it('lets an Admin grant a key the Admin role no longer holds', async () => {
+      repo.isActiveAdminUser.mockResolvedValue(true);
+      permissions.getFor.mockResolvedValue(['setUsers']);
+      await expect(
+        service.assertNoEscalation(orgId, 'u1', ['finRefund']),
+      ).resolves.toBeUndefined();
+      expect(repo.isActiveAdminUser).toHaveBeenCalledWith(orgId, 'u1');
     });
 
     it('refuses to assign a role granting more than the actor holds', async () => {

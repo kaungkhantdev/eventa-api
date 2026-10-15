@@ -266,16 +266,19 @@ export class AccessService {
    * You cannot hand out access you do not hold yourself (US-SET-12) — otherwise
    * an Organizer could promote themselves to refunds or user management.
    *
-   * Holding setUsers is no exemption: it used to be, on the reasoning that an
-   * Admin holds everything, but setUsers can sit in a custom role without the
+   * Holding setUsers is no exemption: it can sit in a custom role without the
    * rest, and that role could then grant itself refunds or claim the Admin
-   * role. A standard Admin does hold every key, so it is never refused here.
+   * role. Holding the Admin role is: an Admin can do everything (US-SET-12),
+   * and a key taken off the Admin role is one only an Admin could put back,
+   * so checking an Admin against their own keys would lock the workspace out
+   * of that capability for good.
    */
   async assertNoEscalation(
     organizationId: number,
     actorUserId: string,
     granting: readonly string[],
   ): Promise<void> {
+    if (await this.repo.isActiveAdminUser(organizationId, actorUserId)) return;
     const held = await this.permissions.getFor(organizationId, actorUserId);
     const beyond = granting.filter((key) => !held.includes(key));
     if (beyond.length > 0) {
