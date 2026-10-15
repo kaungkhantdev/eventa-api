@@ -332,6 +332,39 @@ describe('Meetings (e2e — E12)', () => {
       const res = await list('?bucket=past');
       expect((res.body as Success<Meeting[]>).data[0].title).toBe('Was');
     });
+
+    it('counts a cancelled meeting out of Today and Upcoming (US-MTG-06)', async () => {
+      for (const o of [
+        { date: bangkokDay(0), title: 'Called off today' },
+        { date: bangkokDay(3), title: 'Called off later' },
+      ]) {
+        const m = created(await schedule(meeting(o)));
+        await request(server)
+          .post(`/api/v1/meetings/${m.id}/cancel`)
+          .set('Authorization', `Bearer ${jwt}`)
+          .send({})
+          .expect(201);
+      }
+      const titles = (res: request.Response) =>
+        (res.body as Success<Meeting[]>).data.map((m) => m.title);
+
+      const today = await list('?bucket=today');
+      expect(titles(today)).toEqual(['Today one']);
+      // Kept on record under All, not erased.
+      expect((today.body as Success<Meeting[]>).meta?.counts).toEqual({
+        all: 6,
+        today: 1,
+        upcoming: 2,
+        past: 1,
+      });
+      expect(titles(await list('?bucket=upcoming'))).toEqual([
+        'Sooner',
+        'Later',
+      ]);
+      expect(titles(await list())).toEqual(
+        expect.arrayContaining(['Called off today', 'Called off later']),
+      );
+    });
   });
 
   describe('finding a meeting (US-MTG-02)', () => {

@@ -9,6 +9,7 @@ import {
   inArray,
   isNull,
   lt,
+  ne,
   or,
   sql,
 } from 'drizzle-orm';
@@ -27,6 +28,12 @@ import type {
 
 /** Today in BANGKOK, decided by the database so every row is judged alike. */
 const TODAY = sql`(now() AT TIME ZONE 'Asia/Bangkok')::date`;
+
+/**
+ * A cancelled meeting no longer counts toward Today or Upcoming (US-MTG-06).
+ * It stays on record under All, and under Past once its date has gone by.
+ */
+const NOT_CANCELLED = ne(meetings.status, 'cancelled');
 
 /**
  * Data access for meetings (E12).
@@ -224,8 +231,8 @@ export class MeetingsRepository {
       const [row] = await tx
         .select({
           all: sql<number>`count(*)::int`,
-          today: sql<number>`count(*) FILTER (WHERE ${meetings.meetingDate} = ${TODAY})::int`,
-          upcoming: sql<number>`count(*) FILTER (WHERE ${meetings.meetingDate} > ${TODAY})::int`,
+          today: sql<number>`count(*) FILTER (WHERE ${meetings.meetingDate} = ${TODAY} AND ${NOT_CANCELLED})::int`,
+          upcoming: sql<number>`count(*) FILTER (WHERE ${meetings.meetingDate} > ${TODAY} AND ${NOT_CANCELLED})::int`,
           past: sql<number>`count(*) FILTER (WHERE ${meetings.meetingDate} < ${TODAY})::int`,
         })
         .from(meetings)
@@ -284,9 +291,13 @@ export class MeetingsRepository {
     return and(...clauses);
   }
 
-  private bucketWhere(bucket: MeetingBucket): SQL {
-    if (bucket === 'today') return eq(meetings.meetingDate, TODAY as never);
-    if (bucket === 'upcoming') return gt(meetings.meetingDate, TODAY as never);
+  private bucketWhere(bucket: MeetingBucket): SQL | undefined {
+    if (bucket === 'today') {
+      return and(eq(meetings.meetingDate, TODAY as never), NOT_CANCELLED);
+    }
+    if (bucket === 'upcoming') {
+      return and(gt(meetings.meetingDate, TODAY as never), NOT_CANCELLED);
+    }
     return lt(meetings.meetingDate, TODAY as never);
   }
 }
