@@ -19,6 +19,8 @@ const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'mypay-e2e', name: 'MyPay E2E' };
 const ANAN = 'anan@mypay.test';
 const MALEE = 'malee@mypay.test';
+const TAX_ID = '0105561234567';
+const ADDRESS = '88 Bangna, Bangkok';
 const BAHT = 100;
 /** ฿1,000 ×2 + 5% fee. */
 const ORDER_TOTAL = 2_100 * BAHT;
@@ -146,7 +148,41 @@ describe('Payment history (e2e — US-DISC-10)', () => {
     expect(svg).toContain('VAT 7%');
     expect(svg).toContain('฿2,100'); // total
     expect(svg).toContain('MyPay Summit');
-    expect(svg).toContain('0105561234567'); // the workspace tax id
+    expect(svg).toContain(TAX_ID); // the workspace tax id
+  });
+
+  /*
+   * US-SET-07: "Given a document was already issued, when I later change the
+   * organization details, then that past document is unchanged." The portal
+   * receipt used to join the live organizations row, so the edit rewrote it.
+   * The edit is written straight to the row here; the invoices suite drives
+   * the same change through PATCH /organization.
+   */
+  it('keeps the seller identity it was paid under after the workspace changes its details', async () => {
+    const setIdentity = (name: string, address: string, taxId: string) =>
+      pool.query(
+        `UPDATE organizations SET name = $2, address = $3, tax_id = $4
+         WHERE slug = $1`,
+        [ORG.slug, name, address, taxId],
+      );
+    await setIdentity(
+      'Siam Renamed Trading',
+      '1 Silom Road, Bangkok 10500',
+      '0105569999999',
+    );
+    try {
+      const res = await get(`/me/payments/${paidPaymentId}/receipt.svg`, anan);
+      expect(res.status).toBe(200);
+      const svg = (res.body as Buffer).toString();
+      expect(svg).toContain(ORG.name);
+      expect(svg).toContain(ADDRESS);
+      expect(svg).toContain(TAX_ID);
+      expect(svg).not.toContain('Siam Renamed Trading');
+      expect(svg).not.toContain('1 Silom Road');
+      expect(svg).not.toContain('0105569999999');
+    } finally {
+      await setIdentity(ORG.name, ADDRESS, TAX_ID);
+    }
   });
 
   it('marks a refunded transaction’s receipt REFUNDED', async () => {
@@ -275,8 +311,8 @@ interface Seeded {
 async function seed(pool: Pool): Promise<Seeded> {
   const org = await pool.query<{ id: string }>(
     `INSERT INTO organizations (name, slug, vat_rate, service_fee_rate, tax_id, address)
-     VALUES ($1,$2,0.0700,0.0500,'0105561234567','88 Bangna, Bangkok') RETURNING id`,
-    [ORG.name, ORG.slug],
+     VALUES ($1,$2,0.0700,0.0500,$3,$4) RETURNING id`,
+    [ORG.name, ORG.slug, TAX_ID, ADDRESS],
   );
   const orgId = Number(org.rows[0].id);
   // Money is taken only through the workspace's own connected account.

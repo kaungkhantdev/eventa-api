@@ -4,6 +4,7 @@ import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { auditEvents, events, invoices, orders } from '../../db/schema';
 import { withTenant, type Tx } from '../../db/tenant';
 import { organizations } from '../../db/schema';
+import { stampedSeller } from '../../db/seller-identity';
 import {
   INVOICE_NUMBER_PREFIX,
   INVOICE_SEQUENCE_WIDTH,
@@ -71,11 +72,13 @@ export class InvoicesRepository {
       );
       if (existing) return { invoice: existing, fresh: false };
       const number = await this.nextNumber(tx, input.organizationId, year);
+      const seller = await this.sellerNow(tx, input.organizationId);
       const [row] = await tx
         .insert(invoices)
         .values({
           organizationId: input.organizationId,
           number,
+          ...seller,
           orderId: input.orderId,
           eventId: input.eventId,
           buyerName: input.buyerName,
@@ -192,7 +195,7 @@ export class InvoicesRepository {
     });
   }
 
-  /** The invoice plus the seller identity the printed document carries. */
+  /** The invoice plus the seller identity it was issued with (US-SET-07). */
   async findDocument(
     organizationId: number,
     invoiceId: number,
@@ -201,9 +204,7 @@ export class InvoicesRepository {
       const [row] = await tx
         .select({
           ...this.columns(),
-          sellerName: organizations.name,
-          sellerAddress: organizations.address,
-          sellerTaxId: organizations.taxId,
+          ...stampedSeller(invoices),
           vatRate: organizations.vatRate,
         })
         .from(invoices)
@@ -286,6 +287,31 @@ export class InvoicesRepository {
       );
     }
     return and(...clauses);
+  }
+
+  /**
+   * The workspace's legal identity as it stands, read inside the issuing
+   * transaction and stamped on the invoice (US-SET-07): a later edit to the
+   * workspace must not rewrite an invoice already issued.
+   */
+  private async sellerNow(
+    tx: Tx,
+    organizationId: number,
+  ): Promise<{
+    sellerName: string;
+    sellerAddress: string | null;
+    sellerTaxId: string | null;
+  }> {
+    const [org] = await tx
+      .select({
+        sellerName: organizations.name,
+        sellerAddress: organizations.address,
+        sellerTaxId: organizations.taxId,
+      })
+      .from(organizations)
+      .where(eq(organizations.id, organizationId))
+      .limit(1);
+    return org;
   }
 
   /**

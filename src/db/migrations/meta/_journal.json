@@ -519,6 +519,13 @@
       "when": 1787500000023,
       "tag": "0073_categories_name_unique_live",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1787500000024,
+      "tag": "0074_document_seller_identity",
+      "breakpoints": true
     }
   ]
 }

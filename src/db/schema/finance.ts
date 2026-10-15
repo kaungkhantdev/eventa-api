@@ -50,6 +50,16 @@ export const invoices = pgTable(
      * still show who it was billed to after the buyer edits their account.
      */
     buyerEmail: citext().notNull(),
+    /**
+     * The seller's legal identity as it stood on issue, from `organizations`
+     * (US-SET-07): a later edit to the workspace must not rewrite an invoice
+     * already issued. All three are copied together, so an address or tax ID
+     * that was blank on issue stays blank. NULL `seller_name` only on a row
+     * that was never stamped.
+     */
+    sellerName: text(),
+    sellerAddress: text(),
+    sellerTaxId: text(),
     issuedAt: date().notNull(),
     /** Terms are 14 days from issue; what "overdue" is measured against. */
     dueAt: date().notNull(),

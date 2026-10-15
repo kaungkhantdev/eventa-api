@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { events, orders, organizations, payments } from '../../db/schema';
+import { stampedSeller } from '../../db/seller-identity';
 import type {
   ReceiptRow,
   TransactionRow,
@@ -69,11 +70,15 @@ export class AttendeePaymentsRepository {
     return rows.map(normalise);
   }
 
-  /** One receipt — or null when it does not exist OR is not this email's. */
+  /**
+   * One receipt — or null when it does not exist OR is not this email's. The
+   * seller is the identity stamped when the payment settled (US-SET-07).
+   */
   async receiptByIdForEmail(
     paymentId: string,
     email: string,
   ): Promise<ReceiptRow | null> {
+    const seller = stampedSeller(payments);
     const [row] = await this.db
       .select({
         paymentId: payments.id,
@@ -87,9 +92,9 @@ export class AttendeePaymentsRepository {
         paidAt: payments.paidAt,
         buyerName: orders.buyerName,
         buyerEmail: orders.buyerEmail,
-        organizerName: organizations.name,
-        organizerAddress: organizations.address,
-        organizerTaxId: organizations.taxId,
+        organizerName: seller.sellerName,
+        organizerAddress: seller.sellerAddress,
+        organizerTaxId: seller.sellerTaxId,
         vatRate: organizations.vatRate,
       })
       .from(payments)
