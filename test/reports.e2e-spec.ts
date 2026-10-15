@@ -486,17 +486,26 @@ describe('Reports (e2e — US-RPT)', () => {
       expect(report(res).rows[0].confirmed).toBe(4);
     });
 
-    it('makes the parts sum to the whole', async () => {
+    it('makes the four columns on screen sum to the whole, row and tiles', async () => {
+      // US-RPT-08 AC1: confirmed, pending, waitlist and cancelled add up
+      // exactly to the event's total. A rejected or lapsed (`expired`) order
+      // has no column, so counting its seats in the total printed a figure
+      // the row could never add up to.
       await seedOrder({ status: 'confirmed', seats: 3 });
+      await seedOrder({ status: 'pending', seats: 2 });
+      await seedOrder({ status: 'waitlisted' });
       await seedOrder({ status: 'cancelled', seats: 2 });
-      await seedOrder({ status: 'rejected' });
+      await seedOrder({ status: 'rejected', seats: 4 });
+      await seedOrder({ status: 'expired', seats: 5 });
 
-      const { total, confirmed, pending, waitlisted, cancelled, rejected } =
-        report(await get(adminJwt).expect(200)).totals;
-      expect(confirmed + pending + waitlisted + cancelled + rejected).toBe(
-        total,
-      );
-      expect(total).toBe(6);
+      const r = report(await get(adminJwt).expect(200));
+      expect(r.rows).toHaveLength(1);
+      for (const split of [r.rows[0], r.totals]) {
+        expect(
+          split.confirmed + split.pending + split.waitlisted + split.cancelled,
+        ).toBe(split.total);
+      }
+      expect(r.totals.total).toBe(8);
     });
 
     it('carries the event it belongs to', async () => {

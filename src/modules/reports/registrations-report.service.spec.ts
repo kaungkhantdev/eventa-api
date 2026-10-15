@@ -31,7 +31,7 @@ const row = (over: Partial<RegistrationSplitPage['rows'][number]> = {}) => ({
   waitlisted: 8,
   cancelled: 5,
   rejected: 2,
-  total: 427,
+  total: 425,
   ...over,
 });
 
@@ -67,7 +67,7 @@ function portReturning(
           waitlisted: 8,
           cancelled: 5,
           rejected: 2,
-          total: 427,
+          total: 425,
         },
         ...page,
       });
@@ -143,17 +143,14 @@ describe('RegistrationsReportService', () => {
       });
       const view = await serviceWith(port).load(ORG, {});
       expect(view.totals.confirmed).toBe(400);
-      expect(view.totals.total).toBe(427);
+      expect(view.totals.total).toBe(425);
     });
 
-    it('carries every state, so the parts sum to the whole', async () => {
+    it('carries the four listed states, which sum to the whole', async () => {
       const { port } = portReturning();
       const view = await serviceWith(port).load(ORG, {});
-      const { confirmed, pending, waitlisted, cancelled, rejected, total } =
-        view.totals;
-      expect(confirmed + pending + waitlisted + cancelled + rejected).toBe(
-        total,
-      );
+      const { confirmed, pending, waitlisted, cancelled, total } = view.totals;
+      expect(confirmed + pending + waitlisted + cancelled).toBe(total);
     });
 
     it('pages over events matched, not over rows returned', async () => {
