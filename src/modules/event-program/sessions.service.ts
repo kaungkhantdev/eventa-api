@@ -318,6 +318,7 @@ export class SessionsService {
         startTime: s.startTime,
         endTime: s.endTime,
         title: s.title,
+        description: s.description,
         type: s.type,
         room: s.room,
         color: s.color,
