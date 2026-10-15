@@ -40,6 +40,12 @@ export interface AttendeeAccountInput {
   name: string;
   email: string;
   passwordHash: string;
+  /**
+   * The address is already proven — by the one-time link a booking's address
+   * was emailed (US-DISC-15) — so the account starts `Active` and no
+   * confirmation is owed.
+   */
+  confirmed?: boolean;
 }
 
 export interface BootstrapInput {
@@ -206,7 +212,8 @@ export class SignupRepository {
    *
    * No organization, no roles, no membership — an attendee owns no workspace,
    * and their tickets span every organizer on the platform. `Unconfirmed`
-   * until the emailed link is opened, exactly like an organizer.
+   * until the emailed link is opened, exactly like an organizer — unless the
+   * address is already proven (`confirmed`).
    *
    * Null when the platform organization is missing (see
    * `findPlatformOrganizationId`).
@@ -225,7 +232,7 @@ export class SignupRepository {
           name: input.name,
           email: input.email,
           persona: ATTENDEE_PERSONA,
-          status: PENDING_STATUS,
+          status: input.confirmed ? ACTIVE_STATUS : PENDING_STATUS,
           passwordHash: input.passwordHash,
         })
         .returning({ id: users.id });

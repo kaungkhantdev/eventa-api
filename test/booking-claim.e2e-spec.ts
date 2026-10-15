@@ -4,12 +4,14 @@ process.env.JWT_SECRET ??= 'test-secret-at-least-16-characters-long';
 
 import type { Server } from 'node:http';
 import type { INestApplication } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import Redis from 'ioredis';
 import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { buildOpenApiDocument } from '../src/openapi';
 import { listenOnLoopback } from './support/loopback';
 
 const ORG = { slug: 'bookclaim-e2e', name: 'Booking Claim E2E' };
@@ -20,6 +22,12 @@ const UNKNOWN_ORDER = '6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b';
 const LINK_ROUTING_KEY = 'identity.booking_account_link_requested';
 const PUBLIC_WEB_URL = 'http://localhost:5173';
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const PASSWORD = 'kept-tickets1!';
+const DEAD_LINK =
+  'This link has expired or is no longer valid. Ask for a new one from your booking confirmation.';
+const SIGN_IN_INSTEAD = 'An account already uses this email. Sign in instead.';
+const CLAIM_PATH = '/api/v1/auth/register/from-booking/claim';
+const INSPECT_PATH = '/api/v1/auth/register/from-booking/claim/inspect';
 const PAYLOAD_KEYS = [
   'claimUrl',
   'email',
@@ -39,6 +47,27 @@ interface Success<T> {
 interface Failure {
   message: string;
   code?: string;
+}
+interface Session {
+  twoFactorRequired: boolean;
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
+  expiresIn: number;
+  user: { name: string; email: string; persona: string; status: string };
+}
+interface MyEvents {
+  upcoming: { orderId: string }[];
+  past: { orderId: string }[];
+}
+interface OpenApiOperation {
+  requestBody?: {
+    content?: Record<string, { schema?: { $ref?: string } }>;
+  };
+}
+interface OpenApiSchema {
+  properties?: Record<string, unknown>;
+  required?: string[];
 }
 interface OutboxRow {
   organization_id: string;
@@ -129,6 +158,29 @@ describe('Account from a booking (e2e — US-DISC-15)', () => {
       [LINK_ROUTING_KEY, id],
     );
     return rows;
+  };
+
+  /** The token in the link the worker would have mailed for this order. */
+  const claimTokenFor = async (id: string): Promise<string> => {
+    const [{ payload }] = await linkRows(id);
+    return new URL(payload.claimUrl as string).searchParams.get('claim') ?? '';
+  };
+
+  /** Signs with the app's own secret — what a forged-but-valid token is. */
+  const jwt = new JwtService({ secret: process.env.JWT_SECRET });
+
+  const inspect = (token: unknown) =>
+    request(server).post(INSPECT_PATH).send({ token });
+
+  const claim = (body: Record<string, unknown>) =>
+    request(server).post(CLAIM_PATH).send(body);
+
+  const expectDeadLink = (res: request.Response) => {
+    expect(res.status).toBe(400);
+    expect(res.body as Failure).toMatchObject({
+      message: DEAD_LINK,
+      code: 'CLAIM_LINK_INVALID',
+    });
   };
 
   const attendeeAccounts = async (email: string) => {
@@ -279,6 +331,286 @@ describe('Account from a booking (e2e — US-DISC-15)', () => {
         .send({ password: 'chosen-by-stranger1!', acceptTerms: true });
 
       expect(await attendeeAccounts(VICTIM.email)).toHaveLength(0);
+    });
+
+    it('cannot claim it without the emailed link — no route takes a password without one', async () => {
+      for (const body of [
+        { password: PASSWORD, acceptTerms: true },
+        { orderId: strangersOrderId, password: PASSWORD, acceptTerms: true },
+        { token: strangersOrderId, password: PASSWORD, acceptTerms: true },
+        { token: '', password: PASSWORD, acceptTerms: true },
+      ]) {
+        expect((await claim(body)).status).toBe(400);
+      }
+      expect(await attendeeAccounts(VICTIM.email)).toHaveLength(0);
+    });
+
+    it('cannot claim it with a link signed for somebody else’s address', async () => {
+      const forged = await jwt.signAsync({
+        sub: strangersOrderId,
+        email: 'stranger@bookclaim.test',
+        typ: 'booking_claim',
+      });
+
+      expectDeadLink(
+        await claim({ token: forged, password: PASSWORD, acceptTerms: true }),
+      );
+      expect(await attendeeAccounts(VICTIM.email)).toHaveLength(0);
+      expect(await attendeeAccounts('stranger@bookclaim.test')).toHaveLength(0);
+    });
+
+    it('exposes no route under from-booking that takes a password without the token', () => {
+      const document = buildOpenApiDocument(app);
+      const schemas = (document.components?.schemas ?? {}) as Record<
+        string,
+        OpenApiSchema
+      >;
+      const takingPassword: string[] = [];
+      for (const [path, item] of Object.entries(document.paths ?? {})) {
+        if (!path.includes('/auth/register/from-booking')) continue;
+        for (const [method, operation] of Object.entries(
+          item as Record<string, OpenApiOperation>,
+        )) {
+          const ref =
+            operation.requestBody?.content?.['application/json']?.schema?.$ref;
+          const schema = ref ? schemas[ref.split('/').pop() ?? ''] : undefined;
+          if (!schema?.properties?.password) continue;
+          // The document's paths carry the global prefix or not depending on
+          // how it was built; compare without it.
+          takingPassword.push(
+            `${method.toUpperCase()} ${path.replace(/^\/api\/v1/, '')}`,
+          );
+          expect(schema.required).toEqual(
+            expect.arrayContaining(['token', 'password']),
+          );
+          expect(schema.properties).not.toHaveProperty('email');
+          expect(schema.properties).not.toHaveProperty('orderId');
+        }
+      }
+      expect(takingPassword).toEqual([
+        'POST /auth/register/from-booking/claim',
+      ]);
+    });
+  });
+
+  describe('opening the emailed link', () => {
+    it('shows the name from the booking and the address the link was sent to', async () => {
+      const res = await inspect(await claimTokenFor(orderId));
+
+      expect(res.status).toBe(200);
+      expect((res.body as Success<unknown>).data).toEqual({
+        name: BUYER.name,
+        email: BUYER.email,
+        accountExists: false,
+      });
+    });
+
+    it('refuses a link that is not one, in one fixed sentence', async () => {
+      expectDeadLink(await inspect('not-a-link'));
+      expectDeadLink(await inspect(''));
+    });
+
+    it('refuses an expired link', async () => {
+      const expired = await jwt.signAsync({
+        sub: orderId,
+        email: BUYER.email,
+        typ: 'booking_claim',
+        exp: Math.floor(Date.now() / 1000) - 60,
+      });
+
+      expectDeadLink(await inspect(expired));
+    });
+
+    it('refuses any other token signed with the same secret', async () => {
+      const reset = await jwt.signAsync({
+        sub: orderId,
+        email: BUYER.email,
+        typ: 'reset_password',
+      });
+
+      expectDeadLink(await inspect(reset));
+    });
+
+    it('refuses a link once its order is gone or no longer carries that address', async () => {
+      const elsewhere = await jwt.signAsync({
+        sub: orderId,
+        email: 'someone-else@bookclaim.test',
+        typ: 'booking_claim',
+      });
+      const orphan = await jwt.signAsync({
+        sub: UNKNOWN_ORDER,
+        email: BUYER.email,
+        typ: 'booking_claim',
+      });
+
+      expectDeadLink(await inspect(elsewhere));
+      expectDeadLink(await inspect(orphan));
+    });
+
+    it('creates nothing by looking', async () => {
+      expect(await attendeeAccounts(BUYER.email)).toHaveLength(0);
+    });
+  });
+
+  describe('choosing the password', () => {
+    let token: string;
+    let session: Session;
+
+    beforeAll(async () => {
+      token = await claimTokenFor(orderId);
+    });
+
+    it('refuses an address or a name from the client — they come from the link and the order (400)', async () => {
+      for (const extra of [
+        { email: 'someone-else@bookclaim.test' },
+        { name: 'Somebody Else' },
+      ]) {
+        const res = await claim({
+          token,
+          password: PASSWORD,
+          acceptTerms: true,
+          ...extra,
+        });
+        expect(res.status).toBe(400);
+      }
+      expect(await attendeeAccounts(BUYER.email)).toHaveLength(0);
+      expect(
+        await attendeeAccounts('someone-else@bookclaim.test'),
+      ).toHaveLength(0);
+    });
+
+    it('holds the password to the shared rule (400)', async () => {
+      const res = await claim({
+        token,
+        password: 'weakpass',
+        acceptTerms: true,
+      });
+
+      expect(res.status).toBe(400);
+      expect(await attendeeAccounts(BUYER.email)).toHaveLength(0);
+    });
+
+    it('requires the Terms & Privacy, as every attendee sign-up does (400)', async () => {
+      for (const acceptTerms of [false, undefined]) {
+        const res = await claim({ token, password: PASSWORD, acceptTerms });
+        expect(res.status).toBe(400);
+      }
+      expect(await attendeeAccounts(BUYER.email)).toHaveLength(0);
+    });
+
+    it('creates the account and signs it straight in (201)', async () => {
+      const res = await claim({ token, password: PASSWORD, acceptTerms: true });
+
+      expect(res.status).toBe(201);
+      session = (res.body as Success<Session>).data;
+      expect(Object.keys(session).sort()).toEqual([
+        'accessToken',
+        'expiresIn',
+        'refreshToken',
+        'tokenType',
+        'twoFactorRequired',
+        'user',
+      ]);
+      expect(session).toMatchObject({
+        twoFactorRequired: false,
+        accessToken: expect.any(String) as string,
+        refreshToken: expect.any(String) as string,
+        tokenType: 'Bearer',
+        expiresIn: expect.any(Number) as number,
+      });
+      expect(session.user).toMatchObject({
+        name: BUYER.name,
+        email: BUYER.email,
+        persona: 'attendee',
+        status: 'Active',
+      });
+    });
+
+    it('made it Active, in the platform organization, in the booking’s name', async () => {
+      const rows = await attendeeAccounts(BUYER.email);
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        name: BUYER.name,
+        email: BUYER.email,
+        status: 'Active',
+      });
+      expect(Number(rows[0].organization_id)).toBe(platformOrgId);
+      // Opening the link proved the address: no confirmation email is owed.
+      const { rows: verifications } = await pool.query(
+        `SELECT 1 FROM outbox_events
+          WHERE routing_key = 'identity.email_verification_requested'
+            AND payload->>'email' = $1`,
+        [BUYER.email],
+      );
+      expect(verifications).toHaveLength(0);
+    });
+
+    it('the session it returned works', async () => {
+      const res = await request(server)
+        .get('/api/v1/auth/me')
+        .set('Authorization', `Bearer ${session.accessToken}`);
+
+      expect(res.status).toBe(200);
+      expect((res.body as Success<{ email: string }>).data.email).toBe(
+        BUYER.email,
+      );
+    });
+
+    it('lands on My Events with this booking and the one made earlier already there', async () => {
+      const res = await request(server)
+        .get('/api/v1/me/tickets')
+        .set('Authorization', `Bearer ${session.accessToken}`);
+
+      expect(res.status).toBe(200);
+      const mine = (res.body as Success<MyEvents>).data;
+      const orders = [...mine.upcoming, ...mine.past].map((r) => r.orderId);
+      expect(orders).toEqual(expect.arrayContaining([orderId, earlierOrderId]));
+      // Never the stranger's booking made with somebody else's address.
+      expect(orders).not.toContain(strangersOrderId);
+    });
+
+    it('works once: the same link again is told to sign in (409)', async () => {
+      const res = await claim({ token, password: PASSWORD, acceptTerms: true });
+
+      expect(res.status).toBe(409);
+      expect((res.body as Failure).message).toBe(SIGN_IN_INSTEAD);
+      expect(await attendeeAccounts(BUYER.email)).toHaveLength(1);
+    });
+
+    it('refuses the session’s own access token as a link', async () => {
+      expectDeadLink(await inspect(session.accessToken));
+      expectDeadLink(
+        await claim({
+          token: session.accessToken,
+          password: PASSWORD,
+          acceptTerms: true,
+        }),
+      );
+    });
+  });
+
+  describe('once the account exists', () => {
+    it('the link says so, and the confirmation screen offers sign-in', async () => {
+      const inspected = await inspect(await claimTokenFor(orderId));
+      const offered = await accountFor(earlierOrderId);
+
+      expect((inspected.body as Success<unknown>).data).toMatchObject({
+        accountExists: true,
+      });
+      expect((offered.body as Success<unknown>).data).toEqual({
+        accountExists: true,
+      });
+    });
+
+    it('no further link is sent for the address (409)', async () => {
+      await redis.del(coolOffKey(BUYER.email));
+
+      const res = await requestLink(earlierOrderId);
+
+      expect(res.status).toBe(409);
+      expect((res.body as Failure).message).toBe(SIGN_IN_INSTEAD);
+      expect(await linkRows(earlierOrderId)).toHaveLength(0);
     });
   });
 });

@@ -23,6 +23,17 @@ export const ErrorCode = {
    * apart without matching on a sentence.
    */
   PHONE_CODE_EXPIRED: 'PHONE_CODE_EXPIRED',
+  /**
+   * A booking's create-your-account link (US-DISC-15) is malformed, forged,
+   * expired, not a claim link at all, or names an order that is gone or no
+   * longer carries the address it was sent to. (A link already USED is not
+   * this: its account exists, so it is told to sign in, 409.) Its own code,
+   * not plain `VALIDATION_ERROR`, because the remedy differs from the one a
+   * refused password gets: nothing typed into the page can fix it, and the way
+   * forward is a new link from the booking confirmation. Both answer 400 on
+   * the claim route, so the status alone cannot tell them apart.
+   */
+  CLAIM_LINK_INVALID: 'CLAIM_LINK_INVALID',
   RATE_LIMITED: 'RATE_LIMITED',
   EMAIL_NOT_CONFIRMED: 'EMAIL_NOT_CONFIRMED',
   ACCOUNT_SUSPENDED: 'ACCOUNT_SUSPENDED',
