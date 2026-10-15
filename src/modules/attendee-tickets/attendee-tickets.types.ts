@@ -20,6 +20,11 @@ export interface MyRegistrationRow {
   coverImage: string | null;
   ticketTypeName: string | null;
   ticketCount: number;
+  /**
+   * The order's live tickets, in the order that numbers their admissions — how
+   * the portal opens each one's own pass and QR (US-DISC-07).
+   */
+  ticketIds: string[];
   /** True once any of the order's tickets was scanned at the door (E8). */
   attended: boolean;
 }

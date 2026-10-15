@@ -54,6 +54,14 @@ export class MyRegistrationDto {
   ticketCount!: number;
 
   @ApiProperty({
+    type: [String],
+    format: 'uuid',
+    description:
+      "The order's tickets, in admission order — each opens at GET /me/tickets/{ticketId}",
+  })
+  ticketIds!: string[];
+
+  @ApiProperty({
     example: '6 days left',
     nullable: true,
     type: String,
