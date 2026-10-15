@@ -34,7 +34,7 @@ const BEARER = 'Bearer';
 const UNKNOWN_DEVICE = 'Unknown device';
 const DEAD_LINK_RESPONSE = {
   description:
-    'The link is malformed, expired, not a claim link, or no longer matches its booking (code CLAIM_LINK_INVALID) — or the body failed validation',
+    'The link is malformed, expired, not a claim link, no longer matches its booking, or was used by an account that is now gone (code CLAIM_LINK_INVALID) — or the body failed validation',
   type: ApiErrorDto,
 };
 
@@ -79,7 +79,8 @@ export class AuthBookingSignupController {
     type: ApiErrorDto,
   })
   @ApiTooManyRequestsResponse({
-    description: 'A link was sent moments ago',
+    description:
+      'A link was sent moments ago, or the address has had its links for the day',
     type: ApiErrorDto,
   })
   requestLink(

@@ -1,5 +1,6 @@
 import { HttpStatus } from '@nestjs/common';
 import { DrizzleQueryError } from 'drizzle-orm';
+import { ATTENDEE_ACCOUNTS_UNAVAILABLE } from '../../common/tenancy/platform-org';
 import { refusalOf } from '../../../test/support/refusal';
 import type { PasswordService } from '../auth-password/auth-password.service';
 import type { SignupRepository } from '../auth-signup/auth-signup.repository';
@@ -300,7 +301,7 @@ describe('BookingClaimService (US-DISC-15)', () => {
       expect(auth.startSession).not.toHaveBeenCalled();
     });
 
-    it('invites an address that already has an account to sign in (409) — which also spends the link', async () => {
+    it('invites an address that already has an account to sign in (409) — a used link, while its account stands', async () => {
       accounts.findPlatformAttendee.mockResolvedValue(CONFIRMED);
 
       const refusal = await refusalOf(claim());
@@ -347,6 +348,8 @@ describe('BookingClaimService (US-DISC-15)', () => {
       const refusal = await refusalOf(claim());
 
       expect(refusal.getStatus()).toBe(HttpStatus.INTERNAL_SERVER_ERROR);
+      // The same sentence attendee sign-up gives — one, said everywhere.
+      expect(refusal.message).toBe(ATTENDEE_ACCOUNTS_UNAVAILABLE);
       expect(auth.startSession).not.toHaveBeenCalled();
     });
 

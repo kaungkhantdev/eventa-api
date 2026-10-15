@@ -1,6 +1,7 @@
 import type { ConfigService } from '@nestjs/config';
 import type { Clock } from '../../common/time/clock';
 import { DomainException } from '../../common/errors/domain.exception';
+import { ATTENDEE_ACCOUNTS_UNAVAILABLE } from '../../common/tenancy/platform-org';
 import type { Env } from '../../config/env.validation';
 import type { OutboxPort } from '../platform/outbox.port';
 import type { PasswordService } from '../auth-password/auth-password.service';
@@ -224,6 +225,9 @@ describe('SignupService', () => {
     it('surfaces a missing platform organization rather than reporting success', async () => {
       repo.createAttendeeAccount.mockResolvedValue(null);
 
+      await expect(service.register(attendee)).rejects.toMatchObject({
+        message: ATTENDEE_ACCOUNTS_UNAVAILABLE,
+      });
       await expect(service.register(attendee)).rejects.toBeInstanceOf(
         DomainException,
       );

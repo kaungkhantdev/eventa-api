@@ -30,16 +30,23 @@ import { BookingClaimService } from './booking-claim.service';
  *   · `TokenService` and `AuthService` (AuthModule) — sign and verify the
  *     claim link's token; open the new account's first session exactly as a
  *     password sign-in does (`startSession`).
- *   · `SignupRepository` (AuthSignupModule) — whether the address already has
- *     an attendee account, which organization is the platform's, and creating
- *     the account the way attendee sign-up does (as auth-social reuses it).
+ *   · `SignupRepository` (AuthSignupModule) — the address's platform attendee
+ *     account and whether it was ever confirmed, which organization is the
+ *     platform's, creating the account the way attendee sign-up does, and
+ *     taking over an unconfirmed one. Injected directly, not behind a port:
+ *     AuthSignupModule exports it for exactly this (auth-social reuses it the
+ *     same way for social sign-up), these are sign-up's own writes on sign-up's
+ *     own rows, and no AuthSignup service offers them — a port here would be a
+ *     second name for the same repository.
  *   · `PasswordService` (AuthPasswordModule) — hashes the chosen password.
- *   · `UsersRepository` (UsersModule) — reads the new account back for the
- *     session, as auth-social does.
+ *   · `UsersRepository` (UsersModule) — reads the account back for the
+ *     session, as `TwoFactorSigninService` does before its `startSession`.
  *   · `OutboxPort` (PlatformModule) — the email rides the outbox to
  *     eventa-worker, which sends it.
- *   · `ResendThrottleService` — the shared cool-off from `common/throttle`,
- *     listed as a provider the way UsersModule lists it.
+ *   · `ResendThrottleService` — the shared cool-off and daily total from
+ *     `common/throttle`, listed as a provider the way UsersModule lists it.
+ *   · `REDIS` (the global RedisModule) — the ledger of used claim links
+ *     (`BookingClaimLinkService`).
  *
  * A leaf of its own rather than a facet of auth-signup: it needs CheckoutModule,
  * and auth-signup sits inside the auth ⇄ access cycle that checkout's own

@@ -1,6 +1,7 @@
 import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '../../common/errors/domain.exception';
 import type { ResendThrottleService } from '../../common/throttle/resend-throttle.service';
+import { ATTENDEE_ACCOUNTS_UNAVAILABLE } from '../../common/tenancy/platform-org';
 import { refusalOf } from '../../../test/support/refusal';
 import type { SignupRepository } from '../auth-signup/auth-signup.repository';
 import { AuthBookingSignupService } from './auth-booking-signup.service';
@@ -185,6 +186,8 @@ describe('AuthBookingSignupService (US-DISC-15)', () => {
       const refusal = await refusalOf(service.requestLink(ORDER_ID));
 
       expect(refusal.getStatus()).toBe(HttpStatus.INTERNAL_SERVER_ERROR);
+      // The same sentence attendee sign-up gives — one, said everywhere.
+      expect(refusal.message).toBe(ATTENDEE_ACCOUNTS_UNAVAILABLE);
       expect(links.send).not.toHaveBeenCalled();
       // A broken deployment is not a send: asking again once it is fixed must
       // not be refused for a link that never went out.
