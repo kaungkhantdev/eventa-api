@@ -181,6 +181,46 @@ describe('Categories (e2e — US-EVT-11)', () => {
     await getOne(adminJwt, cat.id).expect(404);
   });
 
+  /*
+   * "The name must be unique in my workspace" — among the categories it HAS.
+   * A deleted category is soft-deleted, and `uq_categories_org_name` used to
+   * cover it, so taking its name back was a unique violation and a 500.
+   */
+  it('a deleted category frees its name — to create again or rename to', async () => {
+    const del = (id: number) =>
+      request(server)
+        .delete(`/api/v1/categories/${id}`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(200);
+    const music = (
+      (await create(adminJwt, { name: 'Music', icon: 'x', color: 'teal' }))
+        .body as Success<Category>
+    ).data;
+    await del(music.id);
+    const again = await create(adminJwt, {
+      name: 'Music',
+      icon: 'x',
+      color: 'teal',
+    });
+    expect(again.status).toBe(201);
+
+    const film = (
+      (await create(adminJwt, { name: 'Film', icon: 'x', color: 'red' }))
+        .body as Success<Category>
+    ).data;
+    await del(film.id);
+    const other = (
+      (await create(adminJwt, { name: 'Cinema', icon: 'x', color: 'red' }))
+        .body as Success<Category>
+    ).data;
+    const renamed = await request(server)
+      .patch(`/api/v1/categories/${other.id}`)
+      .set('Authorization', `Bearer ${adminJwt}`)
+      .send({ name: 'Film', version: other.version });
+    expect(renamed.status).toBe(200);
+    expect((renamed.body as Success<Category>).data.name).toBe('Film');
+  });
+
   it("never exposes another tenant's category (404)", async () => {
     const admin2Jwt = await token(ADMIN2, ORG2.slug);
     const foreign = (

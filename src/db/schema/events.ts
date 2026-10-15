@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
@@ -7,6 +8,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 import { createdAt, deletedAt, idPk, updatedAt, version } from './_columns';
@@ -42,7 +44,11 @@ export const categories = pgTable(
     version: version(),
   },
   (t) => [
-    unique('uq_categories_org_name').on(t.organizationId, t.name),
+    // The service's rule, enforced: unique case-insensitively, among the
+    // categories the workspace still has — a deleted one frees its name.
+    uniqueIndex('uq_categories_org_name')
+      .on(t.organizationId, sql`lower(${t.name})`)
+      .where(sql`${t.deletedAt} IS NULL`),
     index('ix_categories_org').on(t.organizationId),
   ],
 );
