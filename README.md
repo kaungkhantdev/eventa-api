@@ -187,3 +187,9 @@ message naming both paths. Ship the `OFL.txt` beside the faces — the Open Font
 - **`Port 3000 already in use`** — change `PORT` in `.env`, or stop whatever is on 3000.
 - **Docker services unhealthy** — `docker compose down -v` then `docker compose up -d` to reset (this
   wipes the Postgres volume, so re-run `pnpm migrate` and `pnpm seed`).
+
+## License
+
+Proprietary — all rights reserved. This repository is public so that it can be
+read; it is not open-source software, and no right to use, copy, modify or run
+it is granted. See [LICENSE](LICENSE).
