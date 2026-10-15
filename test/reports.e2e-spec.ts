@@ -248,7 +248,13 @@ describe('Reports (e2e — US-RPT)', () => {
     );
   }
 
-  /** A settled payment against a fresh order, with optional refund and fee. */
+  /**
+   * A settled payment against a fresh order, with optional refund and fee.
+   *
+   * A refund that succeeded flips its payment to `refunded`, as
+   * `markRefundedIn` does in production — a refunded payment left `paid` is a
+   * state nothing but a fixture ever produced.
+   */
   async function seedPayment(o: {
     org?: number;
     event?: string;
@@ -256,6 +262,8 @@ describe('Reports (e2e — US-RPT)', () => {
     vatSatang?: number;
     feeSatang?: number;
     refundSatang?: number;
+    /** `succeeded` unless a case needs a refund that never moved the money. */
+    refundStatus?: 'succeeded' | 'pending' | 'failed';
     /** Seats on the order the payment settled — the average price's divisor. */
     seats?: number;
     /** Who paid, for the ledger's search and its person column. */
@@ -304,13 +312,27 @@ describe('Reports (e2e — US-RPT)', () => {
       ],
     );
     if (o.refundSatang) {
+      const refundStatus = o.refundStatus ?? 'succeeded';
       await pool.query(
         `INSERT INTO refunds (organization_id, payment_id, order_id, amount_satang, status,
                               issued_by, idempotency_key)
-         VALUES ($1,$2,$3,$4,'succeeded',
+         VALUES ($1,$2,$3,$4,$6::refund_status,
                  (SELECT id FROM users WHERE organization_id = $1 LIMIT 1), $5)`,
-        [org, payment.rows[0].id, orderId, o.refundSatang, `ref-rpt-${seq}`],
+        [
+          org,
+          payment.rows[0].id,
+          orderId,
+          o.refundSatang,
+          `ref-rpt-${seq}`,
+          refundStatus,
+        ],
       );
+      if (refundStatus === 'succeeded') {
+        await pool.query(
+          `UPDATE payments SET status = 'refunded' WHERE id = $1`,
+          [payment.rows[0].id],
+        );
+      }
     }
     return payment.rows[0].id;
   }
@@ -664,6 +686,36 @@ describe('Reports (e2e — US-RPT)', () => {
       expect(t.grossSatang).toBe(20_000);
       expect(t.refundsSatang).toBe(10_000);
       expect(t.netSatang).toBe(10_000);
+    });
+
+    it('keeps a payment whose refund has settled in gross and in refunds', async () => {
+      // A settled refund flips its payment to `refunded`. Scanning `paid` alone
+      // dropped it from both sums, so a completed refund vanished from the
+      // report instead of showing as money that went back (US-RPT-05).
+      await seedPayment({ amountSatang: 50_000, refundSatang: 50_000 });
+
+      const t = income(await getIncome(adminJwt).expect(200)).totals;
+      expect(t.grossSatang).toBe(50_000);
+      expect(t.refundsSatang).toBe(50_000);
+    });
+
+    it('counts only refunds that moved the money', async () => {
+      // A failed or still-pending refund returned nothing to the buyer.
+      await seedPayment({
+        amountSatang: 20_000,
+        refundSatang: 5_000,
+        refundStatus: 'failed',
+      });
+      await seedPayment({
+        amountSatang: 30_000,
+        refundSatang: 7_000,
+        refundStatus: 'pending',
+      });
+
+      const t = income(await getIncome(adminJwt).expect(200)).totals;
+      expect(t.grossSatang).toBe(50_000);
+      expect(t.refundsSatang).toBe(0);
+      expect(t.netSatang).toBe(50_000);
     });
 
     it('reports a free event as zeros rather than leaving it out', async () => {
@@ -1253,6 +1305,16 @@ describe('Reports (e2e — US-RPT)', () => {
       await seedPayment({ amountSatang: 100_000, refundSatang: 4_000 });
       const view = overview(await getOverview(adminJwt).expect(200));
       expect(view.kpis.refundRate?.value).toBe(4);
+    });
+
+    it('rates a completed full refund, not just a partial one', async () => {
+      // US-RPT-01: the refund rate must reflect a refund that settled. One of
+      // two equal payments refunded in full is half the money going back.
+      await seedPayment({ amountSatang: 100_000, refundSatang: 100_000 });
+      await seedPayment({ amountSatang: 100_000 });
+
+      const view = overview(await getOverview(adminJwt).expect(200));
+      expect(view.kpis.refundRate?.value).toBe(50);
     });
 
     it('compares against the period immediately before this one', async () => {
