@@ -156,18 +156,38 @@ export class SignupRepository {
   }
 
   /**
-   * Create an attendee in the ONE platform organization (US-DISC-08).
+   * Is this address a live attendee account in the PLATFORM organization —
+   * the one attendee sign-in resolves to (US-DISC-08)?
    *
-   * No organization, no roles, no membership — an attendee owns no workspace,
-   * and their tickets span every organizer on the platform. `Invited` until the
-   * emailed link is opened, exactly like an organizer.
-   *
-   * Null when the platform organization is missing: it is seeded by migration
-   * 0026, so its absence is a broken deployment for the caller to surface.
+   * Narrower than `attendeeEmailExists` on purpose. That one counts an
+   * attendee row in any workspace, which only older social sign-ins ever
+   * wrote; this one asks exactly what `uq_users_org_email_persona` will refuse
+   * a second of, so "sign in instead" (US-DISC-15) is only ever said when
+   * there is an account sign-in can actually find.
    */
-  async createAttendeeAccount(
-    input: AttendeeAccountInput,
-  ): Promise<{ organizationId: number; userId: string } | null> {
+  async platformAttendeeExists(email: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .innerJoin(organizations, eq(organizations.id, users.organizationId))
+      .where(
+        and(
+          eq(users.email, email),
+          eq(users.persona, ATTENDEE_PERSONA),
+          isNull(users.deletedAt),
+          eq(organizations.slug, PLATFORM_ORG_SLUG),
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
+  }
+
+  /**
+   * The ONE platform organization every attendee account lives in
+   * (US-DISC-08), or null when it is missing — it is seeded by migration 0026,
+   * so its absence is a broken deployment for the caller to surface.
+   */
+  async findPlatformOrganizationId(): Promise<number | null> {
     const [org] = await this.db
       .select({ id: organizations.id })
       .from(organizations)
@@ -178,13 +198,30 @@ export class SignupRepository {
         ),
       )
       .limit(1);
-    if (!org) return null;
+    return org?.id ?? null;
+  }
 
-    return withTenant(this.db, org.id, async (tx) => {
+  /**
+   * Create an attendee in the ONE platform organization (US-DISC-08).
+   *
+   * No organization, no roles, no membership — an attendee owns no workspace,
+   * and their tickets span every organizer on the platform. `Unconfirmed`
+   * until the emailed link is opened, exactly like an organizer.
+   *
+   * Null when the platform organization is missing (see
+   * `findPlatformOrganizationId`).
+   */
+  async createAttendeeAccount(
+    input: AttendeeAccountInput,
+  ): Promise<{ organizationId: number; userId: string } | null> {
+    const organizationId = await this.findPlatformOrganizationId();
+    if (organizationId === null) return null;
+
+    return withTenant(this.db, organizationId, async (tx) => {
       const [user] = await tx
         .insert(users)
         .values({
-          organizationId: org.id,
+          organizationId,
           name: input.name,
           email: input.email,
           persona: ATTENDEE_PERSONA,
@@ -192,7 +229,7 @@ export class SignupRepository {
           passwordHash: input.passwordHash,
         })
         .returning({ id: users.id });
-      return { organizationId: org.id, userId: user.id };
+      return { organizationId, userId: user.id };
     });
   }
 
