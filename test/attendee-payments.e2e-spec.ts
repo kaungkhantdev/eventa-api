@@ -40,6 +40,7 @@ interface Summary {
 interface Txn {
   paymentId: string;
   reference: string;
+  invoiceNumber: string | null;
   eventName: string;
   method: string;
   status: string;
@@ -123,6 +124,46 @@ describe('Payment history (e2e — US-DISC-10)', () => {
     });
     expect(paid?.reference).toMatch(/^ORD-/);
     expect(rows.some((r) => r.status === 'refunded')).toBe(true);
+  });
+
+  /**
+   * US-DISC-10: the row shows the "invoice number". It only ever carried the
+   * order reference, so the invoice the organizer issued never reached the
+   * buyer — on the row or on the receipt.
+   */
+  it('shows the number of the invoice the organizer issued, on the row and the receipt', async () => {
+    const invoiceNumber = 'INV-2026-0042';
+    await pool.query(
+      `INSERT INTO invoices (organization_id, number, order_id, event_id, buyer_name,
+                             buyer_email, issued_at, due_at, subtotal_satang,
+                             vat_amount_satang, amount_satang, status, paid_via, paid_on)
+       SELECT o.organization_id, $2, o.id, o.event_id, o.buyer_name, o.buyer_email,
+              current_date, current_date + 14, o.total_satang - o.vat_amount_satang,
+              o.vat_amount_satang, o.total_satang, 'paid', 'Card', current_date
+         FROM payments p JOIN orders o ON o.id = p.order_id WHERE p.id = $1`,
+      [paidPaymentId, invoiceNumber],
+    );
+    try {
+      const rows = ((await get('/me/payments', anan)).body as { data: Txn[] })
+        .data;
+      const paid = rows.find((r) => r.paymentId === paidPaymentId);
+      expect(paid?.invoiceNumber).toBe(invoiceNumber);
+      expect(paid?.reference).toMatch(/^ORD-/);
+      // An order nobody invoiced has no invoice number to show.
+      const other = rows.find((r) => r.paymentId !== paidPaymentId);
+      expect(other?.invoiceNumber).toBeNull();
+
+      const svg = (
+        (await get(`/me/payments/${paidPaymentId}/receipt.svg`, anan))
+          .body as Buffer
+      ).toString();
+      expect(svg).toContain('Invoice no.');
+      expect(svg).toContain(invoiceNumber);
+    } finally {
+      await pool.query(`DELETE FROM invoices WHERE number = $1`, [
+        invoiceNumber,
+      ]);
+    }
   });
 
   it('never lists a pending or failed attempt as a transaction', async () => {

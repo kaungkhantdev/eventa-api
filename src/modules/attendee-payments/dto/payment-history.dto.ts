@@ -47,9 +47,18 @@ export class TransactionDto {
 
   @ApiProperty({
     example: 'ORD-7K2M9QX4',
-    description: 'The invoice number shown on the receipt',
+    description: 'The order reference',
   })
   reference!: string;
+
+  @ApiProperty({
+    example: 'INV-2026-0001',
+    nullable: true,
+    type: String,
+    description:
+      'The number of the tax invoice the organizer issued for the order; null when none was issued',
+  })
+  invoiceNumber!: string | null;
 
   @ApiProperty({ example: 'Bangkok Tech Week' })
   eventName!: string;
