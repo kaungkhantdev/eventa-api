@@ -2230,6 +2230,68 @@ describe('Reports (e2e — US-RPT)', () => {
           await download(staffJwt, 'attendance.csv').expect(200);
         });
 
+        /** The export entries written so far for this workspace. */
+        const exportsAudited = async () =>
+          (
+            await pool.query<{
+              actor_user_id: string;
+              title: string;
+              meta: string | null;
+            }>(
+              `SELECT actor_user_id, title, meta FROM audit_events
+               WHERE organization_id = $1 AND type = 'xport' ORDER BY id`,
+              [orgId],
+            )
+          ).rows;
+
+        it('records who exported which report, and for which scope', async () => {
+          // US-RPT-12 AC3 / NFR-SUP-02: an export is an audited act.
+          await seedOrder({ event: galaId, seats: 2 });
+          const before = (await exportsAudited()).length;
+
+          await download(
+            adminJwt,
+            'registrations.csv',
+            `?eventId=${galaId}&q=gala`,
+          ).expect(200);
+
+          const written = (await exportsAudited()).slice(before);
+          const admin = await pool.query<{ id: string }>(
+            `SELECT id FROM users WHERE email = $1`,
+            [ADMIN],
+          );
+          expect(written).toHaveLength(1);
+          expect(written[0].actor_user_id).toBe(admin.rows[0].id);
+          expect(written[0].title).toBe(
+            'Exported the Registrations report (CSV, 1 row)',
+          );
+          expect(written[0].meta).toContain('Event: Charity Gala');
+          expect(written[0].meta).toContain('Search: gala');
+          expect(written[0].meta).toContain('Period: ');
+        });
+
+        it('records every report and format, not just one', async () => {
+          const before = (await exportsAudited()).length;
+          await file(adminJwt, 'income.xlsx').expect(200);
+          await file(adminJwt, 'events.pdf').expect(200);
+
+          const titles = (await exportsAudited())
+            .slice(before)
+            .map((row) => row.title);
+          expect(titles).toEqual([
+            'Exported the Income report (XLSX, 0 rows)',
+            expect.stringMatching(
+              /^Exported the Event performance report \(PDF, /,
+            ),
+          ]);
+        });
+
+        it('records nothing for an export that was refused', async () => {
+          const before = (await exportsAudited()).length;
+          await download(staffJwt, 'income.csv').expect(403);
+          expect(await exportsAudited()).toHaveLength(before);
+        });
+
         it('refuses the ledger’s file to a reader who may not export attendee data', async () => {
           // US-RPT-12 AC2: every ledger row names its payer, so its export
           // needs "Export attendee data" (regExport) on top of finance access.
