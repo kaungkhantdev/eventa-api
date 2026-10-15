@@ -143,10 +143,10 @@ export class OverviewReportService {
     return {
       period,
       kpis: {
-        // Confirmed seats, not every order state: a cancelled or rejected
-        // registration is not one the organizer holds, and counting it would
-        // make this tile RISE as people withdrew.
-        registrations: kpi(signUps.confirmed, signUpsBefore.confirmed),
+        // The registrations report's own total, not a subset of it: US-RPT-08
+        // and US-RPT-12 require the two screens to show the same figure for
+        // the same scope.
+        registrations: kpi(signUps.total, signUpsBefore.total),
         attendanceRate: kpi(attendanceRate(doors), attendanceRate(doorsBefore)),
         ...moneyKpis(takings),
       },

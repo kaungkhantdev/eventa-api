@@ -55,4 +55,33 @@ describe('PermissionsGuard', () => {
     expect(err).toBeInstanceOf(DomainException);
     expect((err as DomainException).getStatus()).toBe(403);
   });
+
+  it('tells a caller without "Export attendee data" exactly that (US-RPT-12)', async () => {
+    // AC2: told they don't have permission to export attendee data — not
+    // handed the key, which means nothing to the person reading the refusal.
+    reflector.getAllAndOverride.mockReturnValue(['finView', 'regExport']);
+    permissions.getFor.mockResolvedValue(['finView']);
+
+    const err = await guard
+      .canActivate(contextWith(auth))
+      .catch((e: unknown) => e);
+
+    expect((err as DomainException).getStatus()).toBe(403);
+    expect((err as DomainException).message).toBe(
+      "You don't have permission to export attendee data.",
+    );
+  });
+
+  it('names any other missing key as before', async () => {
+    reflector.getAllAndOverride.mockReturnValue(['evCreate']);
+    permissions.getFor.mockResolvedValue(['regView']);
+
+    const err = await guard
+      .canActivate(contextWith(auth))
+      .catch((e: unknown) => e);
+
+    expect((err as DomainException).message).toBe(
+      'Missing required permission: evCreate.',
+    );
+  });
 });

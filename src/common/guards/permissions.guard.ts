@@ -15,6 +15,16 @@ import {
 import { PermissionsService } from '../../modules/access/permissions.service';
 
 /**
+ * Refusals a story words itself, by the key that was missing. Any other key is
+ * named as it is. `regExport` is "Export attendee data", and US-RPT-12 AC2
+ * requires a reader without it to be told exactly that — the console shows the
+ * message as it arrives.
+ */
+const WORDED_REFUSALS: Partial<Record<PermissionKey, string>> = {
+  regExport: "You don't have permission to export attendee data.",
+};
+
+/**
  * Enforces `@RequirePermissions(...)` (every key) and `@RequireAnyPermission(...)`
  * (at least one key) server-side: loads the caller's granted keys and 403s if
  * the route's requirement is not met. Routes with no requirement pass through.
@@ -52,9 +62,7 @@ export class PermissionsGuard implements CanActivate {
     );
     const missing = required.filter((key) => !granted.includes(key));
     if (missing.length > 0) {
-      throw DomainException.forbidden(
-        `Missing required permission: ${missing.join(', ')}.`,
-      );
+      throw DomainException.forbidden(refusalFor(missing));
     }
     if (anyOf.length > 0 && !anyOf.some((key) => granted.includes(key))) {
       throw DomainException.forbidden(
@@ -63,4 +71,12 @@ export class PermissionsGuard implements CanActivate {
     }
     return true;
   }
+}
+
+/** The sentence for the first missing key a story words, else the key list. */
+function refusalFor(missing: PermissionKey[]): string {
+  const worded = missing
+    .map((key) => WORDED_REFUSALS[key])
+    .find((sentence) => sentence !== undefined);
+  return worded ?? `Missing required permission: ${missing.join(', ')}.`;
 }

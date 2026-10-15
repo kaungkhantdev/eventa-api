@@ -36,7 +36,7 @@ export interface EventPerformanceView {
   city: string | null;
   lifecycle: EventLifecycle;
   registrations: number;
-  /** Net of VAT and refunds. Null when the reader may not see money. */
+  /** The Income report's net. Null when the reader may not see money. */
   revenueSatang: number | null;
   /** Percent, or null where there is no honest figure. */
   attendanceRate: number | null;

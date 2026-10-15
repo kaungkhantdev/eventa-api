@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AccessModule } from '../access/access.module';
+import { AuditModule } from '../audit/audit.module';
 import { DiscountsModule } from '../discounts/discounts.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { PayoutsModule } from '../payouts/payouts.module';
@@ -30,8 +31,10 @@ import { ReportsController } from './reports.controller';
 @Module({
   // AccessModule for PermissionsService, which `PermissionsGuard` on the
   // controller needs: US-RPT-12 gates every report on a permission.
+  // AuditModule because US-RPT-12 also requires every export to be recorded.
   imports: [
     AccessModule,
+    AuditModule,
     DiscountsModule,
     PaymentsModule,
     PayoutsModule,

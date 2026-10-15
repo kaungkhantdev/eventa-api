@@ -48,13 +48,14 @@ const INCOME_BEFORE = {
   paidSeats: 250,
 };
 
+/** The four listed states sum to `total`; rejected sits outside it. */
 const split = (confirmed: number) => ({
   confirmed,
   pending: 12,
   waitlisted: 3,
   cancelled: 5,
   rejected: 1,
-  total: confirmed + 21,
+  total: confirmed + 20,
 });
 
 const attendance = (registered: number, checkedIn: number) => ({
@@ -115,12 +116,12 @@ describe('OverviewReportService (US-RPT-01)', () => {
   });
 
   describe('the five tiles', () => {
-    it('counts registrations as confirmed seats, not every order state', async () => {
-      // Pending, cancelled and rejected seats are not registrations the
-      // organizer holds; counting them would make the tile RISE as people
-      // withdraw.
+    it('counts registrations as the registrations report’s total', async () => {
+      // US-RPT-08 AC2 / US-RPT-12 AC5: the tile equals the registrations
+      // report's total for the same scope — the same figure, not a subset.
       const view = await service.load(auth, {});
-      expect(view.kpis.registrations.value).toBe(400);
+      expect(view.kpis.registrations.value).toBe(420);
+      expect(view.kpis.registrations.change.direction).toBe('up');
     });
 
     it('reports revenue as the income report’s net, unchanged', async () => {
@@ -283,7 +284,7 @@ describe('OverviewReportService (US-RPT-01)', () => {
 
     it('still reports the registration and attendance tiles', async () => {
       const view = await service.load(auth, {});
-      expect(view.kpis.registrations.value).toBe(400);
+      expect(view.kpis.registrations.value).toBe(420);
       expect(view.kpis.attendanceRate.value).toBe(80);
     });
   });

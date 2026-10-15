@@ -25,7 +25,7 @@ const money = {
   vatSatang: 7_000,
   refundsSatang: 10_000,
   feesSatang: 3_000,
-  netSatang: 90_000,
+  netSatang: 94_000,
   settledSatang: 87_000,
 };
 
@@ -105,17 +105,16 @@ describe('IncomeReportService', () => {
   });
 
   describe('the figures it reports', () => {
-    it('reconciles: net is gross less VAT and refunds', async () => {
-      // The definition the dashboard already uses, so the overview agrees.
+    it('reconciles: net is gross less refunds and fees (US-RPT-05)', async () => {
       const view = await serviceWith(portReturning().port).load(ORG, {});
       const t = view.totals;
-      expect(t.grossSatang - t.vatSatang - t.refundsSatang).toBe(t.netSatang);
+      expect(t.grossSatang - t.refundsSatang - t.feesSatang).toBe(t.netSatang);
     });
 
-    it('reconciles: settled is net less the provider’s fees', async () => {
+    it('reconciles: settled is net less VAT', async () => {
       const view = await serviceWith(portReturning().port).load(ORG, {});
       const t = view.totals;
-      expect(t.netSatang - t.feesSatang).toBe(t.settledSatang);
+      expect(t.netSatang - t.vatSatang).toBe(t.settledSatang);
     });
 
     it('totals the whole filter, not the page on screen', async () => {
@@ -132,7 +131,7 @@ describe('IncomeReportService', () => {
         matchedEvents: 30,
       });
       const view = await serviceWith(port).load(ORG, {});
-      expect(view.totals.netSatang).toBe(90_000);
+      expect(view.totals.netSatang).toBe(94_000);
     });
 
     it('reports a free event as zeros rather than hiding it', async () => {

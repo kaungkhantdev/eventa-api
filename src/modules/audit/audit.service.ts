@@ -27,10 +27,18 @@ export interface ListAuditQuery {
   subjectId?: number;
 }
 
+/** An export another module performed, as the trail should record it. */
+export interface ExportRecord {
+  /** What was exported, in words: the report, the format, how many rows. */
+  title: string;
+  /** For which scope: the filters the file was produced under. */
+  scope: string;
+}
+
 /**
  * The security & access audit log (US-SET-05). Append-only: this service can read
- * and export, and the only write it makes is recording an export — nothing in the
- * product edits or deletes an entry.
+ * and export, and the only write it makes is recording an export — its own, or a
+ * report's (US-RPT-12) — nothing in the product edits or deletes an entry.
  *
  * Visibility: an Admin (`setUsers`) sees the whole workspace; anyone else sees
  * only their own security events. The route itself carries no
@@ -84,6 +92,19 @@ export class AuditService {
       `Exported ${rows.length} audit entries`,
     );
     return { filename: exportName(range), csv: toCsv(rows) };
+  }
+
+  /**
+   * Record an export made elsewhere — every report file (US-RPT-12 AC3,
+   * NFR-SUP-02). Who is the caller, when is the entry's own timestamp.
+   */
+  async recordExport(auth: AuthContext, entry: ExportRecord): Promise<void> {
+    await this.repo.recordExport(
+      auth.organizationId,
+      auth.userId,
+      entry.title,
+      entry.scope,
+    );
   }
 
   /** Non-Admins are pinned to their own events. */
