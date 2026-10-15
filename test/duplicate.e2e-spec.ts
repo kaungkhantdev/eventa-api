@@ -178,6 +178,27 @@ describe('Duplicate event (e2e — US-EVT-13)', () => {
     expect(rows[0].speakers.map((s) => s.name)).toEqual(['Ada']);
   });
 
+  // The public page lists speakers in the order they were added (US-PAGE-04),
+  // so the copy must add them in the source's order, not alphabetically.
+  it('keeps the order the organizer added the speakers in', async () => {
+    const id = await createEvent(adminJwt, 'Speaker Order');
+    for (const name of ['Somchai', 'Ada', 'Malee']) {
+      await request(server)
+        .post(`/api/v1/events/${id}/speakers`)
+        .set(authHeader(adminJwt))
+        .send({ name })
+        .expect(201);
+    }
+    const copyId = ((await duplicate(id, adminJwt)).body as Success<Event>).data
+      .id;
+    const { rows } = await pool.query<{ name: string }>(
+      `SELECT name FROM speakers WHERE event_id = $1 AND deleted_at IS NULL
+        ORDER BY created_at, id`,
+      [copyId],
+    );
+    expect(rows.map((r) => r.name)).toEqual(['Somchai', 'Ada', 'Malee']);
+  });
+
   it('copies the seat map', async () => {
     const copyId = ((await duplicate(srcId, adminJwt)).body as Success<Event>)
       .data.id;

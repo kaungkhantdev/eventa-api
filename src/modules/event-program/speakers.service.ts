@@ -184,6 +184,10 @@ export class SpeakersService {
         tag: s.tag,
         initials: s.initials,
         tone: s.tone,
+        bio: s.bio,
+        photoUrl: s.photoUrl,
+        website: s.website,
+        socialLinks: s.socialLinks,
       };
       const copy = await this.repo.insert(values);
       idMap.set(s.id, copy.id);

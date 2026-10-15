@@ -337,7 +337,7 @@ export class TicketingService {
         isFree: t.isFree,
         priceSatang: t.priceSatang,
         currency: t.currency,
-        status: t.status,
+        status: this.statusOfCopy(t),
         admissionType: t.admissionType,
         total: t.total,
         salesStartAt: null,
@@ -348,6 +348,18 @@ export class TicketingService {
       };
       await this.repo.insert(values);
     }
+  }
+
+  /**
+   * A copied tier has sold nothing and has no sales window, so its availability
+   * is derived afresh rather than carried over: a sold-out or scheduled source
+   * tier is on sale on the copy, and only the organizer's `paused` survives.
+   */
+  private statusOfCopy(source: TicketRow): TicketStatus {
+    return this.policy.resolveStatus(
+      { ...source, sold: 0, salesStartAt: null, salesEndAt: null },
+      this.clock.now(),
+    );
   }
 
   private buildValues(input: UpdateTicketInput): Partial<NewTicketValues> {
