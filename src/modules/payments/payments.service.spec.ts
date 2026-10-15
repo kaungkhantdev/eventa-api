@@ -3,6 +3,7 @@ import { DomainException } from '../../common/errors/domain.exception';
 import type { Clock } from '../../common/time/clock';
 import type { Env } from '../../config/env.validation';
 import type { Tx } from '../../db/tenant';
+import type { OrderInvoicePort } from './ports/order-invoice.port';
 import type {
   OrderPaymentPort,
   PayableOrder,
@@ -108,6 +109,14 @@ function credentialsPort(): jest.Mocked<GatewayCredentialsPort> {
 
 const message = (e: unknown) => (e as DomainException).message;
 
+/** The order's invoice, kept in step with its money (US-FIN-06/07). */
+function invoicesDouble(): jest.Mocked<OrderInvoicePort> {
+  return {
+    markPaidIn: jest.fn().mockResolvedValue(undefined),
+    voidForRefundIn: jest.fn(),
+  };
+}
+
 /** Finishing a pending refund is RefundsService's job; this double stands in. */
 function refundsDouble(): jest.Mocked<RefundsService> {
   return {
@@ -119,6 +128,7 @@ describe('PaymentsService (US-DISC-05)', () => {
   let repo: jest.Mocked<PaymentsRepository>;
   let provider: jest.Mocked<PaymentProviderPort>;
   let orders: jest.Mocked<OrderPaymentPort>;
+  let invoices: jest.Mocked<OrderInvoicePort>;
   let merchants: jest.Mocked<MerchantAccountPort>;
   let credentials: jest.Mocked<GatewayCredentialsPort>;
   let refunds: jest.Mocked<RefundsService>;
@@ -156,6 +166,7 @@ describe('PaymentsService (US-DISC-05)', () => {
       queueRefund: jest.fn().mockResolvedValue(undefined),
       refundOrder: jest.fn(),
     };
+    invoices = invoicesDouble();
     merchants = merchantPort();
     credentials = credentialsPort();
     refunds = refundsDouble();
@@ -167,6 +178,7 @@ describe('PaymentsService (US-DISC-05)', () => {
       repo,
       provider,
       orders,
+      invoices,
       merchants,
       credentials,
       refunds,
@@ -450,6 +462,27 @@ describe('PaymentsService (US-DISC-05)', () => {
       );
     });
 
+    /**
+     * US-FIN-06: "Given a paid invoice, when I view its row, then it shows how
+     * and when it was paid". An invoice issued while the order was unpaid was
+     * only ever stamped at issue, so a buyer who then paid had it age to
+     * Overdue with nothing to say they had.
+     */
+    it('marks the order’s invoice paid, by how and when, inside that transaction', async () => {
+      const tx = {} as Tx;
+      orders.settle.mockImplementation(async (_org, _order, record) => {
+        await record(tx);
+        return { outcome: 'settled', reference: 'ORD-1', ticketCount: 2 };
+      });
+      await service.handleWebhook(WEBHOOK_TOKEN, raw, 'sig');
+      expect(invoices.markPaidIn).toHaveBeenCalledWith(tx, {
+        organizationId: ORG,
+        orderId: ORDER_ID,
+        method: 'Card',
+        paidAt: NOW,
+      });
+    });
+
     it('does not settle twice for a payment already marked paid', async () => {
       repo.findByGatewayRef.mockResolvedValue(paymentRow({ status: 'paid' }));
       await service.handleWebhook(WEBHOOK_TOKEN, raw, 'sig');
@@ -622,6 +655,7 @@ describe('PaymentsService — money-path defences', () => {
       repo,
       provider,
       orders,
+      invoicesDouble(),
       merchantPort(),
       credentialsPort(),
       refundsDouble(),

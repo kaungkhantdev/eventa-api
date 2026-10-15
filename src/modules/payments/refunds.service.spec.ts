@@ -1,6 +1,7 @@
 import { DomainException } from '../../common/errors/domain.exception';
 import type { Clock } from '../../common/time/clock';
 import type { AuthContext } from '../auth/auth.types';
+import type { OrderInvoicePort } from './ports/order-invoice.port';
 import type { OrderPaymentPort } from './ports/order-payment.port';
 import type { PaymentProviderPort } from './ports/payment-provider.port';
 import type { PaymentRow, RefundRow } from './payments.repository';
@@ -44,6 +45,7 @@ const refundRow = (o: Partial<RefundRow> = {}) =>
     orderId: 'o-1',
     amountSatang: TOTAL,
     status: 'pending',
+    issuedBy: 'admin-1',
     ...o,
   }) as RefundRow;
 
@@ -51,6 +53,7 @@ describe('RefundsService (US-FIN-02)', () => {
   let repo: jest.Mocked<PaymentsRepository>;
   let provider: jest.Mocked<PaymentProviderPort>;
   let orders: jest.Mocked<OrderPaymentPort>;
+  let invoices: jest.Mocked<OrderInvoicePort>;
   let service: RefundsService;
 
   beforeEach(() => {
@@ -82,8 +85,12 @@ describe('RefundsService (US-FIN-02)', () => {
           work({}).then(() => ({ ticketsVoided: 2, seatsReleased: 2 })),
         ),
     } as unknown as jest.Mocked<OrderPaymentPort>;
+    invoices = {
+      markPaidIn: jest.fn(),
+      voidForRefundIn: jest.fn().mockResolvedValue(undefined),
+    };
     const clock: Clock = { now: () => NOW };
-    service = new RefundsService(repo, provider, orders, clock);
+    service = new RefundsService(repo, provider, orders, invoices, clock);
   });
 
   const refund = (o: Record<string, unknown> = {}) =>
@@ -124,6 +131,32 @@ describe('RefundsService (US-FIN-02)', () => {
   });
 
   /**
+   * US-FIN-02: "Given the refund succeeds, when I look at the related invoice,
+   * then it is marked Void and no longer counts toward outstanding
+   * receivables". It used to stay Paid, because nothing on the way back
+   * touched the invoice at all.
+   */
+  it('voids the order’s invoice in the same transaction as the ledger', async () => {
+    const tx = {};
+    orders.refundOrder.mockImplementation((_o, _r, work) =>
+      work(tx as never).then(() => ({ ticketsVoided: 2, seatsReleased: 2 })),
+    );
+    await refund();
+    expect(invoices.voidForRefundIn).toHaveBeenCalledWith(tx, {
+      organizationId: ORG,
+      orderId: 'o-1',
+      actorUserId: 'admin-1',
+      now: NOW,
+    });
+  });
+
+  it('leaves the invoice alone when the refund was finished elsewhere', async () => {
+    repo.markRefundedIn.mockResolvedValue(false);
+    await refund().catch(() => undefined);
+    expect(invoices.voidForRefundIn).not.toHaveBeenCalled();
+  });
+
+  /**
    * The documented duplicate: the old PromptPay QR scanned after the card had
    * paid. The buyer paid once — refunding the extra payment must not take
    * away the tickets the other one bought.
@@ -140,6 +173,8 @@ describe('RefundsService (US-FIN-02)', () => {
       now: NOW,
     });
     expect(orders.refundOrder).not.toHaveBeenCalled();
+    // The buyer keeps what the other payment bought — and its invoice.
+    expect(invoices.voidForRefundIn).not.toHaveBeenCalled();
     expect(result.status).toBe('succeeded');
   });
 

@@ -3,6 +3,7 @@ import { DomainException } from '../../common/errors/domain.exception';
 import { ErrorCode } from '../../common/errors/error-codes';
 import { Clock } from '../../common/time/clock';
 import type { AuthContext } from '../auth/auth.types';
+import { OrderInvoicePort } from './ports/order-invoice.port';
 import { OrderPaymentPort } from './ports/order-payment.port';
 import { PaymentProviderPort } from './ports/payment-provider.port';
 import type {
@@ -73,7 +74,8 @@ class RefundNoLongerPending extends Error {}
  *    call inside one holds locks for as long as Stripe takes to answer.
  * 3. **Then free the inventory in ONE transaction** with the ledger write: the
  *    payment flips to refunded, the tickets are voided and their seats go back,
- *    and the refund row is marked succeeded — together or not at all. The
+ *    the order's invoice is voided, and the refund row is marked succeeded —
+ *    together or not at all. The
  *    exception is a duplicate payment, while another paid payment still
  *    covers the order: only its own ledger lines flip, because the buyer paid
  *    once and keeps what they bought.
@@ -98,6 +100,7 @@ export class RefundsService {
     private readonly repo: PaymentsRepository,
     private readonly provider: PaymentProviderPort,
     private readonly orders: OrderPaymentPort,
+    private readonly invoices: OrderInvoicePort,
     private readonly clock: Clock,
   ) {}
 
@@ -289,9 +292,10 @@ export class RefundsService {
    * finished the refund first; nothing is written then.
    *
    * A duplicate payment — another payment still covers the order — flips only
-   * its own ledger lines: the buyer paid once and keeps what they bought. Only
-   * the refund of the order's last paid payment voids its tickets and returns
-   * their stock, in ONE transaction with the ledger.
+   * its own ledger lines: the buyer paid once and keeps what they bought, and
+   * the invoice for it. Only the refund of the order's last paid payment voids
+   * its tickets, returns their stock and voids its invoice (US-FIN-02), in ONE
+   * transaction with the ledger.
    */
   private async completeRefund(
     refund: RefundRow,
@@ -324,6 +328,12 @@ export class RefundsService {
           if (!(await this.repo.markRefundedIn(tx, ledger))) {
             throw new RefundNoLongerPending();
           }
+          await this.invoices.voidForRefundIn(tx, {
+            organizationId: refund.organizationId,
+            orderId: refund.orderId,
+            actorUserId: refund.issuedBy,
+            now: ledger.now,
+          });
         },
       );
       return true;

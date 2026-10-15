@@ -5,10 +5,12 @@ import { formatBaht } from '../../common/money/baht';
 import { Clock } from '../../common/time/clock';
 import { ticketsUrlFor } from '../checkout/ticket-links';
 import type { Env } from '../../config/env.validation';
+import type { Tx } from '../../db/tenant';
 import type { PayOrderDto } from './dto/pay-order.dto';
 import type { PaymentIntentDto } from './dto/payment-intent.dto';
 import { GatewayCredentialsPort } from './ports/gateway-credentials.port';
 import { MerchantAccountPort } from './ports/merchant-account.port';
+import { OrderInvoicePort } from './ports/order-invoice.port';
 import {
   OrderPaymentPort,
   type PayableOrder,
@@ -95,6 +97,7 @@ export class PaymentsService {
     private readonly repo: PaymentsRepository,
     private readonly provider: PaymentProviderPort,
     private readonly orders: OrderPaymentPort,
+    private readonly invoices: OrderInvoicePort,
     private readonly merchants: MerchantAccountPort,
     private readonly credentials: GatewayCredentialsPort,
     private readonly refunds: RefundsService,
@@ -281,7 +284,7 @@ export class PaymentsService {
       const result = await this.orders.settle(
         payment.organizationId,
         payment.orderId,
-        (tx) => this.repo.markPaidIn(tx, payment.id, this.clock.now()),
+        (tx) => this.recordPaid(tx, payment),
       );
       if (result.outcome === 'refund_required') {
         this.logger.warn(
@@ -298,6 +301,23 @@ export class PaymentsService {
       payment.organizationId,
       'processed',
     );
+  }
+
+  /**
+   * Inside the settlement transaction: the ledger line flips to paid, and so
+   * does an invoice already issued against the order (US-FIN-06/07) — it was
+   * stamped at issue, when nothing had been paid yet, and would otherwise age
+   * to Overdue on a buyer who has paid.
+   */
+  private async recordPaid(tx: Tx, payment: PaymentRow): Promise<void> {
+    const paidAt = this.clock.now();
+    await this.repo.markPaidIn(tx, payment.id, paidAt);
+    await this.invoices.markPaidIn(tx, {
+      organizationId: payment.organizationId,
+      orderId: payment.orderId,
+      method: payment.method,
+      paidAt,
+    });
   }
 
   /**
