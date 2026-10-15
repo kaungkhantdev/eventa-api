@@ -4,6 +4,11 @@ export interface MerchantAccount {
   connected: boolean;
   /** The provider's connected-account reference (`acct_…`) — never a secret. */
   accountId: string | null;
+  /**
+   * The label attendees see on their card statement, as saved on Settings →
+   * Payments (US-SET-10); null when none was saved there.
+   */
+  statementDescriptor: string | null;
 }
 
 /**

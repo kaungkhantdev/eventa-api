@@ -216,6 +216,34 @@ describe('Paying for an order (e2e — US-DISC-05)', () => {
       expect(Date.parse(intent.expiresAt ?? '')).toBeGreaterThan(Date.now());
     });
 
+    /**
+     * US-SET-10: the label saved on Settings → Payments "appears on attendees'
+     * card statements for later charges". Only the Organization page's own
+     * field (EVENTA*SUMMIT, seeded below) ever reached the provider.
+     */
+    it('charges under the statement label saved on Settings → Payments', async () => {
+      const provider = app.get(PaymentProviderPort);
+      const start = jest.spyOn(provider, 'start');
+      await pool.query(
+        `UPDATE payment_settings SET statement_descriptor = 'PAYE2E LABEL'
+         WHERE organization_id = $1`,
+        [orgId],
+      );
+      try {
+        await pay(await placeOrder());
+        expect(start).toHaveBeenCalledWith(
+          expect.objectContaining({ statementDescriptor: 'PAYE2E LABEL' }),
+        );
+      } finally {
+        start.mockRestore();
+        await pool.query(
+          `UPDATE payment_settings SET statement_descriptor = NULL
+           WHERE organization_id = $1`,
+          [orgId],
+        );
+      }
+    });
+
     it('ignores any amount a hostile client tries to send', async () => {
       const orderId = await placeOrder();
       const res = await request(server)

@@ -23,6 +23,10 @@ export class MerchantAccountAdapter extends MerchantAccountPort {
     // platform charge wearing a workspace's label.
     const connected =
       settings.status === 'connected' && Boolean(settings.accountId);
-    return { connected, accountId: settings.accountId ?? null };
+    return {
+      connected,
+      accountId: settings.accountId ?? null,
+      statementDescriptor: settings.statementDescriptor ?? null,
+    };
   }
 }

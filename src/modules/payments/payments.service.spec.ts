@@ -89,9 +89,12 @@ function merchantPort(
   account: Partial<MerchantAccount> = {},
 ): jest.Mocked<MerchantAccountPort> {
   return {
-    findAccount: jest
-      .fn()
-      .mockResolvedValue({ connected: true, accountId: ACCOUNT, ...account }),
+    findAccount: jest.fn().mockResolvedValue({
+      connected: true,
+      accountId: ACCOUNT,
+      statementDescriptor: null,
+      ...account,
+    }),
   };
 }
 
@@ -242,6 +245,23 @@ describe('PaymentsService (US-DISC-05)', () => {
     });
 
     /**
+     * US-SET-10: the label an Admin saves on Settings → Payments "appears on
+     * attendees' card statements for later charges". Only the duplicate field
+     * on the Organization page ever reached the provider.
+     */
+    it('charges under the statement label saved on Settings → Payments', async () => {
+      merchants.findAccount.mockResolvedValue({
+        connected: true,
+        accountId: ACCOUNT,
+        statementDescriptor: 'MY LABEL',
+      });
+      await pay();
+      expect(provider.start).toHaveBeenCalledWith(
+        expect.objectContaining({ statementDescriptor: 'MY LABEL' }),
+      );
+    });
+
+    /**
      * The provider is not told WHICH account to use — it authenticates as the
      * workspace with that workspace's own key. What this service still owes is
      * the check that there IS one, before a buyer is sent to a payment page
@@ -273,6 +293,7 @@ describe('PaymentsService (US-DISC-05)', () => {
         merchants.findAccount.mockResolvedValue({
           connected: false,
           accountId: null,
+          statementDescriptor: null,
         });
         await expect(pay()).rejects.toBeInstanceOf(DomainException);
         expect(provider.start).not.toHaveBeenCalled();
@@ -282,6 +303,7 @@ describe('PaymentsService (US-DISC-05)', () => {
         merchants.findAccount.mockResolvedValue({
           connected: false,
           accountId: null,
+          statementDescriptor: null,
         });
         // The buyer cannot fix this and did nothing wrong, so the message
         // names the organizer's setup rather than blaming the attempt.
@@ -296,6 +318,7 @@ describe('PaymentsService (US-DISC-05)', () => {
         merchants.findAccount.mockResolvedValue({
           connected: true,
           accountId: null,
+          statementDescriptor: null,
         });
         await expect(pay()).rejects.toBeInstanceOf(DomainException);
         expect(provider.start).not.toHaveBeenCalled();

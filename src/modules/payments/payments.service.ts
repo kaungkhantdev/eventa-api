@@ -9,7 +9,10 @@ import type { Tx } from '../../db/tenant';
 import type { PayOrderDto } from './dto/pay-order.dto';
 import type { PaymentIntentDto } from './dto/payment-intent.dto';
 import { GatewayCredentialsPort } from './ports/gateway-credentials.port';
-import { MerchantAccountPort } from './ports/merchant-account.port';
+import {
+  MerchantAccountPort,
+  type MerchantAccount,
+} from './ports/merchant-account.port';
 import { OrderInvoicePort } from './ports/order-invoice.port';
 import {
   OrderPaymentPort,
@@ -110,7 +113,7 @@ export class PaymentsService {
   /** Start collecting. Safe to replay — the idempotency key finds its own attempt. */
   async pay(input: PayOrderDto): Promise<PaymentIntentDto> {
     const order = await this.requirePayable(input.orderId);
-    const accountId = await this.requireMerchantAccount(order.organizationId);
+    const account = await this.requireMerchantAccount(order.organizationId);
     const started = await this.provider.start({
       orderId: order.id,
       organizationId: order.organizationId,
@@ -118,8 +121,9 @@ export class PaymentsService {
       currency: order.currency,
       method: input.method,
       buyerEmail: order.buyerEmail,
-      statementDescriptor: await this.repo.orgStatementDescriptor(
+      statementDescriptor: await this.statementDescriptorFor(
         order.organizationId,
+        account,
       ),
       description: order.eventName,
       // Where the provider sends the buyer back: their own copy of the order,
@@ -138,7 +142,7 @@ export class PaymentsService {
       gatewayRef: started.gatewayRef,
       // Stamped now, so the refund reverses on this account however the
       // workspace's settings row changes later.
-      gatewayAccountId: accountId,
+      gatewayAccountId: account.accountId,
       statementDescriptor: null,
       idempotencyKey: input.idempotencyKey,
       status: started.status === 'failed' ? 'failed' : 'pending',
@@ -377,12 +381,26 @@ export class PaymentsService {
    */
   private async requireMerchantAccount(
     organizationId: number,
-  ): Promise<string> {
+  ): Promise<MerchantAccount & { accountId: string }> {
     const account = await this.merchants.findAccount(organizationId);
     if (!account.connected || !account.accountId) {
       throw DomainException.conflict(NO_MERCHANT_ACCOUNT);
     }
-    return account.accountId;
+    return { ...account, accountId: account.accountId };
+  }
+
+  /**
+   * What the buyer's card statement shows (US-SET-10): the label saved on
+   * Settings → Payments, else the one on the workspace's organization record.
+   */
+  private async statementDescriptorFor(
+    organizationId: number,
+    account: MerchantAccount,
+  ): Promise<string | null> {
+    return (
+      account.statementDescriptor ??
+      (await this.repo.orgStatementDescriptor(organizationId))
+    );
   }
 
   private async requirePayable(orderId: string): Promise<PayableOrder> {
