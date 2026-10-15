@@ -460,6 +460,38 @@ describe('Access / RBAC management (e2e)', () => {
         .send({ token: inviteToken, password: INVITEE_PW });
       expect(res.status).toBe(401);
     });
+
+    /*
+     * US-SET-11: "Given a member who should leave, when I confirm removal,
+     * then their access ends immediately … they can be re-invited later."
+     *
+     * Removal soft-deletes the user row and leaves its email in place, and
+     * `uq_users_org_email_persona` used to cover deleted rows too — so the
+     * re-invite inserted a duplicate (org, email, persona) and answered 500.
+     */
+    it('re-invites somebody who was removed (201, Invited again)', async () => {
+      interface Member {
+        id: number;
+        status: string;
+      }
+      const LEAVER = 'leaver@access-e2e.test';
+      const jwt = await token(ADMIN);
+      const first = await invite(jwt, LEAVER);
+      expect(first.status).toBe(201);
+      const memberId = (first.body as Success<{ member: Member }>).data.member
+        .id;
+
+      await request(server)
+        .delete(`/api/v1/members/${memberId}`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .expect(200);
+
+      const again = await invite(jwt, LEAVER);
+      expect(again.status).toBe(201);
+      const member = (again.body as Success<{ member: Member }>).data.member;
+      expect(member.status).toBe('Invited');
+      expect(member.id).not.toBe(memberId);
+    });
   });
 });
 

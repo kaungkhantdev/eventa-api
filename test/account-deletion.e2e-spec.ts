@@ -163,6 +163,32 @@ describe('Delete my account (e2e — US-DISC-14)', () => {
     expect(gone.status).toBe(401);
   });
 
+  /*
+   * US-DISC-15: "Given I have no account, when I am on the attendee sign-in
+   * page, then I can create one from there." A deleted account is no account.
+   * The deleted row keeps its email, and `uq_users_org_email_persona` used to
+   * cover deleted rows as well, so this sign-up hit a unique violation and
+   * answered 500.
+   */
+  it('a deleted attendee can sign up again with the same email', async () => {
+    const res = await request(server).post('/api/v1/auth/register').send({
+      name: 'Anan Again',
+      email: ANAN,
+      password: 'a fresh start 2',
+      persona: 'attendee',
+      acceptTerms: true,
+    });
+    expect(res.status).toBe(202);
+
+    const rows = await pool.query<{ deleted_at: Date | null }>(
+      `SELECT deleted_at FROM users WHERE email = $1 AND persona = 'attendee'
+       ORDER BY created_at`,
+      [ANAN],
+    );
+    // The deleted account is kept for the record; a new live one sits beside it.
+    expect(rows.rows.map((r) => r.deleted_at === null)).toEqual([false, true]);
+  });
+
   it('with 2FA enrolled, deletion demands the code and honours it', async () => {
     const { accessToken } = await login(BOON);
     const jwt = accessToken as string;
