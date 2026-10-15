@@ -1,5 +1,9 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { seatingModeEnum, ticketStatusEnum } from '../../../db/schema';
+import {
+  PAYMENT_METHOD_CHOICES,
+  type PaymentMethodChoice,
+} from '../../payments/ports/payment-provider.port';
 
 /** The event, as the checkout header shows it. */
 export class CheckoutEventDto {
@@ -164,4 +168,12 @@ export class CheckoutViewDto {
 
   @ApiProperty({ description: 'False when every selectable tier is free' })
   paymentRequired!: boolean;
+
+  @ApiProperty({
+    enum: PAYMENT_METHOD_CHOICES,
+    isArray: true,
+    description:
+      'The ways to pay this workspace has switched on that checkout can collect (US-SET-09)',
+  })
+  paymentMethods!: PaymentMethodChoice[];
 }

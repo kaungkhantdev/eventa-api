@@ -6,6 +6,12 @@ export type PaymentMethodChoice = Extract<
   'Card' | 'PromptPay'
 >;
 
+/** The same methods as a list — every one checkout can collect. */
+export const PAYMENT_METHOD_CHOICES: readonly PaymentMethodChoice[] = [
+  'Card',
+  'PromptPay',
+];
+
 /** What the provider is asked to collect. Note what is absent: any card detail. */
 export interface StartPaymentInput {
   orderId: string;

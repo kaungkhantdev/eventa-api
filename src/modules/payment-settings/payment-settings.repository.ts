@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { paymentMethodSettings, paymentSettings } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
@@ -79,7 +79,7 @@ export class PaymentSettingsRepository {
     );
   }
 
-  /** Enable/disable one method (upsert — an absent row means disabled). */
+  /** Enable/disable one method (upsert — an absent row takes its default). */
   async setMethod(
     organizationId: number,
     method: PaymentMethod,
@@ -97,20 +97,5 @@ export class PaymentSettingsRepository {
           set: { enabled, updatedAt: new Date() },
         });
     });
-  }
-
-  async countEnabledMethods(organizationId: number): Promise<number> {
-    const rows = await withTenant(this.db, organizationId, (tx) =>
-      tx
-        .select({ method: paymentMethodSettings.method })
-        .from(paymentMethodSettings)
-        .where(
-          and(
-            eq(paymentMethodSettings.organizationId, organizationId),
-            eq(paymentMethodSettings.enabled, true),
-          ),
-        ),
-    );
-    return rows.length;
   }
 }

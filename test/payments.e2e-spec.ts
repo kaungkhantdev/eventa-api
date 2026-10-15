@@ -244,6 +244,44 @@ describe('Paying for an order (e2e — US-DISC-05)', () => {
       }
     });
 
+    /**
+     * US-SET-09: "Given I disable a method, when new orders are placed, then
+     * that method no longer appears at checkout." Checkout offered Card and
+     * PromptPay whatever the workspace had switched off.
+     */
+    it('no longer offers or takes a method the workspace switched off', async () => {
+      const offered = async () => {
+        const res = await request(server).get(
+          `/api/v1/public/checkout/${SUMMIT}`,
+        );
+        expect(res.status).toBe(200);
+        return (res.body as Success<{ paymentMethods: string[] }>).data
+          .paymentMethods;
+      };
+      expect(await offered()).toEqual(['Card', 'PromptPay']);
+
+      await pool.query(
+        `INSERT INTO payment_method_settings (organization_id, method, enabled)
+         VALUES ($1, 'PromptPay', false)`,
+        [orgId],
+      );
+      try {
+        expect(await offered()).toEqual(['Card']);
+        const orderId = await placeOrder();
+        const refused = await pay(orderId, 'PromptPay');
+        expect(refused.status).toBe(409);
+        expect((refused.body as { message: string }).message).toMatch(
+          /PromptPay/,
+        );
+        expect((await pay(orderId, 'Card')).status).toBe(201);
+      } finally {
+        await pool.query(
+          `DELETE FROM payment_method_settings WHERE organization_id = $1`,
+          [orgId],
+        );
+      }
+    });
+
     it('ignores any amount a hostile client tries to send', async () => {
       const orderId = await placeOrder();
       const res = await request(server)

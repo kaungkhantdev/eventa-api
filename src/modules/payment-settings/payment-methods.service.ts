@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { DomainException } from '../../common/errors/domain.exception';
 import { paymentMethodEnum } from '../../db/schema';
+import {
+  PAYMENT_METHOD_CHOICES,
+  type PaymentMethodChoice,
+} from '../payments/ports/payment-provider.port';
 import { PaymentSettingsRepository } from './payment-settings.repository';
 import type { PaymentMethod } from './payment-settings.types';
 import { TicketSalesPort } from './ports/ticket-sales.port';
@@ -10,6 +14,19 @@ const ALL_METHODS = paymentMethodEnum.enumValues;
 
 /** Wallets ride on a connected provider account; they can't stand alone. */
 const WALLET_METHODS: readonly PaymentMethod[] = ['Apple Pay', 'Google Pay'];
+
+/**
+ * The methods checkout can actually collect, which are also the ones it has
+ * always offered. With no stored row they are ON: reading an absent row as
+ * "off" now that checkout honours these switches would take every way to pay
+ * away from every workspace that never visited this screen. Every other
+ * method needs turning on.
+ */
+const CHECKOUT_METHODS = PAYMENT_METHOD_CHOICES;
+
+function onByDefault(method: PaymentMethod): boolean {
+  return (CHECKOUT_METHODS as readonly PaymentMethod[]).includes(method);
+}
 
 export interface PaymentMethodView {
   method: PaymentMethod;
@@ -27,14 +44,28 @@ export class PaymentMethodsService {
     private readonly sales: TicketSalesPort,
   ) {}
 
-  /** All known methods; a method with no stored row is simply disabled. */
+  /** All known methods; one with no stored row takes its default. */
   async list(organizationId: number): Promise<PaymentMethodView[]> {
     const stored = await this.repo.listMethods(organizationId);
     const enabled = new Map(stored.map((r) => [r.method, r.enabled]));
     return ALL_METHODS.map((method) => ({
       method,
-      enabled: enabled.get(method) ?? false,
+      enabled: enabled.get(method) ?? onByDefault(method),
     }));
+  }
+
+  /**
+   * What checkout offers (US-SET-09): the methods it can collect that are
+   * switched on. A wallet switched on is not among them — no checkout takes
+   * one yet.
+   */
+  async acceptedAtCheckout(
+    organizationId: number,
+  ): Promise<PaymentMethodChoice[]> {
+    const methods = await this.list(organizationId);
+    return CHECKOUT_METHODS.filter((method) =>
+      methods.some((m) => m.method === method && m.enabled),
+    );
   }
 
   async setEnabled(
@@ -66,7 +97,8 @@ export class PaymentMethodsService {
   private async assertNotLastWhileSelling(
     organizationId: number,
   ): Promise<void> {
-    if ((await this.repo.countEnabledMethods(organizationId)) > 1) return;
+    const methods = await this.list(organizationId);
+    if (methods.filter((m) => m.enabled).length > 1) return;
     if (!(await this.sales.hasPaidTickets(organizationId))) return;
     throw DomainException.validation(
       'Keep at least one payment method enabled while you sell paid tickets.',

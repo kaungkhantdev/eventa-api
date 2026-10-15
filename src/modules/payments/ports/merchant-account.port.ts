@@ -1,3 +1,5 @@
+import type { PaymentMethodChoice } from './payment-provider.port';
+
 /** The workspace's account at the provider, as the till needs it. */
 export interface MerchantAccount {
   /** Whether this workspace can take money at all. */
@@ -9,6 +11,11 @@ export interface MerchantAccount {
    * Payments (US-SET-10); null when none was saved there.
    */
   statementDescriptor: string | null;
+  /**
+   * The ways to pay the workspace has switched on that checkout can collect
+   * (US-SET-09). A method missing here is refused.
+   */
+  acceptedMethods: readonly PaymentMethodChoice[];
 }
 
 /**

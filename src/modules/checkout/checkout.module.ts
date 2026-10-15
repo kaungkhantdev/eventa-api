@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { DiscountsModule } from '../discounts/discounts.module';
+import { PaymentSettingsModule } from '../payment-settings/payment-settings.module';
 import { PlatformModule } from '../platform/platform.module';
 import { EventsModule } from '../events/events.module';
 import { RegistrationModule } from '../registration/registration.module';
@@ -31,7 +32,7 @@ import { WaitlistOffersAdapter } from './waitlist-offers.adapter';
  * the buyer sees and loads the context every action starts from;
  * `CheckoutService` prices a selection and reserves it.
  *
- * It consumes four things and owns none of them. Three are consumer-owned ports,
+ * It consumes five things and owns none of them. Four are consumer-owned ports,
  * bound by the module that owns the data:
  *   · `CheckoutEventPort` (Events) — what is being sold, and which workspace owns
  *     it. Resolving the event IS the authorization check on this anonymous
@@ -39,7 +40,10 @@ import { WaitlistOffersAdapter } from './waitlist-offers.adapter';
  *   · `TicketCatalogPort` (Ticketing) — the price, read at the moment of use, with
  *     a live-derived status so a tier that just sold out cannot be bought.
  *   · `SeatMapPort` (Registration) — which seats can be picked right now.
- * The fourth is a plain service dependency: `SeatHoldService` for the row-locked
+ *   · `CheckoutPaymentMethodsPort` (PaymentSettings) — which ways to pay the
+ *     workspace has switched on (US-SET-09). PaymentSettings reaches Ticketing,
+ *     which reaches back here, so that edge is a `forwardRef` too.
+ * The fifth is a plain service dependency: `SeatHoldService` for the row-locked
  * reservation, and `DiscountRedemptionService` for what a code is worth.
  *
  * Ticketing and Checkout reference each other (`forwardRef`): Checkout reads
@@ -57,6 +61,7 @@ import { WaitlistOffersAdapter } from './waitlist-offers.adapter';
     RegistrationModule,
     DiscountsModule,
     PlatformModule,
+    forwardRef(() => PaymentSettingsModule),
   ],
   controllers: [CheckoutController, GuestOrderController],
   providers: [

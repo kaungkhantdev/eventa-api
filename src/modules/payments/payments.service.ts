@@ -44,6 +44,10 @@ export interface WebhookAck {
 const NO_MERCHANT_ACCOUNT =
   'This event cannot take payment yet — the organizer has not finished connecting their payment account.';
 
+/** Written for the buyer: the organizer turned this way to pay off (US-SET-09). */
+const methodOff = (method: string): string =>
+  `This event doesn't take ${method} — please choose another way to pay.`;
+
 /** A refund callback carries a REFUND's reference, not a payment's. */
 type RefundWebhook = VerifiedWebhook & { type: RefundWebhookType };
 
@@ -69,6 +73,17 @@ const WEBHOOK_STATUS_FOR: Readonly<
   amount_mismatch: 'failed',
   failed_after_settled: 'failed',
 };
+
+/**
+ * A method the workspace switched off is refused (US-SET-09). Checkout no
+ * longer offers it; this is the control behind that, for a page left open or a
+ * request made by hand.
+ */
+function assertAccepted(account: MerchantAccount, method: string): void {
+  if (!(account.acceptedMethods as readonly string[]).includes(method)) {
+    throw DomainException.conflict(methodOff(method));
+  }
+}
 
 function isRefundWebhook(verified: VerifiedWebhook): verified is RefundWebhook {
   return (REFUND_WEBHOOK_TYPES as readonly string[]).includes(verified.type);
@@ -114,6 +129,7 @@ export class PaymentsService {
   async pay(input: PayOrderDto): Promise<PaymentIntentDto> {
     const order = await this.requirePayable(input.orderId);
     const account = await this.requireMerchantAccount(order.organizationId);
+    assertAccepted(account, input.method);
     const started = await this.provider.start({
       orderId: order.id,
       organizationId: order.organizationId,

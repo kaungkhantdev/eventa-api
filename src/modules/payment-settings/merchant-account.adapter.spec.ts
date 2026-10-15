@@ -1,3 +1,4 @@
+import type { PaymentMethodsService } from './payment-methods.service';
 import type { PaymentSettingsRepository } from './payment-settings.repository';
 import type { PaymentSettingsRow } from './payment-settings.types';
 import { MerchantAccountAdapter } from './merchant-account.adapter';
@@ -16,13 +17,17 @@ function settings(o: Partial<PaymentSettingsRow> = {}): PaymentSettingsRow {
 
 describe('MerchantAccountAdapter (US-SET-08, US-SET-10)', () => {
   let repo: jest.Mocked<PaymentSettingsRepository>;
+  let methods: jest.Mocked<PaymentMethodsService>;
   let adapter: MerchantAccountAdapter;
 
   beforeEach(() => {
     repo = {
       findOrCreate: jest.fn().mockResolvedValue(settings()),
     } as unknown as jest.Mocked<PaymentSettingsRepository>;
-    adapter = new MerchantAccountAdapter(repo);
+    methods = {
+      acceptedAtCheckout: jest.fn().mockResolvedValue(['Card', 'PromptPay']),
+    } as unknown as jest.Mocked<PaymentMethodsService>;
+    adapter = new MerchantAccountAdapter(repo, methods);
   });
 
   it('names the connected account a charge is made on', async () => {
@@ -44,6 +49,17 @@ describe('MerchantAccountAdapter (US-SET-08, US-SET-10)', () => {
     expect((await adapter.findAccount(ORG)).statementDescriptor).toBe(
       'EVENTA*SUMMIT',
     );
+  });
+
+  /**
+   * US-SET-09: "Given I disable a method, when new orders are placed, then
+   * that method no longer appears at checkout." The till has to know which
+   * ones are switched on to refuse the rest.
+   */
+  it('carries the methods the workspace takes at checkout', async () => {
+    methods.acceptedAtCheckout.mockResolvedValue(['Card']);
+    expect((await adapter.findAccount(ORG)).acceptedMethods).toEqual(['Card']);
+    expect(methods.acceptedAtCheckout).toHaveBeenCalledWith(ORG);
   });
 
   it('carries no label when none was saved', async () => {

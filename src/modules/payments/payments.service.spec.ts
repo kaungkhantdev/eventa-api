@@ -93,6 +93,7 @@ function merchantPort(
       connected: true,
       accountId: ACCOUNT,
       statementDescriptor: null,
+      acceptedMethods: ['Card', 'PromptPay'],
       ...account,
     }),
   };
@@ -254,11 +255,31 @@ describe('PaymentsService (US-DISC-05)', () => {
         connected: true,
         accountId: ACCOUNT,
         statementDescriptor: 'MY LABEL',
+        acceptedMethods: ['Card', 'PromptPay'],
       });
       await pay();
       expect(provider.start).toHaveBeenCalledWith(
         expect.objectContaining({ statementDescriptor: 'MY LABEL' }),
       );
+    });
+
+    /**
+     * US-SET-09: "Given I disable a method, when new orders are placed, then
+     * that method no longer appears at checkout." Hiding it on the page is not
+     * the control — a request naming it is refused here.
+     */
+    it('refuses a method the workspace switched off, before asking the provider', async () => {
+      merchants.findAccount.mockResolvedValue({
+        connected: true,
+        accountId: ACCOUNT,
+        statementDescriptor: null,
+        acceptedMethods: ['Card'],
+      });
+      const err = await pay({ method: 'PromptPay' }).catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(409);
+      expect(message(err)).toMatch(/PromptPay/);
+      expect(provider.start).not.toHaveBeenCalled();
+      expect(repo.upsertAttempt).not.toHaveBeenCalled();
     });
 
     /**
@@ -294,6 +315,7 @@ describe('PaymentsService (US-DISC-05)', () => {
           connected: false,
           accountId: null,
           statementDescriptor: null,
+          acceptedMethods: ['Card', 'PromptPay'],
         });
         await expect(pay()).rejects.toBeInstanceOf(DomainException);
         expect(provider.start).not.toHaveBeenCalled();
@@ -304,6 +326,7 @@ describe('PaymentsService (US-DISC-05)', () => {
           connected: false,
           accountId: null,
           statementDescriptor: null,
+          acceptedMethods: ['Card', 'PromptPay'],
         });
         // The buyer cannot fix this and did nothing wrong, so the message
         // names the organizer's setup rather than blaming the attempt.
@@ -319,6 +342,7 @@ describe('PaymentsService (US-DISC-05)', () => {
           connected: true,
           accountId: null,
           statementDescriptor: null,
+          acceptedMethods: ['Card', 'PromptPay'],
         });
         await expect(pay()).rejects.toBeInstanceOf(DomainException);
         expect(provider.start).not.toHaveBeenCalled();

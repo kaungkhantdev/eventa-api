@@ -3,6 +3,7 @@ import {
   type MerchantAccount,
   MerchantAccountPort,
 } from '../payments/ports/merchant-account.port';
+import { PaymentMethodsService } from './payment-methods.service';
 import { PaymentSettingsRepository } from './payment-settings.repository';
 
 /**
@@ -12,7 +13,10 @@ import { PaymentSettingsRepository } from './payment-settings.repository';
  */
 @Injectable()
 export class MerchantAccountAdapter extends MerchantAccountPort {
-  constructor(private readonly repo: PaymentSettingsRepository) {
+  constructor(
+    private readonly repo: PaymentSettingsRepository,
+    private readonly methods: PaymentMethodsService,
+  ) {
     super();
   }
 
@@ -27,6 +31,7 @@ export class MerchantAccountAdapter extends MerchantAccountPort {
       connected,
       accountId: settings.accountId ?? null,
       statementDescriptor: settings.statementDescriptor ?? null,
+      acceptedMethods: await this.methods.acceptedAtCheckout(organizationId),
     };
   }
 }

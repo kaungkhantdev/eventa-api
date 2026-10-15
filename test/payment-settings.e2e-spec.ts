@@ -192,14 +192,20 @@ describe('Payment settings (e2e — US-SET-08/09/10)', () => {
     );
   });
 
-  it('SET-09: lists every method, all disabled until turned on', async () => {
+  // Checkout honours these switches now (US-SET-09), so the two it has always
+  // offered start on — off by default would take every way to pay away from a
+  // workspace that never opened this screen. The rest need turning on.
+  it('SET-09: lists every method, Card and PromptPay on until turned off', async () => {
     const res = await request(server)
       .get('/api/v1/payment-settings/methods')
       .set(auth(adminJwt));
     expect(res.status).toBe(200);
     const methods = (res.body as Success<MethodView[]>).data;
     expect(methods).toHaveLength(5);
-    expect(methods.every((m) => !m.enabled)).toBe(true);
+    expect(methods.filter((m) => m.enabled).map((m) => m.method)).toEqual([
+      'Card',
+      'PromptPay',
+    ]);
   });
 
   it('SET-09: enables PromptPay, then blocks turning off the last one while paid tickets exist', async () => {
@@ -223,6 +229,8 @@ describe('Payment settings (e2e — US-SET-08/09/10)', () => {
     );
 
     await setMethod('PromptPay', true);
+    // Card is on by default, so it goes first and PromptPay is left alone.
+    expect((await setMethod('Card', false)).status).toBe(200);
     const blocked = await setMethod('PromptPay', false);
     expect(blocked.status).toBe(422);
     expect((blocked.body as { message: string }).message).toMatch(
