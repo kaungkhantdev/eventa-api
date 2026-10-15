@@ -195,6 +195,25 @@ describe('Auth (e2e — envelope + passport)', () => {
       expect(res.status).toBe(401);
       expect(JSON.stringify(res.body)).not.toContain(SLUG);
     });
+
+    // NFR-SUP-02: every failed sign-in is in the security log — this path,
+    // the one the sign-in form takes, included. It lands in the workspace
+    // whose account was tried.
+    it('logs the failed sign-in in the workspace it was tried against', async () => {
+      const failures = async (): Promise<number> => {
+        const r = await pool.query<{ n: number }>(
+          `SELECT count(*)::int AS n FROM audit_events
+            WHERE organization_id = $1 AND type = 'fail'`,
+          [orgId],
+        );
+        return r.rows[0].n;
+      };
+      const before = await failures();
+
+      expect((await loginWithout('still not the password')).status).toBe(401);
+
+      expect(await failures()).toBe(before + 1);
+    });
   });
 });
 

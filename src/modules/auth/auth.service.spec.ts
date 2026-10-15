@@ -485,6 +485,64 @@ describe('AuthService', () => {
       await expect(service.login(noWorkspace)).rejects.toMatchObject({
         code: 'UNAUTHORIZED',
       });
+      // Nobody's account was tried, so there is no one's log to write to —
+      // as on the named-workspace path.
+      expect(repo.recordAudit).not.toHaveBeenCalled();
+    });
+
+    /**
+     * NFR-SUP-02: the security log records every failed sign-in. This is the
+     * path the sign-in form takes — it names no workspace — so a wrong
+     * password here must be logged as the named path logs it. Each row lands
+     * in that account's own workspace, so no workspace learns of another.
+     */
+    it('logs a wrong password against every account it was tried on', async () => {
+      const bkk: LoginUser = {
+        user: userRow({ id: 'u2', organizationId: 2 }),
+        org: { ...org, id: 2, slug: 'acme-bkk', name: 'Acme Bangkok' },
+      };
+      users.findLoginCandidates.mockResolvedValue([
+        candidate('acme-events', 'Acme Events'),
+        bkk,
+      ]);
+      passwords.verify.mockResolvedValue(false);
+
+      await expect(
+        service.login({ ...noWorkspace, ip: '203.0.113.9' }),
+      ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+
+      expect(repo.recordAudit).toHaveBeenCalledTimes(2);
+      expect(repo.recordAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          organizationId: 1,
+          type: 'fail',
+          actorUserId: 'u1',
+          ip: '203.0.113.9',
+        }),
+      );
+      expect(repo.recordAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          organizationId: 2,
+          type: 'fail',
+          actorUserId: 'u2',
+          ip: '203.0.113.9',
+        }),
+      );
+    });
+
+    // One account's password matched, so nobody failed to sign in.
+    it('logs no failure when the password opens one of the accounts', async () => {
+      users.findLoginCandidates.mockResolvedValue([
+        candidate('other-co', 'Other Co'),
+        candidate('acme-events', 'Acme Events'),
+      ]);
+      passwords.verify.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+      await service.login(noWorkspace);
+
+      expect(repo.recordAudit).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'fail' }),
+      );
     });
 
     // Naming one still works: it is what the picker sends back.

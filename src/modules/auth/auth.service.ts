@@ -188,6 +188,11 @@ export class AuthService {
 
     if (matched.length === 0) {
       await this.throttle.recordFailure(throttleId);
+      // Logged as the named path logs it (NFR-SUP-02), once per account tried
+      // and each in that account's own workspace, so none learns of another.
+      for (const candidate of candidates) {
+        await this.auditFail(candidate, input);
+      }
       // The same refusal an unknown address gets, for the same reason.
       throw this.invalidCredentials();
     }
