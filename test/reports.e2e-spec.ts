@@ -2210,10 +2210,10 @@ describe('Reports (e2e — US-RPT)', () => {
           await download(staffJwt, 'transactions.csv').expect(403);
           await download(staffJwt, 'discounts.csv').expect(403);
           await download(staffJwt, 'payouts.csv').expect(403);
+          await download(staffJwt, 'events.csv').expect(403);
           // The staff-visible ones still answer.
           await download(staffJwt, 'registrations.csv').expect(200);
           await download(staffJwt, 'attendance.csv').expect(200);
-          await download(staffJwt, 'events.csv').expect(200);
         });
 
         it('refuses a backwards window, like the report it mirrors', async () => {
@@ -2303,26 +2303,6 @@ describe('Reports (e2e — US-RPT)', () => {
           );
         });
 
-        it('leaves revenue the reader may not see as an EMPTY cell', async () => {
-          // Never 0, which would say the event earned nothing (US-RPT-12).
-          const one = await seedEventAt(
-            'rpt-xl-mask',
-            'Masked View',
-            '-2 days',
-          );
-          await seedPayment({ event: one, amountSatang: 50_000 });
-          const { wb } = await workbook(staffJwt, 'events.xlsx');
-
-          const sheet = wb.getWorksheet('Event performance');
-          let checked = false;
-          sheet?.eachRow((row, number) => {
-            if (number === 1 || row.getCell(1).value !== 'Masked View') return;
-            expect(row.getCell(7).value).toBeNull();
-            checked = true;
-          });
-          expect(checked).toBe(true);
-        });
-
         it('keeps a Thai event name intact through the workbook', async () => {
           // TC-RPT-22: Thai reads correctly, with no mojibake.
           const thai = 'มหกรรมเทคโนโลยีกรุงเทพ';
@@ -2361,8 +2341,8 @@ describe('Reports (e2e — US-RPT)', () => {
           await file(staffJwt, 'transactions.pdf').expect(403);
           await file(staffJwt, 'discounts.xlsx').expect(403);
           await file(staffJwt, 'payouts.xlsx').expect(403);
+          await file(staffJwt, 'events.xlsx').expect(403);
           await file(staffJwt, 'attendance.pdf').expect(200);
-          await file(staffJwt, 'events.xlsx').expect(200);
         });
 
         it('refuses in JSON, never as a corrupt spreadsheet', async () => {
@@ -2397,18 +2377,17 @@ describe('Reports (e2e — US-RPT)', () => {
     });
 
     describe('who may read it (US-RPT-12)', () => {
-      it('gives staff the ranking with the money withheld, not a 403', async () => {
-        const one = await seedEventAt('rpt-ep-staff', 'Staff View', '-2 days');
-        await seedOrder({ event: one, seats: 2 });
-        await seedPayment({ event: one, amountSatang: 50_000 });
-
-        const row = performance(
-          await getEvents(staffJwt, `${spanningWindow()}&q=Staff`).expect(200),
-        ).rows[0];
-        // Three seats, not two: `seedPayment` brings its own confirmed order.
-        expect(row.registrations).toBe(3);
-        // Null, never 0 — "you may not see this" is not "it earned nothing".
-        expect(row.revenueSatang).toBeNull();
+      it('is a finance report: registration access is not enough', async () => {
+        // US-RPT-12 AC1 names event performance among the finance reports a
+        // Staff member with registration access only is not shown.
+        await getEvents(staffJwt, spanningWindow()).expect(403);
+        await request(server)
+          .get('/api/v1/reports/events.csv')
+          .set('Authorization', `Bearer ${staffJwt}`)
+          .expect(403);
+        await getEvents(adminJwt, spanningWindow()).expect(200);
+        // The overview stays theirs: its money is withheld inside it.
+        await getOverview(staffJwt).expect(200);
       });
 
       it('refuses an admin user without registration access', async () => {

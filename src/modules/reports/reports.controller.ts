@@ -79,7 +79,8 @@ const PRODUCES = Object.values(EXPORT_MIME);
  *
  * Each report is gated by the data it exposes rather than by being a "report":
  * registrations and attendance are staff-visible (`regView`), everything with
- * money on it is finance-only (`finView`) — US-RPT-12.
+ * money on it is finance-only (`finView`) — US-RPT-12, which names income,
+ * transactions, payouts, discounts and event performance as finance reports.
  */
 @ApiTags('reports')
 @ApiBearerAuth()
@@ -120,12 +121,12 @@ export class ReportsController {
   }
 
   /**
-   * Gated on `regView` although each row carries revenue: the money is withheld
-   * per row inside the service, so an organizer without finance access still
-   * gets the ranking (US-RPT-12).
+   * A finance report (US-RPT-12 names event performance among them), so
+   * `finView` on top of the `regView` its registration counts need. A Staff
+   * member with registration access only is refused it.
    */
   @Get('events')
-  @RequirePermissions(Permission.regView)
+  @RequirePermissions(Permission.regView, Permission.finView)
   @ResponseMessage('Event performance retrieved.')
   @ApiData(EventsReportDto)
   async eventsReport(
@@ -259,7 +260,7 @@ export class ReportsController {
   }
 
   @Get('events.:format')
-  @RequirePermissions(Permission.regView)
+  @RequirePermissions(Permission.regView, Permission.finView)
   @SkipResponseEnvelope()
   @ApiParam({ name: 'format', enum: EXPORT_FORMATS })
   @ApiProduces(...PRODUCES)
