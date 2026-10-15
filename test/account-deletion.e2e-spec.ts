@@ -4,6 +4,7 @@ process.env.JWT_SECRET ??= 'test-secret-at-least-16-characters-long';
 
 import type { Server } from 'node:http';
 import type { INestApplication } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { hash } from '@node-rs/argon2';
 import { Pool } from 'pg';
@@ -11,6 +12,8 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { generateTotp } from '../src/common/crypto/totp';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { AuthRepository } from '../src/modules/auth/auth.repository';
+import { JwtStrategy } from '../src/modules/auth/jwt.strategy';
 import { OutboxPort } from '../src/modules/platform/outbox.port';
 import { listenOnLoopback } from './support/loopback';
 
@@ -161,6 +164,19 @@ describe('Delete my account (e2e — US-DISC-14)', () => {
     // The credentials no longer buy a session.
     const gone = await login(ANAN);
     expect(gone.status).toBe(401);
+
+    // NFR-PDPA-03: access is revoked immediately — the token this device
+    // already holds no longer reads or writes the account, though it has not
+    // expired yet.
+    const write = await request(server)
+      .patch('/api/v1/me/profile')
+      .set('Authorization', `Bearer ${accessToken as string}`)
+      .send({ name: 'Still Here' });
+    expect(write.status).toBe(401);
+    const read = await request(server)
+      .get('/api/v1/auth/me')
+      .set('Authorization', `Bearer ${accessToken as string}`);
+    expect(read.status).toBe(401);
   });
 
   /*
@@ -263,6 +279,13 @@ describe('Delete my account (e2e — US-DISC-14)', () => {
 
     afterAll(async () => {
       await faultApp.close();
+      // Passport keeps one strategy per name for the whole process, and
+      // compiling faultApp re-registered 'jwt' with ITS JwtStrategy — whose
+      // session check reads through the pool close() just ended, so every
+      // later request on the main app would answer 500. A strategy registers
+      // itself when it is constructed: building one over the main app's
+      // providers hands the name back.
+      new JwtStrategy(app.get(ConfigService), app.get(AuthRepository));
     });
 
     it('rolls back the soft delete AND the sign-out — one transaction or nothing', async () => {

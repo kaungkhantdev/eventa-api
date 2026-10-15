@@ -50,8 +50,9 @@ export interface PasswordResetSubject {
 
 /**
  * Signs and verifies the access + refresh JWTs (HS256 via the configured secret).
- * Access tokens are short-lived and verified statelessly; refresh tokens are
- * long-lived and additionally gated by a live auth_sessions row (revocable).
+ * Access tokens are short-lived, refresh tokens long-lived; both are gated by a
+ * live auth_sessions row (revocable) — the access token on every request, in
+ * JwtStrategy.
  */
 @Injectable()
 export class TokenService {

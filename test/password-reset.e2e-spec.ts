@@ -124,6 +124,15 @@ describe('Forgotten-password reset (US-ACC-04, e2e)', () => {
   });
 
   it('sets the new password; the old one stops working', async () => {
+    // A device signed in before the reset, holding an unexpired access token.
+    const before = await login(OLD_PASSWORD);
+    const { accessToken } = (before.body as Body<{ accessToken: string }>).data;
+    const me = () =>
+      request(server)
+        .get('/api/v1/auth/me')
+        .set('Authorization', `Bearer ${accessToken}`);
+    expect((await me()).status).toBe(200);
+
     const token = await tokenFrom('identity.password_reset_requested');
     const res = await request(server)
       .post('/api/v1/auth/reset-password')
@@ -132,6 +141,9 @@ describe('Forgotten-password reset (US-ACC-04, e2e)', () => {
 
     expect((await login(OLD_PASSWORD)).status).toBe(401);
     expect((await login(NEW_PASSWORD)).status).toBe(200);
+    // "Every device is signed out, and I must sign in again": that device
+    // loses access at once, not when its access token happens to lapse.
+    expect((await me()).status).toBe(401);
   });
 
   it('rejects reusing a single-use link (fingerprint changed) with 422', async () => {
