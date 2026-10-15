@@ -92,7 +92,7 @@ docker compose up -d   # Postgres :5432 · Redis :6379 · RabbitMQ :5672 (+ mgmt
                        # · Mailpit :1025 (inbox :8025) · MinIO :9000 (console :9001)
 pnpm dev               # HTTP API in watch mode (http://localhost:3000, prefix /api/v1)
 pnpm generate          # drizzle-kit: diff src/db/schema → SQL migration in src/db/migrations
-pnpm migrate           # drizzle-kit: apply pending migrations
+pnpm migrate           # apply pending migrations, each in its own transaction (scripts/migrate.ts)
 pnpm seed              # seeds the `acme` tenant + admin@acme.test, idempotent (src/db/seed.ts)
 pnpm db:studio         # drizzle-kit studio — browse the local DB
 ```
@@ -173,7 +173,12 @@ the development guide when implementing:
   (email/SMS, calendar, read-models, search) → write a row to **`outbox_events`** in the *same* transaction;
   the relay ships it to RabbitMQ and a consumer (in `eventa-worker`) handles it. **Never dual-write.**
 - **Drizzle ORM** (SQL-first). Schema in `src/db/schema` (TS) → `pnpm drizzle-kit generate --name <x>`
-  diffs it to **plain-SQL** migrations (reviewed in the PR) → `pnpm drizzle-kit migrate` applies them.
+  diffs it to **plain-SQL** migrations (reviewed in the PR) → `pnpm migrate` applies them, each in its own
+  transaction (`scripts/migrate.ts` → `src/db/migrator.ts`). **Never `drizzle-kit migrate` directly**: it applies
+  every pending migration in ONE transaction, Postgres refuses to use an enum value in the transaction that
+  added it, and 0052 uses keys that 0034/0038/0042 add — so on a fresh database (CI, a new machine, a first
+  deploy) the whole batch rolls back to an empty schema. The journal is drizzle's own, so either tool can
+  continue the other's database.
   Non-diffable SQL (RLS **policies**, functions) goes in a `--custom` migration. This repo **owns**
   migrations; keep the schema consistent with `entities.md`/`erd.md`, and **never edit a shipped
   migration** — add a new one (expand/contract for zero-downtime).
