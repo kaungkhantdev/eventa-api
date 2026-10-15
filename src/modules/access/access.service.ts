@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DomainException } from '../../common/errors/domain.exception';
 import { Paginated } from '../../common/http/paginated';
-import { Permission } from '../../common/decorators/require-permissions.decorator';
 import { TokenService } from '../auth/token.service';
 import { PermissionsService } from './permissions.service';
 import { ADMIN_ROLE, AccessRepository } from './access.repository';
@@ -146,13 +145,16 @@ export class AccessService {
 
   /**
    * Re-assign a member to another role (both must belong to the caller org).
-   * Moving somebody off the Admin role is a demotion, so the last Admin is
-   * protected here exactly as from suspend and remove (US-SET-11).
+   * Assigning a role hands out its grants, so the actor must hold them all
+   * (US-SET-12). Moving somebody off the Admin role is a demotion, so the
+   * last Admin is protected here exactly as from suspend and remove
+   * (US-SET-11).
    */
   async changeMemberRole(
     organizationId: number,
     membershipId: number,
     roleId: number,
+    actorUserId: string,
   ): Promise<MemberRow> {
     await this.assertMemberExists(organizationId, membershipId);
     if (!(await this.repo.roleExists(organizationId, roleId))) {
@@ -161,6 +163,11 @@ export class AccessService {
       );
     }
     const target = await this.repo.getRole(organizationId, roleId);
+    await this.assertNoEscalation(
+      organizationId,
+      actorUserId,
+      target.permissions,
+    );
     if (target.name !== ADMIN_ROLE) {
       await this.assertNotLastAdmin(organizationId, membershipId);
     }
@@ -224,6 +231,11 @@ export class AccessService {
   /**
    * You cannot hand out access you do not hold yourself (US-SET-12) — otherwise
    * an Organizer could promote themselves to refunds or user management.
+   *
+   * Holding setUsers is no exemption: it used to be, on the reasoning that an
+   * Admin holds everything, but setUsers can sit in a custom role without the
+   * rest, and that role could then grant itself refunds or claim the Admin
+   * role. A standard Admin does hold every key, so it is never refused here.
    */
   async assertNoEscalation(
     organizationId: number,
@@ -231,7 +243,6 @@ export class AccessService {
     granting: readonly string[],
   ): Promise<void> {
     const held = await this.permissions.getFor(organizationId, actorUserId);
-    if (held.includes(Permission.setUsers)) return; // an Admin holds everything
     const beyond = granting.filter((key) => !held.includes(key));
     if (beyond.length > 0) {
       throw DomainException.forbidden(

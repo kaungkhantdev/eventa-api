@@ -92,7 +92,12 @@ export class MembersController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateMemberDto,
   ): Promise<MemberResponseDto> {
-    return this.access.changeMemberRole(auth.organizationId, id, dto.roleId);
+    return this.access.changeMemberRole(
+      auth.organizationId,
+      id,
+      dto.roleId,
+      auth.userId,
+    );
   }
 
   @Post(':id/suspend')

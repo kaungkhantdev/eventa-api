@@ -71,7 +71,7 @@ describe('AccessService', () => {
       repo.memberExists.mockResolvedValue(false);
 
       const err = await service
-        .changeMemberRole(orgId, 999, 7)
+        .changeMemberRole(orgId, 999, 7, 'u1')
         .catch((e: unknown) => e);
 
       expect(err).toBeInstanceOf(DomainException);
@@ -84,7 +84,7 @@ describe('AccessService', () => {
       repo.roleExists.mockResolvedValue(false);
 
       const err = await service
-        .changeMemberRole(orgId, 10, 999)
+        .changeMemberRole(orgId, 10, 999, 'u1')
         .catch((e: unknown) => e);
 
       expect((err as DomainException).getStatus()).toBe(404);
@@ -96,7 +96,7 @@ describe('AccessService', () => {
       repo.roleExists.mockResolvedValue(true);
       repo.getMember.mockResolvedValue(member);
 
-      const result = await service.changeMemberRole(orgId, 10, 7);
+      const result = await service.changeMemberRole(orgId, 10, 7, 'u1');
 
       expect(repo.updateMemberRole).toHaveBeenCalledWith(orgId, 10, 7);
       expect(result).toMatchObject({ id: 10, roleId: 7, role: 'Organizer' });

@@ -38,6 +38,8 @@ describe('Access / RBAC management (e2e)', () => {
   let app: INestApplication;
   let server: Server;
   let pool: Pool;
+  let orgId: number;
+  let adminRoleId: number;
   let staffRoleId: number;
   let organizerRoleId: number;
   let foreignRoleId: number;
@@ -49,7 +51,12 @@ describe('Access / RBAC management (e2e)', () => {
       pool,
       ORG,
       [
-        { name: 'Admin', grants: ['setUsers', 'evCreate', 'regView'] },
+        // regCheckin because the Admin creates a Volunteer role granting it
+        // below, and nobody may hand out a key they do not hold (US-SET-12).
+        {
+          name: 'Admin',
+          grants: ['setUsers', 'evCreate', 'regView', 'regCheckin'],
+        },
         { name: 'Organizer', grants: ['evCreate'] },
         { name: 'Staff', grants: ['regView'] },
       ],
@@ -58,6 +65,8 @@ describe('Access / RBAC management (e2e)', () => {
         { email: STAFF, roleName: 'Staff' },
       ],
     );
+    orgId = seeded.orgId;
+    adminRoleId = seeded.roleIdByName.Admin;
     staffRoleId = seeded.roleIdByName.Staff;
     organizerRoleId = seeded.roleIdByName.Organizer;
     const other = await seedOrg(
@@ -511,6 +520,64 @@ describe('Access / RBAC management (e2e)', () => {
       const member = (again.body as Success<{ member: Member }>).data.member;
       expect(member.status).toBe('Invited');
       expect(member.id).not.toBe(memberId);
+    });
+  });
+
+  /*
+   * US-SET-12: "Given I try to grant myself more access than I currently have,
+   * when I save, then it's blocked." PEOPLE manages users and roles and holds
+   * nothing else — which used to count as holding everything.
+   */
+  describe('privilege escalation (US-SET-12)', () => {
+    const PEOPLE = 'people@access-e2e.test';
+    let peopleRoleId: number;
+    let peopleMemberId: number;
+
+    beforeAll(async () => {
+      const role = await pool.query<{ id: string }>(
+        `INSERT INTO roles (organization_id, name, description, is_system)
+         VALUES ($1, 'People', 'seed', false) RETURNING id`,
+        [orgId],
+      );
+      peopleRoleId = Number(role.rows[0].id);
+      await pool.query(
+        `INSERT INTO role_permissions (role_id, permission_key, granted)
+         VALUES ($1, 'setUsers', true)`,
+        [peopleRoleId],
+      );
+      const user = await pool.query<{ id: string }>(
+        `INSERT INTO users (organization_id, name, email, persona, status, password_hash)
+         VALUES ($1, 'People Lead', $2, 'admin', 'Active', $3) RETURNING id`,
+        [orgId, PEOPLE, await hash(PASSWORD)],
+      );
+      const member = await pool.query<{ id: string }>(
+        `INSERT INTO memberships (organization_id, user_id, role_id, role, status)
+         VALUES ($1, $2, $3, 'People', 'Active') RETURNING id`,
+        [orgId, user.rows[0].id, peopleRoleId],
+      );
+      peopleMemberId = Number(member.rows[0].id);
+    });
+
+    it('refuses to add a key the actor lacks to their own role (403)', async () => {
+      const jwt = await token(PEOPLE);
+      const res = await request(server)
+        .put(`/api/v1/roles/${peopleRoleId}/permissions`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({ permissions: ['setUsers', 'evCreate'] });
+
+      expect(res.status).toBe(403);
+    });
+
+    it('refuses to move the actor themselves onto the Admin role (403)', async () => {
+      const jwt = await token(PEOPLE);
+      const res = await request(server)
+        .patch(`/api/v1/members/${peopleMemberId}`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({ roleId: adminRoleId });
+
+      expect(res.status).toBe(403);
+      const after = (await membersOf(jwt)).data.find((m) => m.email === PEOPLE);
+      expect(after?.role).toBe('People');
     });
   });
 });
