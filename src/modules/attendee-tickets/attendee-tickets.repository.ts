@@ -52,6 +52,14 @@ export class AttendeeTicketsRepository {
         coverImage: events.coverImage,
         ticketTypeName: ticketTypes.name,
         ticketCount: orders.seats,
+        // Same order as `ticketByIdForEmail`'s siblings, so the n-th id here
+        // is the pass that prints "Admission n of m".
+        ticketIds: sql<string[]>`ARRAY(
+          SELECT ${tickets.id}::text FROM ${tickets}
+          WHERE ${tickets.orderId} = ${orders.id}
+            AND ${tickets.deletedAt} IS NULL
+          ORDER BY ${tickets.id}
+        )`,
         attended: sql<boolean>`EXISTS (
           SELECT 1 FROM ${tickets}
           WHERE ${tickets.orderId} = ${orders.id}
