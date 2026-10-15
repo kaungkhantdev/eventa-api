@@ -118,6 +118,24 @@ describe('Public event page (e2e — US-PAGE-01…08)', () => {
     expect(p.faqs[0].question).toBe('Parking?');
   });
 
+  // Ids are random UUIDs, so these are chosen to sort apart from the order of
+  // entry, and the names likewise: only the entry order gives Somchai first.
+  it('US-PAGE-04: speakers render in the order the organizer added them', async () => {
+    await pool.query(
+      `INSERT INTO speakers (id, organization_id, event_id, name, created_at)
+       VALUES ('cccccccc-0000-4000-8000-000000000001',$1,$2,'Somchai', now() - interval '3 minutes'),
+              ('eeeeeeee-0000-4000-8000-000000000002',$1,$2,'Ada', now() - interval '2 minutes'),
+              ('aaaaaaaa-0000-4000-8000-000000000003',$1,$2,'Malee', now() - interval '1 minute')`,
+      [orgId, liveId],
+    );
+    const p = ((await page(LIVE)).body as Success<Page>).data;
+    expect(p.speakers.map((sp) => sp.name)).toEqual([
+      'Somchai',
+      'Ada',
+      'Malee',
+    ]);
+  });
+
   it('US-PROG-11: a deleted speaker leaves the public agenda and speakers section', async () => {
     const speakers = await pool.query<{ id: string; name: string }>(
       `INSERT INTO speakers (organization_id, event_id, name)

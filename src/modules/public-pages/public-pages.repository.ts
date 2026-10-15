@@ -118,6 +118,11 @@ export class PublicPagesRepository {
     return rows;
   }
 
+  /**
+   * In the order they were added (US-PAGE-04): speakers have no position
+   * column, and their ids are random UUIDs, so entry order is the only
+   * arrangement the organizer has made.
+   */
   speakers(eventId: string) {
     return this.db
       .select({
@@ -129,7 +134,7 @@ export class PublicPagesRepository {
       })
       .from(speakers)
       .where(and(eq(speakers.eventId, eventId), isNull(speakers.deletedAt)))
-      .orderBy(asc(speakers.id));
+      .orderBy(asc(speakers.createdAt), asc(speakers.id));
   }
 
   tickets(eventId: string) {
