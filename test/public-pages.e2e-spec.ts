@@ -9,6 +9,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { LANDING_TEMPLATES } from '../src/modules/events/landing-templates';
 import { listenOnLoopback } from './support/loopback';
 
 const ORG = { slug: 'page-e2e', name: 'Page E2E' };
@@ -244,6 +245,16 @@ describe('Public event page (e2e — US-PAGE-01…08)', () => {
 });
 
 async function seed(pool: Pool): Promise<{ orgId: number; liveId: string }> {
+  // The live event below names the 'aurora' template, and a fresh database
+  // has none until a later suite or `pnpm seed` writes them. Seeded here, as
+  // publish.e2e-spec.ts does, so this suite never depends on run order.
+  for (const t of LANDING_TEMPLATES) {
+    await pool.query(
+      `INSERT INTO landing_templates (id, title, badge, description)
+       VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING`,
+      [t.id, t.title, t.badge, t.description],
+    );
+  }
   const org = await pool.query<{ id: string }>(
     `INSERT INTO organizations (name, slug) VALUES ($1,$2) RETURNING id`,
     [ORG.name, ORG.slug],
