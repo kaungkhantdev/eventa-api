@@ -38,6 +38,8 @@ describe('Access / RBAC management (e2e)', () => {
   let app: INestApplication;
   let server: Server;
   let pool: Pool;
+  let orgId: number;
+  let adminRoleId: number;
   let staffRoleId: number;
   let organizerRoleId: number;
   let foreignRoleId: number;
@@ -49,7 +51,12 @@ describe('Access / RBAC management (e2e)', () => {
       pool,
       ORG,
       [
-        { name: 'Admin', grants: ['setUsers', 'evCreate', 'regView'] },
+        // regCheckin because the Admin creates a Volunteer role granting it
+        // below, and nobody may hand out a key they do not hold (US-SET-12).
+        {
+          name: 'Admin',
+          grants: ['setUsers', 'evCreate', 'regView', 'regCheckin'],
+        },
         { name: 'Organizer', grants: ['evCreate'] },
         { name: 'Staff', grants: ['regView'] },
       ],
@@ -58,6 +65,8 @@ describe('Access / RBAC management (e2e)', () => {
         { email: STAFF, roleName: 'Staff' },
       ],
     );
+    orgId = seeded.orgId;
+    adminRoleId = seeded.roleIdByName.Admin;
     staffRoleId = seeded.roleIdByName.Staff;
     organizerRoleId = seeded.roleIdByName.Organizer;
     const other = await seedOrg(
@@ -159,6 +168,23 @@ describe('Access / RBAC management (e2e)', () => {
       .expect(201);
   });
 
+  /*
+   * NFR-SUP-02: every permission change is recorded with who, when and from
+   * where. The grant above is that change.
+   */
+  it('records the permission change in the audit trail, with who and from where', async () => {
+    const rows = await permAudit(pool, orgId);
+    const entry = rows.find(
+      (r) => r.title === 'Changed the permissions of the Staff role',
+    );
+
+    expect(entry).toMatchObject({
+      meta: 'Granted: Create & edit events',
+      actorEmail: ADMIN,
+    });
+    expect(entry?.ipAddress).toBeTruthy();
+  });
+
   it('revokes all permissions when given an empty set', async () => {
     const jwt = await token(ADMIN);
     const res = await request(server)
@@ -220,6 +246,38 @@ describe('Access / RBAC management (e2e)', () => {
     expect((res.body as Success<{ role: string }>).data.role).toBe('Organizer');
   });
 
+  /*
+   * US-SET-05: "Given a teammate's role was changed, when I open the audit log,
+   * then I see an entry showing who changed it, from which role to which, and
+   * when." The previous case moved STAFF from Staff to Organizer.
+   */
+  it('shows the role change in the audit log: who, from which role to which, and when', async () => {
+    const jwt = await token(ADMIN);
+    const res = await request(server)
+      .get('/api/v1/audit')
+      .query({ type: 'perm' })
+      .set('Authorization', `Bearer ${jwt}`);
+
+    expect(res.status).toBe(200);
+    const entry = (
+      res.body as Success<
+        { title: string; actorName: string | null; occurredAt: string }[]
+      >
+    ).data.find(
+      (e) => e.title === "Changed Seed User's role from Staff to Organizer",
+    );
+    expect(entry?.actorName).toBe('Seed User');
+    expect(Number.isNaN(Date.parse(entry?.occurredAt ?? ''))).toBe(false);
+
+    // Every seeded teammate is called "Seed User", so the name alone does not
+    // say who: the row's actor is the Admin who made the change.
+    const row = (await permAudit(pool, orgId)).find(
+      (r) => r.title === "Changed Seed User's role from Staff to Organizer",
+    );
+    expect(row?.actorEmail).toBe(ADMIN);
+    expect(row?.ipAddress).toBeTruthy();
+  });
+
   it('refuses to assign a role from another tenant (404)', async () => {
     const jwt = await token(ADMIN);
     const members = await membersOf(jwt);
@@ -238,6 +296,26 @@ describe('Access / RBAC management (e2e)', () => {
       .get('/api/v1/members')
       .set('Authorization', `Bearer ${jwt}`);
     expect(res.status).toBe(403);
+  });
+
+  /*
+   * US-SET-11: "Given the last remaining Admin, when I try to remove, suspend
+   * or demote them (or myself), then the action is blocked." ADMIN is the only
+   * Admin here, so demoting themselves is the case that would strand the
+   * workspace.
+   */
+  it('refuses to demote the last Admin, even by themselves (409)', async () => {
+    const jwt = await token(ADMIN);
+    const admin = (await membersOf(jwt)).data.find((m) => m.email === ADMIN);
+
+    const res = await request(server)
+      .patch(`/api/v1/members/${admin?.id}`)
+      .set('Authorization', `Bearer ${jwt}`)
+      .send({ roleId: organizerRoleId });
+
+    expect(res.status).toBe(409);
+    const after = (await membersOf(jwt)).data.find((m) => m.email === ADMIN);
+    expect(after?.role).toBe('Admin');
   });
 
   describe('custom roles (US-SET-13)', () => {
@@ -493,6 +571,88 @@ describe('Access / RBAC management (e2e)', () => {
       expect(member.id).not.toBe(memberId);
     });
   });
+
+  /*
+   * US-SET-12: "Given I try to grant myself more access than I currently have,
+   * when I save, then it's blocked." PEOPLE manages users and roles and holds
+   * nothing else — which used to count as holding everything.
+   */
+  describe('privilege escalation (US-SET-12)', () => {
+    const PEOPLE = 'people@access-e2e.test';
+    let peopleRoleId: number;
+    let peopleMemberId: number;
+
+    beforeAll(async () => {
+      const role = await pool.query<{ id: string }>(
+        `INSERT INTO roles (organization_id, name, description, is_system)
+         VALUES ($1, 'People', 'seed', false) RETURNING id`,
+        [orgId],
+      );
+      peopleRoleId = Number(role.rows[0].id);
+      await pool.query(
+        `INSERT INTO role_permissions (role_id, permission_key, granted)
+         VALUES ($1, 'setUsers', true)`,
+        [peopleRoleId],
+      );
+      const user = await pool.query<{ id: string }>(
+        `INSERT INTO users (organization_id, name, email, persona, status, password_hash)
+         VALUES ($1, 'People Lead', $2, 'admin', 'Active', $3) RETURNING id`,
+        [orgId, PEOPLE, await hash(PASSWORD)],
+      );
+      const member = await pool.query<{ id: string }>(
+        `INSERT INTO memberships (organization_id, user_id, role_id, role, status)
+         VALUES ($1, $2, $3, 'People', 'Active') RETURNING id`,
+        [orgId, user.rows[0].id, peopleRoleId],
+      );
+      peopleMemberId = Number(member.rows[0].id);
+    });
+
+    it('refuses to add a key the actor lacks to their own role (403)', async () => {
+      const jwt = await token(PEOPLE);
+      const res = await request(server)
+        .put(`/api/v1/roles/${peopleRoleId}/permissions`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({ permissions: ['setUsers', 'evCreate'] });
+
+      expect(res.status).toBe(403);
+    });
+
+    it('refuses to move the actor themselves onto the Admin role (403)', async () => {
+      const jwt = await token(PEOPLE);
+      const res = await request(server)
+        .patch(`/api/v1/members/${peopleMemberId}`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({ roleId: adminRoleId });
+
+      expect(res.status).toBe(403);
+      const after = (await membersOf(jwt)).data.find((m) => m.email === PEOPLE);
+      expect(after?.role).toBe('People');
+    });
+
+    /*
+     * US-SET-12: "Admin can do everything." A key taken off the Admin role is
+     * one only an Admin could put back, so checking an Admin against their own
+     * keys would leave it off for good.
+     */
+    it('lets an Admin put back a key they took off the Admin role', async () => {
+      const jwt = await token(ADMIN);
+      const put = (permissions: string[]) =>
+        request(server)
+          .put(`/api/v1/roles/${adminRoleId}/permissions`)
+          .set('Authorization', `Bearer ${jwt}`)
+          .send({ permissions });
+
+      expect((await put(['setUsers', 'evCreate', 'regView'])).status).toBe(200);
+      const restored = await put([
+        'setUsers',
+        'evCreate',
+        'regView',
+        'regCheckin',
+      ]);
+
+      expect(restored.status).toBe(200);
+    });
+  });
 });
 
 async function seedOrg(
@@ -550,6 +710,38 @@ async function seedOrg(
     );
   }
   return { orgId, roleIdByName };
+}
+
+/** The workspace's permission-change audit rows, with the actor's email. */
+async function permAudit(
+  pool: Pool,
+  orgId: number,
+): Promise<
+  {
+    title: string;
+    meta: string | null;
+    actorEmail: string | null;
+    ipAddress: string | null;
+  }[]
+> {
+  const res = await pool.query<{
+    title: string;
+    meta: string | null;
+    actor_email: string | null;
+    ip_address: string | null;
+  }>(
+    `SELECT a.title, a.meta, u.email AS actor_email, a.ip_address
+       FROM audit_events a LEFT JOIN users u ON u.id = a.actor_user_id
+      WHERE a.organization_id = $1 AND a.type = 'perm'
+      ORDER BY a.id`,
+    [orgId],
+  );
+  return res.rows.map((r) => ({
+    title: r.title,
+    meta: r.meta,
+    actorEmail: r.actor_email,
+    ipAddress: r.ip_address,
+  }));
 }
 
 async function cleanup(pool: Pool): Promise<void> {

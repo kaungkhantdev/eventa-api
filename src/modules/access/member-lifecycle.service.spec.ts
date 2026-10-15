@@ -5,6 +5,20 @@ import type { PermissionsService } from './permissions.service';
 import type { TokenService } from '../auth/token.service';
 
 const orgId = 1;
+const actor = { userId: 'u1', ip: null };
+
+/** A role as the repository returns it — only the name and grants matter here. */
+function role(name: string, permissions: string[]) {
+  return {
+    id: 3,
+    name,
+    description: '',
+    permissions,
+    neverOfferedPermissions: [],
+    memberCount: 1,
+    isSystem: true,
+  };
+}
 
 describe('AccessService — member lifecycle & escalation (US-SET-11/12)', () => {
   let repo: jest.Mocked<AccessRepository>;
@@ -15,10 +29,20 @@ describe('AccessService — member lifecycle & escalation (US-SET-11/12)', () =>
     repo = {
       memberExists: jest.fn().mockResolvedValue(true),
       isActiveAdmin: jest.fn().mockResolvedValue(false),
+      isActiveAdminUser: jest.fn().mockResolvedValue(false),
       countActiveAdmins: jest.fn().mockResolvedValue(2),
       setMemberStatus: jest.fn().mockResolvedValue(undefined),
       removeMember: jest.fn().mockResolvedValue(undefined),
-      getMember: jest.fn().mockResolvedValue({ id: 7, status: 'Suspended' }),
+      getMember: jest.fn().mockResolvedValue({
+        id: 7,
+        name: 'Ann',
+        roleId: 2,
+        role: 'Admin',
+        status: 'Suspended',
+      }),
+      roleExists: jest.fn().mockResolvedValue(true),
+      getRole: jest.fn().mockResolvedValue(role('Organizer', ['evCreate'])),
+      updateMemberRole: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<AccessRepository>;
     permissions = {
       getFor: jest.fn().mockResolvedValue([]),
@@ -57,6 +81,8 @@ describe('AccessService — member lifecycle & escalation (US-SET-11/12)', () =>
     beforeEach(() => {
       repo.isActiveAdmin.mockResolvedValue(true);
       repo.countActiveAdmins.mockResolvedValue(1);
+      // An Admin acting: they hold whatever the target role grants.
+      permissions.getFor.mockResolvedValue(['setUsers', 'evCreate']);
     });
 
     it('refuses to suspend the last Admin', async () => {
@@ -78,6 +104,42 @@ describe('AccessService — member lifecycle & escalation (US-SET-11/12)', () =>
       await service.removeMember(orgId, 7);
       expect(repo.removeMember).toHaveBeenCalledWith(orgId, 7);
     });
+
+    /*
+     * US-SET-11: "Given the last remaining Admin, when I try to remove, suspend
+     * or DEMOTE them (or myself), then the action is blocked." Suspend and
+     * remove were guarded; a role change was not, so the only Admin could be
+     * moved to Organizer and the workspace left with nobody to manage it.
+     */
+    it('refuses to demote the last Admin to another role', async () => {
+      repo.getRole.mockResolvedValue(role('Organizer', ['evCreate']));
+      await expect(
+        service.changeMemberRole(orgId, 7, 3, actor),
+      ).rejects.toMatchObject({ code: 'CONFLICT' });
+      expect(repo.updateMemberRole).not.toHaveBeenCalled();
+    });
+
+    it('allows demoting an Admin while another Admin remains', async () => {
+      repo.countActiveAdmins.mockResolvedValue(2);
+      await service.changeMemberRole(orgId, 7, 3, actor);
+      expect(repo.updateMemberRole).toHaveBeenCalledWith(
+        orgId,
+        7,
+        3,
+        expect.anything(),
+      );
+    });
+
+    it('does not block the last Admin being given the Admin role', async () => {
+      repo.getRole.mockResolvedValue(role('Admin', ['setUsers']));
+      await service.changeMemberRole(orgId, 7, 1, actor);
+      expect(repo.updateMemberRole).toHaveBeenCalledWith(
+        orgId,
+        7,
+        1,
+        expect.anything(),
+      );
+    });
   });
 
   describe('privilege escalation is blocked', () => {
@@ -95,11 +157,57 @@ describe('AccessService — member lifecycle & escalation (US-SET-11/12)', () =>
       ).resolves.toBeUndefined();
     });
 
-    it('an Admin (setUsers) may grant anything', async () => {
+    /*
+     * US-SET-12: "Given I try to grant myself more access than I currently
+     * have, when I save, then it's blocked." Holding setUsers used to wave
+     * every grant through, so a custom role with user management but no
+     * refunds could add finRefund to itself. A standard Admin holds every
+     * key, so it is never refused by this.
+     */
+    it('refuses a setUsers holder a key they do not hold', async () => {
+      permissions.getFor.mockResolvedValue(['setUsers']);
+      await expect(
+        service.assertNoEscalation(orgId, 'u1', ['finRefund']),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    });
+
+    /*
+     * US-SET-12: "Admin can do everything". A key taken off the Admin role is
+     * one only an Admin could ever put back, so an Admin is never refused —
+     * otherwise one unticked box on the Admin role would lock the whole
+     * workspace out of that capability for good.
+     */
+    it('lets an Admin grant a key the Admin role no longer holds', async () => {
+      repo.isActiveAdminUser.mockResolvedValue(true);
       permissions.getFor.mockResolvedValue(['setUsers']);
       await expect(
         service.assertNoEscalation(orgId, 'u1', ['finRefund']),
       ).resolves.toBeUndefined();
+      expect(repo.isActiveAdminUser).toHaveBeenCalledWith(orgId, 'u1');
+    });
+
+    it('refuses to assign a role granting more than the actor holds', async () => {
+      permissions.getFor.mockResolvedValue(['setUsers']);
+      repo.getRole.mockResolvedValue(
+        role('Admin', ['setUsers', 'finRefund', 'evCreate']),
+      );
+      await expect(
+        service.changeMemberRole(orgId, 7, 1, actor),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      expect(permissions.getFor).toHaveBeenCalledWith(orgId, 'u1');
+      expect(repo.updateMemberRole).not.toHaveBeenCalled();
+    });
+
+    it('assigns a role whose grants the actor already holds', async () => {
+      permissions.getFor.mockResolvedValue(['setUsers', 'evCreate']);
+      repo.getRole.mockResolvedValue(role('Organizer', ['evCreate']));
+      await service.changeMemberRole(orgId, 7, 3, actor);
+      expect(repo.updateMemberRole).toHaveBeenCalledWith(
+        orgId,
+        7,
+        3,
+        expect.anything(),
+      );
     });
   });
 });

@@ -4,7 +4,8 @@ import type { AccessService } from './access.service';
 import { RolesService } from './roles.service';
 
 const orgId = 1;
-const actor = 'u1';
+/** Who acts, and from where — what the audit trail records (NFR-SUP-02). */
+const actor = { userId: 'u1', ip: '203.0.113.9' };
 
 describe('RolesService — custom roles (US-SET-13)', () => {
   let repo: jest.Mocked<AccessRepository>;
@@ -70,10 +71,35 @@ describe('RolesService — custom roles (US-SET-13)', () => {
         'Volunteer',
         'Helps on the day',
       );
-      expect(repo.setRolePermissions).toHaveBeenCalledWith(orgId, 42, [
-        'regCheckin',
-      ]);
+      expect(repo.setRolePermissions).toHaveBeenCalledWith(
+        orgId,
+        42,
+        ['regCheckin'],
+        expect.anything(),
+      );
       expect(res.name).toBe('Volunteer');
+    });
+
+    /** NFR-SUP-02: a permission change is recorded with who and from where. */
+    it('records who created the role and what it grants', async () => {
+      await service.createRole(orgId, actor, {
+        name: 'Volunteer',
+        description: 'Helps on the day',
+        permissions: ['regCheckin', 'regExport'],
+      });
+
+      expect(repo.setRolePermissions).toHaveBeenCalledWith(
+        orgId,
+        42,
+        ['regCheckin', 'regExport'],
+        {
+          type: 'perm',
+          title: 'Created the Volunteer role — sensitive access granted',
+          meta: 'Granted: Check attendees in, Export attendee data (sensitive)',
+          actorUserId: 'u1',
+          ipAddress: '203.0.113.9',
+        },
+      );
     });
 
     it('rejects a name that already exists, asking for a unique one', async () => {
@@ -108,9 +134,12 @@ describe('RolesService — custom roles (US-SET-13)', () => {
         description: 'x',
         permissions: ['regCheckin', 'regCheckin'],
       });
-      expect(repo.setRolePermissions).toHaveBeenCalledWith(orgId, 42, [
-        'regCheckin',
-      ]);
+      expect(repo.setRolePermissions).toHaveBeenCalledWith(
+        orgId,
+        42,
+        ['regCheckin'],
+        expect.anything(),
+      );
     });
   });
 

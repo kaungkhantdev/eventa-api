@@ -2,19 +2,24 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DomainException } from '../../common/errors/domain.exception';
 import { Paginated } from '../../common/http/paginated';
-import { Permission } from '../../common/decorators/require-permissions.decorator';
 import { TokenService } from '../auth/token.service';
 import { PermissionsService } from './permissions.service';
-import { AccessRepository } from './access.repository';
+import { ADMIN_ROLE, AccessRepository } from './access.repository';
 import { Clock } from '../../common/time/clock';
 import type { Env } from '../../config/env.validation';
 import { OutboxPort } from '../platform/outbox.port';
 import { memberInvitedEvent } from './events/member-invited.event';
+import {
+  memberRoleChangeAudit,
+  permAuditRecord,
+} from './permission-change.audit';
 import type {
+  Actor,
   InviteMemberInput,
   ListMembersQuery,
   MemberRow,
   MemberStatusCounts,
+  RoleWithPermissions,
 } from './access.types';
 
 const DEFAULT_LIMIT = 20;
@@ -144,24 +149,64 @@ export class AccessService {
     };
   }
 
-  /** Re-assign a member to another role (both must belong to the caller org). */
+  /**
+   * Re-assign a member to another role (both must belong to the caller org).
+   * Assigning a role hands out its grants, so the actor must hold them all
+   * (US-SET-12). Moving somebody off the Admin role is a demotion, so the
+   * last Admin is protected here exactly as from suspend and remove
+   * (US-SET-11). The move is recorded with who made it, from which role to
+   * which, and from where (US-SET-05, NFR-SUP-02).
+   */
   async changeMemberRole(
     organizationId: number,
     membershipId: number,
     roleId: number,
+    actor: Actor,
   ): Promise<MemberRow> {
-    if (!(await this.repo.memberExists(organizationId, membershipId))) {
-      throw DomainException.notFound(
-        `Member ${membershipId} not found in this workspace.`,
-      );
+    await this.assertMemberExists(organizationId, membershipId);
+    const target = await this.existingRole(organizationId, roleId);
+    await this.assertNoEscalation(
+      organizationId,
+      actor.userId,
+      target.permissions,
+    );
+    if (target.name !== ADMIN_ROLE) {
+      await this.assertNotLastAdmin(organizationId, membershipId);
     }
+    const member = await this.repo.getMember(organizationId, membershipId);
+    if (member.roleId === roleId) return member; // nothing changes, nothing to record
+    await this.moveToRole(organizationId, member, roleId, target, actor);
+    return this.repo.getMember(organizationId, membershipId);
+  }
+
+  private async existingRole(
+    organizationId: number,
+    roleId: number,
+  ): Promise<RoleWithPermissions> {
     if (!(await this.repo.roleExists(organizationId, roleId))) {
       throw DomainException.notFound(
         `Role ${roleId} not found in this workspace.`,
       );
     }
-    await this.repo.updateMemberRole(organizationId, membershipId, roleId);
-    return this.repo.getMember(organizationId, membershipId);
+    return this.repo.getRole(organizationId, roleId);
+  }
+
+  /** Move the member, recording who did it and from which role to which. */
+  private async moveToRole(
+    organizationId: number,
+    member: MemberRow,
+    roleId: number,
+    target: RoleWithPermissions,
+    actor: Actor,
+  ): Promise<void> {
+    const from = await this.repo.getRole(organizationId, member.roleId);
+    const text = memberRoleChangeAudit(member.name, from, target);
+    await this.repo.updateMemberRole(
+      organizationId,
+      member.id,
+      roleId,
+      permAuditRecord(text, actor),
+    );
   }
 
   /** Pause access without losing the role, so reactivating restores it exactly. */
@@ -220,14 +265,21 @@ export class AccessService {
   /**
    * You cannot hand out access you do not hold yourself (US-SET-12) — otherwise
    * an Organizer could promote themselves to refunds or user management.
+   *
+   * Holding setUsers is no exemption: it can sit in a custom role without the
+   * rest, and that role could then grant itself refunds or claim the Admin
+   * role. Holding the Admin role is: an Admin can do everything (US-SET-12),
+   * and a key taken off the Admin role is one only an Admin could put back,
+   * so checking an Admin against their own keys would lock the workspace out
+   * of that capability for good.
    */
   async assertNoEscalation(
     organizationId: number,
     actorUserId: string,
     granting: readonly string[],
   ): Promise<void> {
+    if (await this.repo.isActiveAdminUser(organizationId, actorUserId)) return;
     const held = await this.permissions.getFor(organizationId, actorUserId);
-    if (held.includes(Permission.setUsers)) return; // an Admin holds everything
     const beyond = granting.filter((key) => !held.includes(key));
     if (beyond.length > 0) {
       throw DomainException.forbidden(
