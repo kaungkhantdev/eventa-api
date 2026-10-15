@@ -4,7 +4,10 @@ import {
   isUniqueViolation,
 } from '../../common/errors/unique-violation';
 import { PasswordService } from '../auth-password/auth-password.service';
-import { SignupRepository } from '../auth-signup/auth-signup.repository';
+import {
+  SignupRepository,
+  type PlatformAttendee,
+} from '../auth-signup/auth-signup.repository';
 import { AuthService, type LoginResult } from '../auth/auth.service';
 import { TokenService } from '../auth/token.service';
 import { UsersRepository } from '../users/users.repository';
@@ -43,6 +46,13 @@ interface Claimant {
  *
  * Single use without a ledger: a claim creates the address's account, and a
  * second claim finds it and is told to sign in.
+ *
+ * An account somebody signed up for with this address but never confirmed is
+ * not "an account already": its password was chosen by whoever typed the
+ * address, proven by nobody. The link proves the inbox, so the claim takes
+ * that account over — the new password replaces the old, the booking's name
+ * replaces the form's, and its sessions are revoked — rather than leaving the
+ * stranger's password one confirmation click from a live account.
  */
 @Injectable()
 export class BookingClaimService {
@@ -61,19 +71,19 @@ export class BookingClaimService {
    */
   async inspect(token: string): Promise<BookingClaimPreviewDto> {
     const claimant = await this.claimantOfGoodLink(token);
-    return {
-      ...claimant,
-      accountExists: await this.accounts.platformAttendeeExists(claimant.email),
-    };
+    const existing = await this.accounts.findPlatformAttendee(claimant.email);
+    return { ...claimant, accountExists: existing?.confirmed ?? false };
   }
 
   /** Create the account, Active, and open its first session. */
   async claim(input: ClaimInput): Promise<LoginResult> {
     const claimant = await this.claimantOfGoodLink(input.token);
-    if (await this.accounts.platformAttendeeExists(claimant.email)) {
-      throw signInInstead();
-    }
-    const userId = await this.createAccount(claimant, input.password);
+    const existing = await this.accounts.findPlatformAttendee(claimant.email);
+    if (existing?.confirmed) throw signInInstead();
+    const passwordHash = await this.passwords.hash(input.password);
+    const userId = existing
+      ? await this.supersede(existing, claimant, passwordHash)
+      : await this.createAccount(claimant, passwordHash);
     const found = await this.users.findProfile(userId);
     if (!found) throw attendeeAccountsUnavailable();
     return this.auth.startSession(found, {
@@ -114,9 +124,8 @@ export class BookingClaimService {
    */
   private async createAccount(
     claimant: Claimant,
-    password: string,
+    passwordHash: string,
   ): Promise<string> {
-    const passwordHash = await this.passwords.hash(password);
     const created = await this.accounts
       .createAttendeeAccount({ ...claimant, passwordHash, confirmed: true })
       .catch((cause: unknown) => {
@@ -127,6 +136,25 @@ export class BookingClaimService {
       });
     if (!created) throw attendeeAccountsUnavailable();
     return created.userId;
+  }
+
+  /**
+   * Take over the address's unconfirmed account. If it stopped being
+   * unconfirmed since it was looked up — its owner opened the sign-up's own
+   * confirmation link a moment ago — it is an account like any other now.
+   */
+  private async supersede(
+    unconfirmed: PlatformAttendee,
+    claimant: Claimant,
+    passwordHash: string,
+  ): Promise<string> {
+    const taken = await this.accounts.supersedeUnconfirmedAttendee({
+      userId: unconfirmed.userId,
+      name: claimant.name,
+      passwordHash,
+    });
+    if (!taken) throw signInInstead();
+    return unconfirmed.userId;
   }
 }
 

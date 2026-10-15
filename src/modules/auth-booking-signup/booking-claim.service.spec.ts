@@ -35,6 +35,11 @@ const claims = {
   typ: 'booking_claim' as const,
 };
 
+/** An account whose address was proven — by its own link, an invite or a provider. */
+const CONFIRMED = { userId: 'att-1', confirmed: true };
+/** Somebody signed up with this address and never confirmed it. */
+const UNCONFIRMED = { userId: 'att-9', confirmed: false };
+
 const found = {
   user: { id: 'att-1', persona: 'attendee', status: 'Active' },
   org: { id: 1, slug: 'eventa' },
@@ -77,10 +82,11 @@ describe('BookingClaimService (US-DISC-15)', () => {
       verifyBookingClaim: jest.fn().mockResolvedValue(claims),
     } as unknown as jest.Mocked<TokenService>;
     accounts = {
-      platformAttendeeExists: jest.fn().mockResolvedValue(false),
+      findPlatformAttendee: jest.fn().mockResolvedValue(null),
       createAttendeeAccount: jest
         .fn()
         .mockResolvedValue({ organizationId: 1, userId: 'att-1' }),
+      supersedeUnconfirmedAttendee: jest.fn().mockResolvedValue(true),
     } as unknown as jest.Mocked<SignupRepository>;
     passwords = {
       hash: jest.fn().mockResolvedValue('HASH'),
@@ -129,14 +135,22 @@ describe('BookingClaimService (US-DISC-15)', () => {
     });
 
     it('says when the address already has an account', async () => {
-      accounts.platformAttendeeExists.mockResolvedValue(true);
+      accounts.findPlatformAttendee.mockResolvedValue(CONFIRMED);
 
       await expect(service.inspect(TOKEN)).resolves.toMatchObject({
         accountExists: true,
       });
-      expect(accounts.platformAttendeeExists).toHaveBeenCalledWith(
+      expect(accounts.findPlatformAttendee).toHaveBeenCalledWith(
         'Anan@Example.com',
       );
+    });
+
+    it('asks for a password when the address’s only account was never confirmed', async () => {
+      accounts.findPlatformAttendee.mockResolvedValue(UNCONFIRMED);
+
+      await expect(service.inspect(TOKEN)).resolves.toMatchObject({
+        accountExists: false,
+      });
     });
 
     it('refuses a link that does not verify — forged, expired or not a claim', async () => {
@@ -186,8 +200,43 @@ describe('BookingClaimService (US-DISC-15)', () => {
       });
     });
 
+    /**
+     * Somebody signed up with this address and chose its password, but never
+     * proved the inbox. The link does prove it, so its holder takes the
+     * account over: their password replaces the stranger's, the name is the
+     * booking's, and nothing the stranger may have opened survives.
+     */
+    it('takes over an account whose address was never confirmed, rather than refusing', async () => {
+      accounts.findPlatformAttendee.mockResolvedValue(UNCONFIRMED);
+      users.findProfile.mockResolvedValue({
+        ...found,
+        user: { ...found.user, id: 'att-9' },
+      } as unknown as Awaited<ReturnType<UsersRepository['findProfile']>>);
+
+      await claim();
+
+      expect(accounts.supersedeUnconfirmedAttendee).toHaveBeenCalledWith({
+        userId: 'att-9',
+        name: 'Anan Suksawat',
+        passwordHash: 'HASH',
+      });
+      expect(accounts.createAttendeeAccount).not.toHaveBeenCalled();
+      expect(users.findProfile).toHaveBeenCalledWith('att-9');
+      expect(auth.startSession).toHaveBeenCalledTimes(1);
+    });
+
+    it('tells the loser to sign in if that account was confirmed meanwhile (409)', async () => {
+      accounts.findPlatformAttendee.mockResolvedValue(UNCONFIRMED);
+      accounts.supersedeUnconfirmedAttendee.mockResolvedValue(false);
+
+      const refusal = await refusalOf(claim());
+
+      expect(refusal.getStatus()).toBe(HttpStatus.CONFLICT);
+      expect(auth.startSession).not.toHaveBeenCalled();
+    });
+
     it('invites an address that already has an account to sign in (409) — which also spends the link', async () => {
-      accounts.platformAttendeeExists.mockResolvedValue(true);
+      accounts.findPlatformAttendee.mockResolvedValue(CONFIRMED);
 
       const refusal = await refusalOf(claim());
 
@@ -196,6 +245,7 @@ describe('BookingClaimService (US-DISC-15)', () => {
         'An account already uses this email. Sign in instead.',
       );
       expect(accounts.createAttendeeAccount).not.toHaveBeenCalled();
+      expect(accounts.supersedeUnconfirmedAttendee).not.toHaveBeenCalled();
       expect(auth.startSession).not.toHaveBeenCalled();
     });
 

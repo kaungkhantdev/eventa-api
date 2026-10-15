@@ -72,11 +72,7 @@ export class AuthBookingSignupService {
    */
   async accountFor(orderId: string): Promise<BookingAccountDto> {
     const booking = await this.bookingOrNotFound(orderId);
-    return {
-      accountExists: await this.accounts.platformAttendeeExists(
-        booking.buyerEmail,
-      ),
-    };
+    return { accountExists: await this.hasAccount(booking.buyerEmail) };
   }
 
   /**
@@ -89,9 +85,7 @@ export class AuthBookingSignupService {
    */
   async requestLink(orderId: string): Promise<BookingLinkSentDto> {
     const booking = await this.bookingOrNotFound(orderId);
-    if (await this.accounts.platformAttendeeExists(booking.buyerEmail)) {
-      throw signInInstead();
-    }
+    if (await this.hasAccount(booking.buyerEmail)) throw signInInstead();
     const platformOrganizationId = await this.platformOrganizationId();
     await this.throttle.claim(
       claimThrottleIdentity(booking.buyerEmail),
@@ -122,6 +116,18 @@ export class AuthBookingSignupService {
         occurredAt: this.clock.now().toISOString(),
       }),
     );
+  }
+
+  /**
+   * Whether the address has an account to sign in to. One nobody confirmed
+   * does not count: anybody can sign up with anybody's address and choose its
+   * password, and telling the address's owner to sign in to that account —
+   * or refusing them a link because of it — would steer them into the
+   * stranger's password (pre-account takeover). The claim link supersedes it.
+   */
+  private async hasAccount(email: string): Promise<boolean> {
+    const account = await this.accounts.findPlatformAttendee(email);
+    return account?.confirmed ?? false;
   }
 
   private async bookingOrNotFound(orderId: string): Promise<ClaimableBooking> {

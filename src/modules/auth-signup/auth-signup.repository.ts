@@ -3,6 +3,7 @@ import { and, eq, isNull, like, ne, sql } from 'drizzle-orm';
 import { PLATFORM_ORG_SLUG } from '../../common/tenancy/platform-org';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
+  authSessions,
   memberships,
   organizations,
   permissions,
@@ -46,6 +47,28 @@ export interface AttendeeAccountInput {
    * confirmation is owed.
    */
   confirmed?: boolean;
+}
+
+/**
+ * The attendee account attendee sign-in would find for an address, and
+ * whether that address was ever proven — by its own confirmation link, an
+ * invitation, a sign-in provider, or a booking's claim link.
+ */
+export interface PlatformAttendee {
+  userId: string;
+  /**
+   * False while the account is `Unconfirmed`: somebody filled in the sign-up
+   * form with this address and chose its password, and nobody has yet shown
+   * they read its inbox.
+   */
+  confirmed: boolean;
+}
+
+/** What a proven inbox replaces on an account nobody had proven (US-DISC-15). */
+export interface SupersedeInput {
+  userId: string;
+  name: string;
+  passwordHash: string;
 }
 
 export interface BootstrapInput {
@@ -162,18 +185,18 @@ export class SignupRepository {
   }
 
   /**
-   * Is this address a live attendee account in the PLATFORM organization —
-   * the one attendee sign-in resolves to (US-DISC-08)?
+   * The live attendee account in the PLATFORM organization on this address —
+   * the one attendee sign-in resolves to (US-DISC-08) — or null.
    *
    * Narrower than `attendeeEmailExists` on purpose. That one counts an
    * attendee row in any workspace, which only older social sign-ins ever
    * wrote; this one asks exactly what `uq_users_org_email_persona` will refuse
-   * a second of, so "sign in instead" (US-DISC-15) is only ever said when
-   * there is an account sign-in can actually find.
+   * a second of, so "sign in instead" (US-DISC-15) is only ever said about an
+   * account sign-in can actually find.
    */
-  async platformAttendeeExists(email: string): Promise<boolean> {
+  async findPlatformAttendee(email: string): Promise<PlatformAttendee | null> {
     const [row] = await this.db
-      .select({ id: users.id })
+      .select({ userId: users.id, status: users.status })
       .from(users)
       .innerJoin(organizations, eq(organizations.id, users.organizationId))
       .where(
@@ -185,7 +208,58 @@ export class SignupRepository {
         ),
       )
       .limit(1);
-    return row !== undefined;
+    if (!row) return null;
+    return { userId: row.userId, confirmed: row.status !== PENDING_STATUS };
+  }
+
+  /**
+   * Hand an account nobody had proven to the person who just proved its inbox
+   * (US-DISC-15): their password replaces whatever the sign-up form was given,
+   * the name becomes theirs, the account turns `Active`, and every session it
+   * had is revoked — one transaction, so no moment exists where the old
+   * password and the new status hold together.
+   *
+   * Only an account still `Unconfirmed` is touched. False when there is none
+   * any more — confirmed, deleted or gone since the caller looked — and then
+   * nothing is written.
+   */
+  async supersedeUnconfirmedAttendee(input: SupersedeInput): Promise<boolean> {
+    const organizationId = await this.findPlatformOrganizationId();
+    if (organizationId === null) return false;
+
+    return withTenant(this.db, organizationId, async (tx) => {
+      const now = new Date();
+      const taken = await tx
+        .update(users)
+        .set({
+          name: input.name,
+          passwordHash: input.passwordHash,
+          status: ACTIVE_STATUS,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(users.id, input.userId),
+            eq(users.organizationId, organizationId),
+            eq(users.persona, ATTENDEE_PERSONA),
+            eq(users.status, PENDING_STATUS),
+            isNull(users.deletedAt),
+          ),
+        )
+        .returning({ id: users.id });
+      if (taken.length === 0) return false;
+      await tx
+        .update(authSessions)
+        .set({ revokedAt: now })
+        .where(
+          and(
+            eq(authSessions.userId, input.userId),
+            eq(authSessions.organizationId, organizationId),
+            isNull(authSessions.revokedAt),
+          ),
+        );
+      return true;
+    });
   }
 
   /**

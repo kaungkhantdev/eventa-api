@@ -18,6 +18,13 @@ const PLATFORM_ORG_ID = 1;
 const WEB = 'https://web.example.com';
 const NOW = new Date('2026-10-15T05:00:00.000Z');
 const EXPIRES = new Date('2026-10-22T05:00:00.000Z');
+/** An account whose address was proven — by its own link, an invite or a provider. */
+const CONFIRMED = { userId: 'att-1', confirmed: true };
+/**
+ * An account somebody signed up for with this address and never confirmed —
+ * a password chosen by whoever typed the address, proven by nobody.
+ */
+const UNCONFIRMED = { userId: 'att-9', confirmed: false };
 
 /** The booking, as Checkout describes it — the address typed in mixed case. */
 const booking: ClaimableBooking = {
@@ -49,7 +56,7 @@ describe('AuthBookingSignupService (US-DISC-15)', () => {
       findBooking: jest.fn().mockResolvedValue(booking),
     };
     accounts = {
-      platformAttendeeExists: jest.fn().mockResolvedValue(false),
+      findPlatformAttendee: jest.fn().mockResolvedValue(null),
       findPlatformOrganizationId: jest.fn().mockResolvedValue(PLATFORM_ORG_ID),
       createAttendeeAccount: jest.fn(),
     } as unknown as jest.Mocked<SignupRepository>;
@@ -84,14 +91,28 @@ describe('AuthBookingSignupService (US-DISC-15)', () => {
       await expect(service.accountFor(ORDER_ID)).resolves.toEqual({
         accountExists: false,
       });
-      accounts.platformAttendeeExists.mockResolvedValue(true);
+      accounts.findPlatformAttendee.mockResolvedValue(CONFIRMED);
       await expect(service.accountFor(ORDER_ID)).resolves.toEqual({
         accountExists: true,
       });
       expect(bookings.findBooking).toHaveBeenCalledWith(ORDER_ID);
-      expect(accounts.platformAttendeeExists).toHaveBeenCalledWith(
+      expect(accounts.findPlatformAttendee).toHaveBeenCalledWith(
         booking.buyerEmail,
       );
+    });
+
+    /**
+     * Anybody can sign up with anybody's address and choose its password. If
+     * that unproven account counted, the address's owner would be told to sign
+     * in to it — and confirming it would hand the stranger's password a live
+     * account (pre-account takeover).
+     */
+    it('does not count an account whose address was never confirmed', async () => {
+      accounts.findPlatformAttendee.mockResolvedValue(UNCONFIRMED);
+
+      await expect(service.accountFor(ORDER_ID)).resolves.toEqual({
+        accountExists: false,
+      });
     });
 
     it('answers 404 for an order that does not exist', async () => {
@@ -170,8 +191,17 @@ describe('AuthBookingSignupService (US-DISC-15)', () => {
       expect(outbox.enqueue).not.toHaveBeenCalled();
     });
 
+    it('sends the link to an address whose only account was never confirmed', async () => {
+      accounts.findPlatformAttendee.mockResolvedValue(UNCONFIRMED);
+
+      await expect(service.requestLink(ORDER_ID)).resolves.toEqual({
+        sentTo: booking.buyerEmail,
+      });
+      expect(outbox.enqueue).toHaveBeenCalledTimes(1);
+    });
+
     it('invites an address that already has an account to sign in (409), sending nothing', async () => {
-      accounts.platformAttendeeExists.mockResolvedValue(true);
+      accounts.findPlatformAttendee.mockResolvedValue(CONFIRMED);
 
       const refusal = await refusalOf(service.requestLink(ORDER_ID));
 

@@ -54,6 +54,12 @@ const OTHER_ACCOUNTS = [
     deleted: false,
   },
 ] as const;
+/**
+ * An address a stranger signed up with directly, choosing its password, and
+ * never confirmed — then its real owner books with it.
+ */
+const PLANTED = { name: 'Ratana Owner', email: 'planted@bookclaim.test' };
+const STRANGERS_PASSWORD = 'chosen-by-stranger1!';
 /** Longer than `CLAIM_TOKEN_MAX_LENGTH` (2048) — no link this API signs is near it. */
 const OVERSIZED_TOKEN = 'x'.repeat(2049);
 const UNKNOWN_ORDER = '6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b';
@@ -735,6 +741,119 @@ describe('Account from a booking (e2e — US-DISC-15)', () => {
       },
     );
   });
+
+  /**
+   * Pre-account takeover. Anybody can fill in the attendee sign-up form with
+   * anybody's address and choose its password; the account waits,
+   * `Unconfirmed`, for its owner to open the confirmation link — which would
+   * activate the STRANGER's password. Counting that account as "already
+   * there" would tell the owner to sign in to it and refuse them the one link
+   * that proves the inbox first. It is no account: the claim takes it over.
+   */
+  describe('an address a stranger signed up with and never confirmed', () => {
+    let plantedOrderId: string;
+    let plantedUserId: string;
+    let token: string;
+
+    const login = (password: string) =>
+      request(server)
+        .post('/api/v1/auth/login')
+        .send({ email: PLANTED.email, password, persona: 'attendee' });
+
+    beforeAll(async () => {
+      const signedUp = await request(server)
+        .post('/api/v1/auth/register')
+        .send({
+          persona: 'attendee',
+          name: 'Not The Owner',
+          email: PLANTED.email,
+          password: STRANGERS_PASSWORD,
+          acceptTerms: true,
+        });
+      expect(signedUp.status).toBe(202);
+      const { rows } = await pool.query<{ id: string; status: string }>(
+        `SELECT id, status FROM users
+          WHERE email = $1 AND persona = 'attendee' AND deleted_at IS NULL`,
+        [PLANTED.email],
+      );
+      expect(rows.map((r) => r.status)).toEqual(['Unconfirmed']);
+      plantedUserId = rows[0].id;
+      // Whatever session that account might hold must not outlive the takeover.
+      await pool.query(
+        `INSERT INTO auth_sessions (organization_id, user_id, device, expires_at)
+         VALUES ($1, $2, 'Stranger’s laptop', now() + interval '1 day')`,
+        [platformOrgId, plantedUserId],
+      );
+      plantedOrderId = (
+        await placeFreeOrder(server, seeded.latest, PLANTED, 'planted')
+      ).orderId;
+    });
+
+    it('is still offered "Create account", not "Sign in"', async () => {
+      const res = await accountFor(plantedOrderId);
+
+      expect((res.body as Success<unknown>).data).toEqual({
+        accountExists: false,
+      });
+    });
+
+    it('is sent the link (202)', async () => {
+      expect((await requestLink(plantedOrderId)).status).toBe(202);
+      token = await claimTokenFor(plantedOrderId);
+    });
+
+    it('the link asks for a password, in the booking’s name', async () => {
+      const res = await inspect(token);
+
+      expect((res.body as Success<unknown>).data).toEqual({
+        name: PLANTED.name,
+        email: PLANTED.email,
+        accountExists: false,
+      });
+    });
+
+    it('the claim takes that account over — the owner’s password, the booking’s name, Active (201)', async () => {
+      const res = await claim({ token, password: PASSWORD, acceptTerms: true });
+
+      expect(res.status).toBe(201);
+      expect((res.body as Success<Session>).data.user).toMatchObject({
+        name: PLANTED.name,
+        email: PLANTED.email,
+        status: 'Active',
+      });
+      const { rows } = await pool.query(
+        `SELECT id, name, status FROM users
+          WHERE email = $1 AND persona = 'attendee' AND deleted_at IS NULL`,
+        [PLANTED.email],
+      );
+      expect(rows).toEqual([
+        { id: plantedUserId, name: PLANTED.name, status: 'Active' },
+      ]);
+    });
+
+    it('revokes every session the unconfirmed account had', async () => {
+      const { rows } = await pool.query(
+        `SELECT 1 FROM auth_sessions
+          WHERE user_id = $1 AND device = 'Stranger’s laptop'
+            AND revoked_at IS NULL`,
+        [plantedUserId],
+      );
+
+      expect(rows).toHaveLength(0);
+    });
+
+    it('the stranger’s password no longer opens it; the owner’s does', async () => {
+      expect((await login(STRANGERS_PASSWORD)).status).toBe(401);
+      expect((await login(PASSWORD)).status).toBe(200);
+    });
+
+    it('works once: the same link again is told to sign in (409)', async () => {
+      const res = await claim({ token, password: PASSWORD, acceptTerms: true });
+
+      expect(res.status).toBe(409);
+      expect((res.body as Failure).message).toBe(SIGN_IN_INSTEAD);
+    });
+  });
 });
 
 interface Seeded {
@@ -815,6 +934,7 @@ async function cleanup(pool: Pool, redis: Redis): Promise<void> {
   await redis.del(
     coolOffKey(BUYER.email),
     coolOffKey(VICTIM.email),
+    coolOffKey(PLANTED.email),
     ...OTHER_ACCOUNTS.map(({ buyer }) => coolOffKey(buyer.email)),
   );
   await pool.query(
