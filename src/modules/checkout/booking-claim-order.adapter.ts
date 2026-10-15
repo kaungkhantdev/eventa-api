@@ -8,8 +8,9 @@ import { CheckoutRepository } from './checkout.repository';
 /**
  * Checkout's answer to "which booking is this?" for an account created from it
  * (US-DISC-15). AuthBookingSignup declares the port; this adapter reads the
- * order, its event and its workspace from the tables Checkout owns, so the
- * account flow never touches them.
+ * order — its status included, which Checkout alone sets — its event and its
+ * workspace from the tables Checkout owns, so the account flow never touches
+ * them.
  *
  * The language is the one the booking's own confirmation email is written in:
  * eventa-worker picks the buyer's account language first, then the event's,
@@ -33,6 +34,7 @@ export class BookingClaimOrderAdapter extends BookingClaimOrderPort {
       buyerEmail: row.buyerEmail,
       eventName: row.eventName,
       locale: row.eventLocale ?? row.organizationLocale,
+      status: row.status,
     };
   }
 }

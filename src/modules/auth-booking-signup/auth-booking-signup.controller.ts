@@ -75,7 +75,8 @@ export class AuthBookingSignupController {
   @ApiData(BookingLinkSentDto, HttpStatus.ACCEPTED)
   @ApiNotFoundResponse({ description: 'No such order', type: ApiErrorDto })
   @ApiConflictResponse({
-    description: 'An attendee account already uses the booking’s email',
+    description:
+      'The booking is not confirmed, so it has no tickets to keep — or an attendee account already uses its email',
     type: ApiErrorDto,
   })
   @ApiTooManyRequestsResponse({

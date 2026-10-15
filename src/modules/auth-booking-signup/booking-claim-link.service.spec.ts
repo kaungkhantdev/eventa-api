@@ -49,6 +49,7 @@ const booking: ClaimableBooking = {
   buyerEmail: 'Anan@Example.com',
   eventName: 'Bangkok Design Week',
   locale: 'th',
+  status: 'confirmed',
 };
 
 /**

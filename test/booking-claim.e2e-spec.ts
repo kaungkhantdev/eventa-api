@@ -12,6 +12,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { orderStatusEnum } from '../src/db/schema';
 import { buildOpenApiDocument } from '../src/openapi';
 import { listenOnLoopback } from './support/loopback';
 
@@ -68,6 +69,15 @@ const MOVER = { name: 'Porntip Mover', email: 'mover@bookclaim.test' };
 const MOVED_TO = 'moved-to@bookclaim.test';
 /** Somebody whose booking a stranger keeps pressing "Create account" on. */
 const PESTERED = { name: 'Suda Pestered', email: 'pestered@bookclaim.test' };
+/** Somebody with bookings standing every way but confirmed — and then one that is. */
+const UNSETTLED = {
+  name: 'Kittisak Unsettled',
+  email: 'unsettled@bookclaim.test',
+};
+/** Every way an order can stand other than confirmed — read from the enum. */
+const NOT_CONFIRMED_STATUSES = orderStatusEnum.enumValues.filter(
+  (status) => status !== 'confirmed',
+);
 /** Longer than `CLAIM_TOKEN_MAX_LENGTH` (2048) — no link this API signs is near it. */
 const OVERSIZED_TOKEN = 'x'.repeat(2049);
 const UNKNOWN_ORDER = '6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b';
@@ -78,6 +88,8 @@ const PASSWORD = 'kept-tickets1!';
 const DEAD_LINK =
   'This link has expired or is no longer valid. Ask for a new one from your booking confirmation.';
 const SIGN_IN_INSTEAD = 'An account already uses this email. Sign in instead.';
+const BOOKING_NOT_CONFIRMED =
+  "This booking isn't confirmed, so there are no tickets to keep in an account yet.";
 const CLAIM_PATH = '/api/v1/auth/register/from-booking/claim';
 const INSPECT_PATH = '/api/v1/auth/register/from-booking/claim/inspect';
 const PAYLOAD_KEYS = [
@@ -380,6 +392,76 @@ describe('Account from a booking (e2e — US-DISC-15)', () => {
 
       expect(res.status).toBe(429);
       expect(await linkRows(earlierOrderId)).toHaveLength(0);
+    });
+  });
+
+  /**
+   * Only a confirmed booking has tickets to keep in an account. Each order is
+   * placed through the real checkout and then set to one of the other statuses
+   * the orders table allows: where the order stands is what is under test, not
+   * how it came to stand there.
+   */
+  describe('a booking that isn’t confirmed', () => {
+    /** The unconfirmed bookings below, by status. */
+    const unsettled = new Map<string, string>();
+
+    it.each(NOT_CONFIRMED_STATUSES)(
+      'refuses the link when the booking is %s (409), queuing nothing and spending no cool-off',
+      async (status) => {
+        const { orderId: id } = await placeFreeOrder(
+          server,
+          seeded.latest,
+          UNSETTLED,
+          `unsettled-${status}`,
+        );
+        const moved = await pool.query(
+          `UPDATE orders SET status = $2 WHERE id = $1`,
+          [id, status],
+        );
+        expect(moved.rowCount).toBe(1);
+        unsettled.set(status, id);
+
+        const res = await requestLink(id);
+
+        expect(res.status).toBe(409);
+        expect((res.body as Failure).message).toBe(BOOKING_NOT_CONFIRMED);
+        expect(await linkRows(id)).toHaveLength(0);
+        expect(
+          await redis.exists(
+            coolOffKey(UNSETTLED.email),
+            budgetKey(UNSETTLED.email),
+          ),
+        ).toBe(0);
+      },
+    );
+
+    it('still says whether the address has an account — only the link is refused', async () => {
+      expect([...unsettled.keys()]).toEqual(NOT_CONFIRMED_STATUSES);
+      for (const id of unsettled.values()) {
+        const res = await accountFor(id);
+
+        expect(res.status).toBe(200);
+        expect((res.body as Success<unknown>).data).toEqual({
+          accountExists: false,
+        });
+      }
+    });
+
+    it('lets a confirmed booking for the same address have its link straight after', async () => {
+      const { orderId: id } = await placeFreeOrder(
+        server,
+        seeded.latest,
+        UNSETTLED,
+        'unsettled-confirmed',
+      );
+
+      const res = await requestLink(id);
+
+      expect(res.status).toBe(202);
+      expect((res.body as Success<unknown>).data).toEqual({
+        sentTo: UNSETTLED.email,
+      });
+      expect(await linkRows(id)).toHaveLength(1);
     });
   });
 
@@ -1060,6 +1142,7 @@ async function cleanup(pool: Pool, redis: Redis): Promise<void> {
     VICTIM.email,
     PLANTED.email,
     PESTERED.email,
+    UNSETTLED.email,
     LEAVER.email,
     MOVER.email,
     ...OTHER_ACCOUNTS.map(({ buyer }) => buyer.email),

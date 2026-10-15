@@ -14,6 +14,7 @@ const row: ClaimableBookingRow = {
   eventName: 'Bangkok Design Week',
   eventLocale: null,
   organizationLocale: 'en',
+  status: 'confirmed',
 };
 
 /**
@@ -39,8 +40,21 @@ describe('BookingClaimOrderAdapter (US-DISC-15)', () => {
       buyerEmail: 'anan@example.com',
       eventName: 'Bangkok Design Week',
       locale: 'en',
+      status: 'confirmed',
     });
     expect(repo.findClaimableBooking).toHaveBeenCalledWith(ORDER_ID);
+  });
+
+  /** Checkout owns the order's status; the account flow only reads it here. */
+  it('says where the order stands, whatever that is', async () => {
+    repo.findClaimableBooking.mockResolvedValue({
+      ...row,
+      status: 'cancelled',
+    });
+
+    await expect(port.findBooking(ORDER_ID)).resolves.toMatchObject({
+      status: 'cancelled',
+    });
   });
 
   it('speaks the event’s own language when it has one', async () => {

@@ -31,6 +31,7 @@ const booking: ClaimableBooking = {
   buyerEmail: 'anan@example.com',
   eventName: 'Bangkok Design Week',
   locale: 'en',
+  status: 'confirmed',
 };
 
 /** What the emailed link carries: the order, and the address it went to. */
@@ -212,6 +213,24 @@ describe('BookingClaimService (US-DISC-15)', () => {
         // Opening the emailed link proved the address: nothing left to confirm.
         confirmed: true,
       });
+    });
+
+    /**
+     * Only SENDING the link needs a confirmed booking. The link, once sent,
+     * proves the inbox; the tickets need not still stand for the address's
+     * owner to have its account.
+     */
+    it('honours a link whose booking has since been cancelled', async () => {
+      bookings.findBooking.mockResolvedValue({
+        ...booking,
+        status: 'cancelled',
+      });
+
+      await expect(service.inspect(TOKEN)).resolves.toMatchObject({
+        accountExists: false,
+      });
+      await claim();
+      expect(accounts.createAttendeeAccount).toHaveBeenCalledTimes(1);
     });
 
     it('spends the link once the account exists, before signing it in', async () => {

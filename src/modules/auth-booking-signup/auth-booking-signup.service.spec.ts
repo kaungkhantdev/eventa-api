@@ -2,6 +2,7 @@ import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '../../common/errors/domain.exception';
 import type { ResendThrottleService } from '../../common/throttle/resend-throttle.service';
 import { ATTENDEE_ACCOUNTS_UNAVAILABLE } from '../../common/tenancy/platform-org';
+import { orderStatusEnum } from '../../db/schema';
 import { refusalOf } from '../../../test/support/refusal';
 import type { SignupRepository } from '../auth-signup/auth-signup.repository';
 import { AuthBookingSignupService } from './auth-booking-signup.service';
@@ -20,6 +21,12 @@ const CONFIRMED = { userId: 'att-1', confirmed: true };
  * a password chosen by whoever typed the address, proven by nobody.
  */
 const UNCONFIRMED = { userId: 'att-9', confirmed: false };
+const BOOKING_NOT_CONFIRMED =
+  "This booking isn't confirmed, so there are no tickets to keep in an account yet.";
+/** Every way an order can stand other than confirmed — read from the enum. */
+const NOT_CONFIRMED_STATUSES = orderStatusEnum.enumValues.filter(
+  (status) => status !== 'confirmed',
+);
 
 /** The booking, as Checkout describes it — the address typed in mixed case. */
 const booking: ClaimableBooking = {
@@ -28,6 +35,7 @@ const booking: ClaimableBooking = {
   buyerEmail: 'Anan@Example.com',
   eventName: 'Bangkok Design Week',
   locale: 'th',
+  status: 'confirmed',
 };
 
 /**
@@ -99,6 +107,17 @@ describe('AuthBookingSignupService (US-DISC-15)', () => {
 
       expect(refusal.getStatus()).toBe(HttpStatus.NOT_FOUND);
     });
+
+    it.each(NOT_CONFIRMED_STATUSES)(
+      'still answers when the booking is %s — only sending the link is refused',
+      async (status) => {
+        bookings.findBooking.mockResolvedValue({ ...booking, status });
+
+        await expect(service.accountFor(ORDER_ID)).resolves.toEqual({
+          accountExists: false,
+        });
+      },
+    );
   });
 
   describe('requestLink', () => {
@@ -169,6 +188,26 @@ describe('AuthBookingSignupService (US-DISC-15)', () => {
       expect(throttle.claim).not.toHaveBeenCalled();
       expect(links.send).not.toHaveBeenCalled();
     });
+
+    /**
+     * Only a confirmed booking has tickets to keep. One still pending, on the
+     * waitlist, cancelled, rejected or expired is refused before anything is
+     * rationed, signed or sent — so a confirmed booking for the same address
+     * can still have its link straight away.
+     */
+    it.each(NOT_CONFIRMED_STATUSES)(
+      'refuses the link when the booking is %s (409), spending no cool-off and sending nothing',
+      async (status) => {
+        bookings.findBooking.mockResolvedValue({ ...booking, status });
+
+        const refusal = await refusalOf(service.requestLink(ORDER_ID));
+
+        expect(refusal.getStatus()).toBe(HttpStatus.CONFLICT);
+        expect(refusal.message).toBe(BOOKING_NOT_CONFIRMED);
+        expect(throttle.claim).not.toHaveBeenCalled();
+        expect(links.send).not.toHaveBeenCalled();
+      },
+    );
 
     it('answers 404 for an order that does not exist, sending nothing', async () => {
       bookings.findBooking.mockResolvedValue(null);

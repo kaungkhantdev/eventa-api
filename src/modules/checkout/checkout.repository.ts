@@ -60,6 +60,8 @@ export interface ClaimableBookingRow {
   buyerName: string;
   buyerEmail: string;
   eventName: string;
+  /** Where the order stands: only a confirmed one has tickets to keep. */
+  status: OrderRow['status'];
   /** The event's own language, when it was given one. */
   eventLocale: (typeof organizations.$inferSelect)['locale'] | null;
   /** The workspace's language — what an event without its own falls back to. */
@@ -627,6 +629,7 @@ export class CheckoutRepository {
         buyerName: orders.buyerName,
         buyerEmail: orders.buyerEmail,
         eventName: events.name,
+        status: orders.status,
         eventLocale: events.locale,
         organizationLocale: organizations.locale,
       })

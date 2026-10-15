@@ -1,4 +1,4 @@
-import type { Locale } from '../auth-booking-signup.types';
+import type { Locale, OrderStatus } from '../auth-booking-signup.types';
 
 /** A booking, as far as creating its buyer's account needs to know it. */
 export interface ClaimableBooking {
@@ -12,6 +12,12 @@ export interface ClaimableBooking {
    * claim email that follows it speaks the same one.
    */
   locale: Locale;
+  /**
+   * Where the order stands. Only a confirmed booking has tickets to keep, so
+   * only a confirmed one is sent a link; a link already sent is honoured
+   * whatever the order has become since, because it proves the inbox.
+   */
+  status: OrderStatus;
 }
 
 /**

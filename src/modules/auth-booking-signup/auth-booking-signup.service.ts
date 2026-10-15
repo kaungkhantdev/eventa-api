@@ -9,6 +9,7 @@ import {
   attendeeAccountsUnavailable,
   signInInstead,
 } from './auth-booking-signup.errors';
+import type { OrderStatus } from './auth-booking-signup.types';
 import { BookingClaimLinkService } from './booking-claim-link.service';
 import type { BookingAccountDto } from './dto/booking-account.dto';
 import type { BookingLinkSentDto } from './dto/booking-link-sent.dto';
@@ -18,6 +19,11 @@ import {
 } from './ports/booking-claim-order.port';
 
 const ORDER_NOT_FOUND = 'That order could not be found.';
+
+/** The one status whose booking has tickets to keep in an account. */
+const CONFIRMED: OrderStatus = 'confirmed';
+const BOOKING_NOT_CONFIRMED =
+  "This booking isn't confirmed, so there are no tickets to keep in an account yet.";
 
 const SECONDS_PER_DAY = 24 * 60 * 60;
 
@@ -77,13 +83,15 @@ export class AuthBookingSignupService {
   /**
    * Email the booking's address the link that creates its account.
    *
-   * Every refusal that sends nothing — no such order, an account already,
-   * a missing platform organization — comes before the cool-off is spent:
-   * there is nothing to ration, and a later, good request must not be told
+   * Every refusal that sends nothing — no such order, a booking that isn't
+   * confirmed, an account already, a missing platform organization — comes
+   * before the cool-off is spent: there is nothing to ration, and a later,
+   * good request (a confirmed booking for the same address) must not be told
    * to wait for a link that never went out.
    */
   async requestLink(orderId: string): Promise<BookingLinkSentDto> {
     const booking = await this.bookingOrNotFound(orderId);
+    assertConfirmed(booking);
     if (await this.hasAccount(booking.buyerEmail)) throw signInInstead();
     const platformOrganizationId = await this.platformOrganizationId();
     await this.throttle.claim(
@@ -118,5 +126,15 @@ export class AuthBookingSignupService {
     const id = await this.accounts.findPlatformOrganizationId();
     if (id === null) throw attendeeAccountsUnavailable();
     return id;
+  }
+}
+
+/**
+ * Only a confirmed booking has tickets to keep, so only it is sent a link;
+ * every other status is refused (409).
+ */
+function assertConfirmed(booking: ClaimableBooking): void {
+  if (booking.status !== CONFIRMED) {
+    throw DomainException.conflict(BOOKING_NOT_CONFIRMED);
   }
 }
