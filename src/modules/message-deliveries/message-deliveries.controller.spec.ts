@@ -34,7 +34,7 @@ function contextFor(route: Route): ExecutionContext {
 async function attempt(
   grants: PermissionKey[],
   route: Route,
-): Promise<number | true> {
+): Promise<number | boolean> {
   const permissions = {
     getFor: jest.fn().mockResolvedValue(grants),
   } as unknown as PermissionsService;
