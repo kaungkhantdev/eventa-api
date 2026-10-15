@@ -6,7 +6,10 @@ import type { SignupRepository } from '../auth-signup/auth-signup.repository';
 import type { AuthService } from '../auth/auth.service';
 import type { UsersRepository } from '../users/users.repository';
 import { invalidClaimLink } from './auth-booking-signup.errors';
-import type { BookingClaimLinkService } from './booking-claim-link.service';
+import type {
+  BookingClaimLinkService,
+  ClaimLink,
+} from './booking-claim-link.service';
 import { BookingClaimService } from './booking-claim.service';
 import type {
   BookingClaimOrderPort,
@@ -30,10 +33,15 @@ const booking: ClaimableBooking = {
 };
 
 /** What the emailed link carries: the order, and the address it went to. */
-const link = {
+const link: ClaimLink = {
   orderId: ORDER_ID,
   email: 'Anan@Example.com',
+  spent: false,
+  ledgerKey: 'booking-claim:spent:digest',
+  expiresAt: new Date('2026-10-22T05:00:00.000Z'),
 };
+/** The same link, once it has made an account. */
+const spentLink = { ...link, spent: true };
 
 /** An account whose address was proven — by its own link, an invite or a provider. */
 const CONFIRMED = { userId: 'att-1', confirmed: true };
@@ -80,6 +88,7 @@ describe('BookingClaimService (US-DISC-15)', () => {
     };
     links = {
       read: jest.fn().mockResolvedValue(link),
+      spend: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<BookingClaimLinkService>;
     accounts = {
       findPlatformAttendee: jest.fn().mockResolvedValue(null),
@@ -165,6 +174,21 @@ describe('BookingClaimService (US-DISC-15)', () => {
       await expectDeadLink(service.inspect(TOKEN));
     });
 
+    it('refuses a used link once the account it made is gone', async () => {
+      links.read.mockResolvedValue(spentLink);
+
+      await expectDeadLink(service.inspect(TOKEN));
+    });
+
+    it('still says "sign in" for a used link while its account stands', async () => {
+      links.read.mockResolvedValue(spentLink);
+      accounts.findPlatformAttendee.mockResolvedValue(CONFIRMED);
+
+      await expect(service.inspect(TOKEN)).resolves.toMatchObject({
+        accountExists: true,
+      });
+    });
+
     it('refuses a link once the order’s address is no longer the one it was sent to', async () => {
       bookings.findBooking.mockResolvedValue({
         ...booking,
@@ -187,6 +211,47 @@ describe('BookingClaimService (US-DISC-15)', () => {
         // Opening the emailed link proved the address: nothing left to confirm.
         confirmed: true,
       });
+    });
+
+    it('spends the link once the account exists, before signing it in', async () => {
+      await claim();
+
+      expect(links.spend).toHaveBeenCalledWith(link);
+      expect(links.spend.mock.invocationCallOrder[0]).toBeGreaterThan(
+        accounts.createAttendeeAccount.mock.invocationCallOrder[0],
+      );
+      expect(links.spend.mock.invocationCallOrder[0]).toBeLessThan(
+        auth.startSession.mock.invocationCallOrder[0],
+      );
+    });
+
+    /**
+     * Deleting the account — or moving it to another address — must not turn
+     * the old email back into a way to make it again.
+     */
+    it('refuses a used link once the account it made is gone, creating nothing', async () => {
+      links.read.mockResolvedValue(spentLink);
+
+      await expectDeadLink(claim());
+      expect(passwords.hash).not.toHaveBeenCalled();
+      expect(accounts.createAttendeeAccount).not.toHaveBeenCalled();
+      expect(accounts.supersedeUnconfirmedAttendee).not.toHaveBeenCalled();
+    });
+
+    it('refuses a used link even when a stranger has since signed up unconfirmed', async () => {
+      links.read.mockResolvedValue(spentLink);
+      accounts.findPlatformAttendee.mockResolvedValue(UNCONFIRMED);
+
+      await expectDeadLink(claim());
+      expect(accounts.supersedeUnconfirmedAttendee).not.toHaveBeenCalled();
+    });
+
+    it('does not spend a link it refused', async () => {
+      accounts.findPlatformAttendee.mockResolvedValue(CONFIRMED);
+
+      await refusalOf(claim());
+
+      expect(links.spend).not.toHaveBeenCalled();
     });
 
     it('signs the new account in, as a password sign-in would', async () => {

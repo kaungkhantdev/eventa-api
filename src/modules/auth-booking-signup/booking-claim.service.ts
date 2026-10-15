@@ -15,7 +15,10 @@ import {
   invalidClaimLink,
   signInInstead,
 } from './auth-booking-signup.errors';
-import { BookingClaimLinkService } from './booking-claim-link.service';
+import {
+  BookingClaimLinkService,
+  type ClaimLink,
+} from './booking-claim-link.service';
 import type { BookingClaimPreviewDto } from './dto/booking-claim-preview.dto';
 import { BookingClaimOrderPort } from './ports/booking-claim-order.port';
 
@@ -34,6 +37,13 @@ interface Claimant {
   email: string;
 }
 
+/** A good link: who it is for, and the account their address has, if any. */
+interface LinkStanding {
+  claimant: Claimant;
+  existing: PlatformAttendee | null;
+  link: ClaimLink;
+}
+
 /**
  * Creating an attendee account from the link a booking's address was emailed
  * (US-DISC-15) — the one sign-up that needs no confirmation email and signs
@@ -44,8 +54,9 @@ interface Claimant {
  * only ever be made for the inbox that received the link — and the person who
  * chooses its password is, by construction, the person who reads that inbox.
  *
- * Single use without a ledger: a claim creates the address's account, and a
- * second claim finds it and is told to sign in.
+ * Single use, twice over: a claim creates the address's account, and a second
+ * claim finds it and is told to sign in; and the link is recorded as spent, so
+ * once that account is gone it cannot make it again.
  *
  * An account somebody signed up for with this address but never confirmed is
  * not "an account already": its password was chosen by whoever typed the
@@ -70,20 +81,19 @@ export class BookingClaimService {
    * link: whose account it creates, and whether one already exists.
    */
   async inspect(token: string): Promise<BookingClaimPreviewDto> {
-    const claimant = await this.claimantOfGoodLink(token);
-    const existing = await this.accounts.findPlatformAttendee(claimant.email);
+    const { claimant, existing } = await this.standingOf(token);
     return { ...claimant, accountExists: existing?.confirmed ?? false };
   }
 
   /** Create the account, Active, and open its first session. */
   async claim(input: ClaimInput): Promise<LoginResult> {
-    const claimant = await this.claimantOfGoodLink(input.token);
-    const existing = await this.accounts.findPlatformAttendee(claimant.email);
+    const { claimant, existing, link } = await this.standingOf(input.token);
     if (existing?.confirmed) throw signInInstead();
     const passwordHash = await this.passwords.hash(input.password);
     const userId = existing
       ? await this.supersede(existing, claimant, passwordHash)
       : await this.createAccount(claimant, passwordHash);
+    await this.links.spend(link);
     const found = await this.users.findProfile(userId);
     if (!found) throw attendeeAccountsUnavailable();
     return this.auth.startSession(found, {
@@ -93,21 +103,29 @@ export class BookingClaimService {
   }
 
   /**
-   * The one answer to "is this link still good", shared by `inspect` and
-   * `claim` so the page can never call a link good that the claim refuses.
+   * The one answer to "is this link still good, and for whom", shared by
+   * `inspect` and `claim` so the page can never call a link good that the
+   * claim refuses.
    *
    * Good means signed by us, unexpired, a booking claim and nothing else, for
    * an order that still exists and still carries the address the link was
    * sent to. If the order's address has changed since, the link proves an
    * inbox the booking no longer names, so it is dead.
+   *
+   * A used link is good only to say "sign in" while the account it made
+   * stands. Once that account is gone — deleted, or moved to another address
+   * — the link is dead too, not a way to make it again.
    */
-  private async claimantOfGoodLink(token: string): Promise<Claimant> {
+  private async standingOf(token: string): Promise<LinkStanding> {
     const link = await this.links.read(token);
     const booking = await this.bookings.findBooking(link.orderId);
     if (!booking || !sameAddress(booking.buyerEmail, link.email)) {
       throw invalidClaimLink();
     }
-    return { name: booking.buyerName, email: link.email };
+    const existing = await this.accounts.findPlatformAttendee(link.email);
+    if (link.spent && !existing?.confirmed) throw invalidClaimLink();
+    const claimant = { name: booking.buyerName, email: link.email };
+    return { claimant, existing, link };
   }
 
   /**

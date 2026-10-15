@@ -98,4 +98,5 @@ export interface BookingClaimClaims {
   sub: string; // orderId
   email: string; // the booking's buyer email the link was sent to
   typ: 'booking_claim';
+  exp: number; // seconds since the epoch — every claim link expires
 }

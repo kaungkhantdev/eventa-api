@@ -138,6 +138,24 @@ describe('TokenService booking claim (US-DISC-15)', () => {
     await expect(tokens.verifyBookingClaim(forged)).rejects.toBeDefined();
   });
 
+  it('says when it stops working, as the token itself does', async () => {
+    const { token, expiresAt } = await tokens.signBookingClaim(booking);
+
+    const claims = await tokens.verifyBookingClaim(token);
+
+    expect(claims.exp * 1000).toBe(expiresAt.getTime());
+  });
+
+  it('refuses a claim that never expires', async () => {
+    const forever = await jwt.signAsync({
+      sub: booking.orderId,
+      email: booking.email,
+      typ: 'booking_claim',
+    });
+
+    await expect(tokens.verifyBookingClaim(forever)).rejects.toBeDefined();
+  });
+
   it('refuses an expired claim', async () => {
     const expired = await jwt.signAsync({
       sub: booking.orderId,

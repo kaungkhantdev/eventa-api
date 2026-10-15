@@ -230,7 +230,7 @@ export class TokenService {
    * a second clock reading here could disagree with it by a second.
    */
   async signBookingClaim(s: BookingClaimSubject): Promise<SignedBookingClaim> {
-    const claims: BookingClaimClaims = {
+    const claims: Omit<BookingClaimClaims, 'exp'> = {
       sub: s.orderId,
       email: s.email,
       typ: BOOKING_CLAIM_TYPE,
@@ -246,14 +246,17 @@ export class TokenService {
    * The `typ` check is the point, as it is for the 2FA challenge: every token
    * here shares one HS256 secret, so without it an access token — which the
    * browser holds — or an invite or reset token would verify as a claim. The
-   * address is required too: it is what the account is created for.
+   * address is required too: it is what the account is created for. So is an
+   * expiry: this service never signs a claim without one, and how long a used
+   * link must be remembered is read from it.
    */
   async verifyBookingClaim(token: string): Promise<BookingClaimClaims> {
     const claims = await this.jwt.verifyAsync<BookingClaimClaims>(token);
     if (
       claims.typ !== BOOKING_CLAIM_TYPE ||
       typeof claims.sub !== 'string' ||
-      typeof claims.email !== 'string'
+      typeof claims.email !== 'string' ||
+      typeof claims.exp !== 'number'
     ) {
       throw new Error('Not a booking claim token');
     }

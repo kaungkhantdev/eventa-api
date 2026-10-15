@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test';
 process.env.DATABASE_URL ??= 'postgres://eventa:eventa@localhost:5432/eventa';
 process.env.JWT_SECRET ??= 'test-secret-at-least-16-characters-long';
 
+import { createHash } from 'node:crypto';
 import type { Server } from 'node:http';
 import type { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -60,6 +61,11 @@ const OTHER_ACCOUNTS = [
  */
 const PLANTED = { name: 'Ratana Owner', email: 'planted@bookclaim.test' };
 const STRANGERS_PASSWORD = 'chosen-by-stranger1!';
+/** Somebody who makes the account from the link, then deletes it. */
+const LEAVER = { name: 'Wichai Leaver', email: 'leaver@bookclaim.test' };
+/** Somebody who makes the account from the link, then moves it elsewhere. */
+const MOVER = { name: 'Porntip Mover', email: 'mover@bookclaim.test' };
+const MOVED_TO = 'moved-to@bookclaim.test';
 /** Somebody whose booking a stranger keeps pressing "Create account" on. */
 const PESTERED = { name: 'Suda Pestered', email: 'pestered@bookclaim.test' };
 /** Longer than `CLAIM_TOKEN_MAX_LENGTH` (2048) — no link this API signs is near it. */
@@ -216,6 +222,12 @@ describe('Account from a booking (e2e — US-DISC-15)', () => {
   /** The token in the link the worker would have mailed for this order. */
   const claimTokenFor = async (id: string): Promise<string> => {
     const [{ payload }] = await linkRows(id);
+    return new URL(payload.claimUrl as string).searchParams.get('claim') ?? '';
+  };
+
+  /** The token in the most recent link mailed for this order. */
+  const latestClaimTokenFor = async (id: string): Promise<string> => {
+    const { payload } = (await linkRows(id)).at(-1) as OutboxRow;
     return new URL(payload.claimUrl as string).searchParams.get('claim') ?? '';
   };
 
@@ -886,6 +898,86 @@ describe('Account from a booking (e2e — US-DISC-15)', () => {
       expect((res.body as Failure).message).toBe(SIGN_IN_INSTEAD);
     });
   });
+
+  /**
+   * "The link works only once" (AC8) — and not only while the account it made
+   * stands. Inside its seven days the old email is still in the inbox, and may
+   * have been forwarded or shared: it must not make the account again once its
+   * owner has deleted it (PDPA) or moved it to another address.
+   */
+  describe('a used link, once the account it made is gone', () => {
+    const live = async (email: string) =>
+      (
+        await pool.query(
+          `SELECT 1 FROM users
+            WHERE email = $1 AND persona = 'attendee' AND deleted_at IS NULL`,
+          [email],
+        )
+      ).rows.length;
+
+    /** Book, ask for the link, and make the account from it. */
+    const madeFromLink = async (buyer: { name: string; email: string }) => {
+      const { orderId: id } = await placeFreeOrder(
+        server,
+        seeded.latest,
+        buyer,
+        `gone-${buyer.email}`,
+      );
+      expect((await requestLink(id)).status).toBe(202);
+      const token = await claimTokenFor(id);
+      const made = await claim({
+        token,
+        password: PASSWORD,
+        acceptTerms: true,
+      });
+      expect(made.status).toBe(201);
+      return { id, token, session: (made.body as Success<Session>).data };
+    };
+
+    it('does not make the account again after its owner deletes it', async () => {
+      const { id, token, session } = await madeFromLink(LEAVER);
+      const deleted = await request(server)
+        .delete('/api/v1/me/account')
+        .set('Authorization', `Bearer ${session.accessToken}`)
+        .send({ confirm: 'DELETE', password: PASSWORD });
+      expect(deleted.status).toBeLessThan(300);
+      expect(await live(LEAVER.email)).toBe(0);
+
+      expectDeadLink(await inspect(token));
+      expectDeadLink(
+        await claim({ token, password: 'another-pass1!', acceptTerms: true }),
+      );
+      expect(await live(LEAVER.email)).toBe(0);
+
+      // Its owner can still choose to come back: a NEW link, to the same inbox.
+      // The cool-off (at least a second) is what separates two links in life;
+      // here it is lifted, so wait out the second the first was signed in.
+      await redis.del(coolOffKey(LEAVER.email));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      expect((await requestLink(id)).status).toBe(202);
+      const again = await claim({
+        token: await latestClaimTokenFor(id),
+        password: PASSWORD,
+        acceptTerms: true,
+      });
+      expect(again.status).toBe(201);
+    });
+
+    it('does not make a second account after the first moves to another address', async () => {
+      const { token } = await madeFromLink(MOVER);
+      await pool.query(
+        `UPDATE users SET email = $2
+          WHERE email = $1 AND persona = 'attendee' AND deleted_at IS NULL`,
+        [MOVER.email, MOVED_TO],
+      );
+
+      expectDeadLink(await inspect(token));
+      expectDeadLink(
+        await claim({ token, password: PASSWORD, acceptTerms: true }),
+      );
+      expect(await live(MOVER.email)).toBe(0);
+    });
+  });
 });
 
 interface Seeded {
@@ -968,9 +1060,23 @@ async function cleanup(pool: Pool, redis: Redis): Promise<void> {
     VICTIM.email,
     PLANTED.email,
     PESTERED.email,
+    LEAVER.email,
+    MOVER.email,
     ...OTHER_ACCOUNTS.map(({ buyer }) => buyer.email),
   ];
   await redis.del(...addresses.flatMap((a) => [coolOffKey(a), budgetKey(a)]));
+  // The used-link ledger, keyed by a digest of each link these tests mailed.
+  const { rows: mailed } = await pool.query<{ claim_url: string }>(
+    `SELECT payload->>'claimUrl' AS claim_url FROM outbox_events
+      WHERE routing_key = $1 AND payload->>'email' LIKE '%@bookclaim.test'`,
+    [LINK_ROUTING_KEY],
+  );
+  for (const { claim_url } of mailed) {
+    const token = new URL(claim_url).searchParams.get('claim') ?? '';
+    await redis.del(
+      `booking-claim:spent:${createHash('sha256').update(token).digest('hex')}`,
+    );
+  }
   await pool.query(
     `DELETE FROM outbox_events WHERE routing_key = $1
         AND payload->>'email' LIKE '%@bookclaim.test'`,
