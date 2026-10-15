@@ -1,5 +1,7 @@
 import { DiscountReportPort } from '../reports/ports/discount-report.port';
 import { DiscountReportAdapter } from './discount-report.adapter';
+import { RedemptionLedgerPort } from '../checkout/ports/redemption-ledger.port';
+import { RedemptionLedgerAdapter } from './redemption-ledger.adapter';
 import { Module, forwardRef } from '@nestjs/common';
 import { AccessModule } from '../access/access.module';
 import { EventsModule } from '../events/events.module';
@@ -25,6 +27,10 @@ import { DiscountsService } from './discounts.service';
  * Consumes two ports rather than reading events: `EventOrgLookupPort` (which
  * workspace an event belongs to — how an anonymous quote gets a tenant without
  * trusting the caller) and Ticketing's `EventLookupPort` (names for the list).
+ *
+ * Binds Checkout's `RedemptionLedgerPort`: an order that uses a code records
+ * the use and counts it against the code's limit inside the order's own
+ * transaction, through this module, so Checkout never writes either table.
  */
 @Module({
   // `forwardRef` only because Discounts sits inside a module cycle it does not
@@ -36,6 +42,7 @@ import { DiscountsService } from './discounts.service';
     // Promotion payback for Reports (US-RPT-10), bound here because only this
     // module knows what a redemption is.
     { provide: DiscountReportPort, useClass: DiscountReportAdapter },
+    { provide: RedemptionLedgerPort, useClass: RedemptionLedgerAdapter },
     DiscountsService,
     DiscountsQueryService,
     DiscountRedemptionService,
@@ -43,6 +50,10 @@ import { DiscountsService } from './discounts.service';
     DiscountsPolicy,
     DiscountCodeGenerator,
   ],
-  exports: [DiscountRedemptionService, DiscountReportPort],
+  exports: [
+    DiscountRedemptionService,
+    DiscountReportPort,
+    RedemptionLedgerPort,
+  ],
 })
 export class DiscountsModule {}

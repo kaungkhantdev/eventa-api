@@ -15,7 +15,6 @@ import { DomainException } from '../../common/errors/domain.exception';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
   attendees,
-  discountRedemptions,
   events,
   orderItems,
   orders,
@@ -37,6 +36,7 @@ import {
   statusAfterRefund,
 } from './approval-rules';
 import type { OrderTotals } from './checkout-pricing';
+import { RedemptionLedgerPort } from './ports/redemption-ledger.port';
 
 /** Fallbacks if a workspace row somehow has none — the Thai statutory rate. */
 const DEFAULT_VAT_RATE = 0.07;
@@ -354,6 +354,7 @@ export class CheckoutRepository {
   constructor(
     @Inject(DRIZZLE) private readonly db: Database,
     private readonly outbox: OutboxPort,
+    private readonly redemptions: RedemptionLedgerPort,
   ) {}
 
   /**
@@ -1730,23 +1731,20 @@ export class CheckoutRepository {
       );
   }
 
-  /** The row set that `discount_codes.used` counts (US-TKT-11). */
+  /** The code's use, counted by Discounts inside this transaction (US-TKT-11). */
   private async recordRedemption(
     tx: Tx,
     input: PlaceOrderInput,
     orderId: string,
   ): Promise<void> {
     if (!input.discountCodeId || input.totals.discountSatang === 0) return;
-    await tx
-      .insert(discountRedemptions)
-      .values({
-        organizationId: input.organizationId,
-        discountCodeId: input.discountCodeId,
-        orderId,
-        buyerEmail: input.buyer.email,
-        amountSatang: input.totals.discountSatang,
-      })
-      .onConflictDoNothing();
+    await this.redemptions.redeemIn(tx, {
+      organizationId: input.organizationId,
+      discountCodeId: input.discountCodeId,
+      orderId,
+      buyerEmail: input.buyer.email,
+      amountSatang: input.totals.discountSatang,
+    });
   }
 
   /**

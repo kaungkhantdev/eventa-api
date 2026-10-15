@@ -45,6 +45,9 @@ import { WaitlistOffersAdapter } from './waitlist-offers.adapter';
  *     which reaches back here, so that edge is a `forwardRef` too.
  * The fifth is a plain service dependency: `SeatHoldService` for the row-locked
  * reservation, and `DiscountRedemptionService` for what a code is worth.
+ * Discounts also binds `RedemptionLedgerPort`, through which an order records
+ * its code's use inside its own transaction (US-TKT-11) without Checkout
+ * writing either promotions table.
  *
  * Ticketing and Checkout reference each other (`forwardRef`): Checkout reads
  * the tiers through Ticketing's catalog, and Ticketing asks Checkout to give a
