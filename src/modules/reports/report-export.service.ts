@@ -26,10 +26,12 @@ import {
   incomeBody,
   registrationsBody,
   transactionsBody,
+  payoutsBody,
 } from './report-tables';
 import type { ReportPeriod } from './reports-period';
 import { toCsvTable } from './reports-csv';
 import { TransactionsReportService } from './transactions-report.service';
+import { PayoutsReportService } from './payouts-report.service';
 
 /**
  * A report, as a file (US-RPT-11).
@@ -51,6 +53,7 @@ export const EXPORTABLE = [
   'income',
   'discounts',
   'transactions',
+  'payouts',
 ] as const;
 export type ExportableReport = (typeof EXPORTABLE)[number];
 
@@ -84,6 +87,9 @@ export class ReportExportService {
     private readonly income: IncomeReportService,
     private readonly discounts: DiscountsReportService,
     private readonly transactions: TransactionsReportService,
+    // Nine dependencies, over the house's ~6: one per exportable report. The
+    // split this asks for is per-report file builders, not done here.
+    private readonly payouts: PayoutsReportService,
     private readonly scope: ReportScopePort,
     private readonly clock: Clock,
   ) {}
@@ -145,6 +151,14 @@ export class ReportExportService {
       whole(query),
     );
     return this.document(auth, query, view.period, transactionsBody(view));
+  }
+
+  async payoutsFile(
+    auth: AuthContext,
+    query: ReportFilterQueryDto,
+  ): Promise<TabularDocument> {
+    const view = await this.payouts.load(auth.organizationId, whole(query));
+    return this.document(auth, query, view.period, payoutsBody(view));
   }
 
   /** The report, plus what a file needs that a screen does not. */

@@ -11,6 +11,8 @@ import type { EventsReportView } from './events-report.service';
 import type { IncomeReportView } from './income-report.service';
 import type { RegistrationsReportView } from './registrations-report.service';
 import type { TransactionsReportView } from './transactions-report.service';
+import type { PayoutsReportView } from './payouts-report.service';
+import type { ReportPayoutStatus } from './ports/payout-report.port';
 
 /**
  * Each report as one typed table (US-RPT-11).
@@ -310,5 +312,58 @@ export function transactionsBody(view: TransactionsReportView): ReportBody {
       figure('Success rate', 'percent', view.totals.successRate),
     ],
     table: transactionsTable(view),
+  };
+}
+
+/* ── payouts (US-RPT-07) ───────────────────────────────────────────────── */
+
+/**
+ * The story's own words for its three statuses. A `status` column would only
+ * capitalise the token, and no token reads "In transit".
+ */
+const PAYOUT_STATUS_LABEL: Record<ReportPayoutStatus, string> = {
+  paid: 'Paid',
+  in_transit: 'In transit',
+  pending: 'Pending',
+};
+
+export function payoutsTable(view: PayoutsReportView): Table {
+  return {
+    columns: columns(
+      ['Reference', 'text'],
+      ['Date', 'day'],
+      // Already masked to the last four digits by Payouts (US-RPT-07).
+      ['Bank', 'text'],
+      ['Events covered', 'text'],
+      ['Amount (THB)', 'money'],
+      ['Status', 'text'],
+    ),
+    rows: view.rows.map((row) => [
+      row.reference,
+      row.at,
+      row.bankAccount,
+      // Absent rather than blank: a payout with no items covers nothing, and
+      // each format already knows how to show a cell that does not exist.
+      row.events.length > 0
+        ? row.events.map((event) => event.eventName).join(', ')
+        : null,
+      row.amountSatang,
+      PAYOUT_STATUS_LABEL[row.status],
+    ]),
+  };
+}
+
+export function payoutsBody(view: PayoutsReportView): ReportBody {
+  return {
+    title: 'Payouts',
+    sheetName: 'Payouts',
+    matched: view.matchedPayouts,
+    summary: [
+      figure('Paid out', 'money', view.totals.paidOutSatang),
+      figure('Pending', 'money', view.totals.pendingSatang),
+      figure('In transit', 'money', view.totals.inTransitSatang),
+      figure('Average payout', 'money', view.totals.averageSatang),
+    ],
+    table: payoutsTable(view),
   };
 }

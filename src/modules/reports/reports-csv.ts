@@ -17,8 +17,10 @@ import {
   incomeTable,
   registrationsTable,
   transactionsTable,
+  payoutsTable,
 } from './report-tables';
 import type { TransactionsReportView } from './transactions-report.service';
+import type { PayoutsReportView } from './payouts-report.service';
 
 /**
  * A report's typed table, written the way a SPREADSHEET reads (US-RPT-11).
@@ -99,3 +101,6 @@ export const discountsCsv = (view: DiscountsReportView): CsvTable =>
 
 export const transactionsCsv = (view: TransactionsReportView): CsvTable =>
   toCsvTable(transactionsTable(view));
+
+export const payoutsCsv = (view: PayoutsReportView): CsvTable =>
+  toCsvTable(payoutsTable(view));

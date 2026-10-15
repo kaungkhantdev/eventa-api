@@ -34,6 +34,7 @@ import type { AuthContext } from '../auth/auth.types';
 import { AttendanceReportDto } from './dto/attendance-report.dto';
 import { DiscountsReportDto } from './dto/discounts-report.dto';
 import { TransactionsReportDto } from './dto/transactions-report.dto';
+import { PayoutsReportDto } from './dto/payouts-report.dto';
 import { EventsReportDto } from './dto/events-report.dto';
 import { EventsReportQueryDto } from './dto/events-report.query.dto';
 import { IncomeReportDto } from './dto/income-report.dto';
@@ -43,6 +44,7 @@ import { RegistrationsReportDto } from './dto/registrations-report.dto';
 import { AttendanceReportService } from './attendance-report.service';
 import { DiscountsReportService } from './discounts-report.service';
 import { TransactionsReportService } from './transactions-report.service';
+import { PayoutsReportService } from './payouts-report.service';
 import { EventsReportService } from './events-report.service';
 import { IncomeReportService } from './income-report.service';
 import { OverviewReportService } from './overview-report.service';
@@ -56,6 +58,7 @@ import {
   toAttendanceReport,
   toDiscountsReport,
   toTransactionsReport,
+  toPayoutsReport,
   toEventsReport,
   toIncomeReport,
   toOverviewReport,
@@ -92,6 +95,7 @@ export class ReportsController {
     private readonly events: EventsReportService,
     private readonly discounts: DiscountsReportService,
     private readonly transactions: TransactionsReportService,
+    private readonly payouts: PayoutsReportService,
     private readonly registrations: RegistrationsReportService,
     private readonly income: IncomeReportService,
     private readonly attendance: AttendanceReportService,
@@ -143,6 +147,21 @@ export class ReportsController {
     return toTransactionsReport(
       await this.transactions.load(auth.organizationId, query),
     );
+  }
+
+  /**
+   * Money on every row, and a bank account on every row: finance-only
+   * (US-RPT-12 names payouts as a finance report).
+   */
+  @Get('payouts')
+  @RequirePermissions(Permission.finView)
+  @ResponseMessage('Payouts report retrieved.')
+  @ApiData(PayoutsReportDto)
+  async payoutsReport(
+    @CurrentAuth() auth: AuthContext,
+    @Query() query: ReportFilterQueryDto,
+  ): Promise<PayoutsReportDto> {
+    return toPayoutsReport(await this.payouts.load(auth.organizationId, query));
   }
 
   /** Money on every row, so finance-only throughout (US-RPT-12). */
@@ -293,6 +312,20 @@ export class ReportsController {
   ): Promise<StreamableFile> {
     const doc = await this.exports.transactionsFile(auth, query);
     return this.download('transactions', format, doc);
+  }
+
+  @Get('payouts.:format')
+  @RequirePermissions(Permission.finView)
+  @SkipResponseEnvelope()
+  @ApiParam({ name: 'format', enum: EXPORT_FORMATS })
+  @ApiProduces(...PRODUCES)
+  async payoutsExport(
+    @CurrentAuth() auth: AuthContext,
+    @Param('format', ExportFormatPipe) format: ExportFormat,
+    @Query() query: ReportFilterQueryDto,
+  ): Promise<StreamableFile> {
+    const doc = await this.exports.payoutsFile(auth, query);
+    return this.download('payouts', format, doc);
   }
 
   /**

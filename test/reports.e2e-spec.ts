@@ -176,6 +176,12 @@ describe('Reports (e2e — US-RPT)', () => {
   }, 30000);
 
   afterEach(async () => {
+    // Payouts first: an item holds its payment ON DELETE RESTRICT.
+    for (const table of ['payout_items', 'payouts']) {
+      await pool.query(`DELETE FROM ${table} WHERE organization_id = ANY($1)`, [
+        [orgId, otherOrgId],
+      ]);
+    }
     for (const table of ['refunds', 'payments', 'tickets', 'order_items']) {
       await pool.query(`DELETE FROM ${table} WHERE organization_id = ANY($1)`, [
         [orgId, otherOrgId],
@@ -257,7 +263,7 @@ describe('Reports (e2e — US-RPT)', () => {
     /** `paid` unless a case needs a failure or a charge still in flight. */
     status?: 'paid' | 'pending' | 'failed';
     at?: string;
-  }): Promise<void> {
+  }): Promise<string> {
     seq += 1;
     const org = o.org ?? orgId;
     const event = o.event ?? summitId;
@@ -306,6 +312,7 @@ describe('Reports (e2e — US-RPT)', () => {
         [org, payment.rows[0].id, orderId, o.refundSatang, `ref-rpt-${seq}`],
       );
     }
+    return payment.rows[0].id;
   }
 
   /** An event starting at an offset from now, for the started/not-started rule. */
@@ -709,6 +716,342 @@ describe('Reports (e2e — US-RPT)', () => {
       expect(
         income(await getIncome(adminJwt).expect(200)).totals.grossSatang,
       ).toBe(1_000);
+    });
+  });
+
+  describe('payouts (US-RPT-07)', () => {
+    interface PayoutsReport {
+      rows: {
+        reference: string;
+        at: string;
+        bankAccount: string;
+        events: { eventId: string; eventName: string }[];
+        amountSatang: number;
+        status: string;
+      }[];
+      matchedPayouts: number;
+      totals: {
+        payouts: number;
+        paidOutSatang: number;
+        inTransitSatang: number;
+        pendingSatang: number;
+        averageSatang: number | null;
+      };
+    }
+
+    const DAY_MS = 86_400_000;
+
+    const getPayouts = (jwt: string, query = '') =>
+      request(server)
+        .get(`/api/v1/reports/payouts${query}`)
+        .set('Authorization', `Bearer ${jwt}`);
+
+    const payouts = (res: { body: unknown }) =>
+      (res.body as Success<PayoutsReport>).data;
+
+    const referencesOf = async (query: string) =>
+      payouts(await getPayouts(adminJwt, query).expect(200)).rows.map(
+        (row) => row.reference,
+      );
+
+    /**
+     * A payout settling one payment per event it covers. `payout_items` is the
+     * only place "covers" is written down, so a payout seeded without events
+     * covers none. A paid one landed yesterday; the rest are still in flight.
+     */
+    async function seedPayout(o: {
+      reference: string;
+      status: 'scheduled' | 'processing' | 'paid' | 'failed';
+      amountSatang: number;
+      events?: string[];
+      org?: number;
+      bank?: string;
+      /** SQL for `requested_at`; defaults to two days ago. */
+      requestedAt?: string;
+    }): Promise<void> {
+      const org = o.org ?? orgId;
+      const landed = o.status === 'paid' ? new Date(Date.now() - DAY_MS) : null;
+      const payout = await pool.query<{ id: string }>(
+        `INSERT INTO payouts (organization_id, reference, amount_satang, bank_account,
+                              status, requested_at, completed_at)
+         VALUES ($1, $2, $3, $4, $5::payout_status,
+                 ${o.requestedAt ?? "now() - interval '2 days'"}, $6)
+         RETURNING id`,
+        [
+          org,
+          o.reference,
+          o.amountSatang,
+          o.bank ?? '•••• 6042',
+          o.status,
+          landed,
+        ],
+      );
+      for (const event of o.events ?? []) {
+        const paymentId = await seedPayment({
+          org,
+          event,
+          amountSatang: 10_000,
+        });
+        await pool.query(
+          `INSERT INTO payout_items (organization_id, payout_id, payment_id,
+                                     gross_satang, refund_satang, fee_satang, net_satang)
+           VALUES ($1, $2, $3, 10000, 0, 0, 10000)`,
+          [org, Number(payout.rows[0].id), paymentId],
+        );
+      }
+    }
+
+    it('shows each payout’s reference, date, masked bank, events, amount and status (TC-RPT-14)', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-1',
+        status: 'paid',
+        amountSatang: 8_500_000,
+        events: [summitId],
+        bank: '1234566789',
+      });
+
+      const res = await getPayouts(adminJwt).expect(200);
+      const [row] = payouts(res).rows;
+      expect(row).toMatchObject({
+        reference: 'PO-RPT-1',
+        bankAccount: '•••• 6789',
+        events: [{ eventId: summitId, eventName: 'Tech Summit 2026' }],
+        amountSatang: 8_500_000,
+        status: 'paid',
+      });
+      expect(Number.isNaN(Date.parse(row.at))).toBe(false);
+      // US-RPT-07: the last four digits, and the full number nowhere at all.
+      expect(JSON.stringify(res.body)).not.toContain('1234566789');
+    });
+
+    it('splits the tiles by status and averages every payout shown (TC-RPT-14)', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-PAID',
+        status: 'paid',
+        amountSatang: 300_000,
+      });
+      await seedPayout({
+        reference: 'PO-RPT-SENT',
+        status: 'processing',
+        amountSatang: 200_000,
+      });
+      await seedPayout({
+        reference: 'PO-RPT-SCHED',
+        status: 'scheduled',
+        amountSatang: 100_000,
+      });
+
+      const report = payouts(await getPayouts(adminJwt).expect(200));
+      expect(report.totals).toEqual({
+        payouts: 3,
+        paidOutSatang: 300_000,
+        inTransitSatang: 200_000,
+        pendingSatang: 100_000,
+        averageSatang: 200_000,
+      });
+      expect(
+        report.rows.map((row) => [row.reference, row.status]).sort(),
+      ).toEqual([
+        ['PO-RPT-PAID', 'paid'],
+        ['PO-RPT-SCHED', 'pending'],
+        ['PO-RPT-SENT', 'in_transit'],
+      ]);
+    });
+
+    // The story has three statuses and no word for a failed transfer; that one
+    // is Finance Payouts' to show, with its retry (US-FIN-04).
+    it('leaves a failed payout out of the rows and the tiles alike', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-OK',
+        status: 'paid',
+        amountSatang: 300_000,
+      });
+      await seedPayout({
+        reference: 'PO-RPT-FAILED',
+        status: 'failed',
+        amountSatang: 999_900,
+      });
+
+      const report = payouts(await getPayouts(adminJwt).expect(200));
+      expect(report.rows.map((row) => row.reference)).toEqual(['PO-RPT-OK']);
+      expect(report.totals).toMatchObject({
+        payouts: 1,
+        averageSatang: 300_000,
+      });
+    });
+
+    it('finds a payout covering several events under each of them, once (TC-RPT-15)', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-MULTI',
+        status: 'paid',
+        amountSatang: 500_000,
+        events: [summitId, galaId],
+      });
+
+      for (const event of [summitId, galaId]) {
+        const report = payouts(
+          await getPayouts(adminJwt, `?eventId=${event}`).expect(200),
+        );
+        expect(report.rows.map((row) => row.reference)).toEqual([
+          'PO-RPT-MULTI',
+        ]);
+        // Still every event it covers, not only the one filtered on.
+        expect(report.rows[0].events.map((e) => e.eventName)).toEqual([
+          'Charity Gala',
+          'Tech Summit 2026',
+        ]);
+        // Counted once, at its whole amount — not once per event.
+        expect(report.totals).toMatchObject({
+          payouts: 1,
+          paidOutSatang: 500_000,
+        });
+      }
+    });
+
+    it('leaves out a payout covering other events, and one covering none', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-SUMMIT',
+        status: 'paid',
+        amountSatang: 100_000,
+        events: [summitId],
+      });
+      await seedPayout({
+        reference: 'PO-RPT-BARE',
+        status: 'paid',
+        amountSatang: 100_000,
+      });
+
+      const all = payouts(await getPayouts(adminJwt).expect(200));
+      expect(
+        all.rows.find((row) => row.reference === 'PO-RPT-BARE')?.events,
+      ).toEqual([]);
+      expect(await referencesOf(`?eventId=${galaId}`)).toEqual([]);
+    });
+
+    it('answers a filter that matches nothing with zeroed tiles and no average (TC-RPT-15)', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-1',
+        status: 'paid',
+        amountSatang: 100_000,
+      });
+
+      const report = payouts(
+        await getPayouts(adminJwt, '?q=no-such-payout').expect(200),
+      );
+      expect(report.rows).toEqual([]);
+      expect(report.matchedPayouts).toBe(0);
+      expect(report.totals).toEqual({
+        payouts: 0,
+        paidOutSatang: 0,
+        inTransitSatang: 0,
+        pendingSatang: 0,
+        averageSatang: null,
+      });
+    });
+
+    it('searches the reference and the events covered, never the bank account', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-JUL',
+        status: 'paid',
+        amountSatang: 100_000,
+        events: [galaId],
+        bank: '1234566789',
+      });
+      await seedPayout({
+        reference: 'PO-RPT-AUG',
+        status: 'paid',
+        amountSatang: 100_000,
+        events: [summitId],
+      });
+
+      expect(await referencesOf('?q=JUL')).toEqual(['PO-RPT-JUL']);
+      expect(await referencesOf('?q=gala')).toEqual(['PO-RPT-JUL']);
+      // A search must not confirm digits the row is not allowed to show.
+      expect(await referencesOf('?q=66789')).toEqual([]);
+    });
+
+    it('keeps to the window, by when the payout landed or was requested', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-RECENT',
+        status: 'scheduled',
+        amountSatang: 100_000,
+      });
+      await seedPayout({
+        reference: 'PO-RPT-OLD',
+        status: 'scheduled',
+        amountSatang: 100_000,
+        requestedAt: "now() - interval '40 days'",
+      });
+
+      expect(await referencesOf('?range=30d')).toEqual(['PO-RPT-RECENT']);
+      expect(
+        payouts(await getPayouts(adminJwt).expect(200)).matchedPayouts,
+      ).toBe(2);
+    });
+
+    it('pages the rows but sums the whole filter', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-A',
+        status: 'paid',
+        amountSatang: 100_000,
+      });
+      await seedPayout({
+        reference: 'PO-RPT-B',
+        status: 'paid',
+        amountSatang: 300_000,
+      });
+
+      const report = payouts(
+        await getPayouts(adminJwt, '?page=1&limit=1').expect(200),
+      );
+      expect(report.rows).toHaveLength(1);
+      expect(report.matchedPayouts).toBe(2);
+      expect(report.totals).toMatchObject({
+        payouts: 2,
+        paidOutSatang: 400_000,
+        averageSatang: 200_000,
+      });
+    });
+
+    it('is a finance report: staff and outsiders are refused (US-RPT-12)', async () => {
+      await getPayouts(staffJwt).expect(403);
+      await getPayouts(outsiderJwt).expect(403);
+      await getPayouts(adminJwt).expect(200);
+    });
+
+    it('never shows another workspace’s payouts', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-THEIRS',
+        status: 'paid',
+        amountSatang: 100_000,
+        org: otherOrgId,
+        events: [otherEventId],
+      });
+
+      const report = payouts(await getPayouts(adminJwt).expect(200));
+      expect(report.rows.map((row) => row.reference)).not.toContain(
+        'PO-RPT-THEIRS',
+      );
+      expect(report.totals.payouts).toBe(0);
+    });
+
+    it('exports the same rows, with the bank still masked (US-RPT-11)', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-CSV',
+        status: 'processing',
+        amountSatang: 8_500_000,
+        events: [summitId],
+        bank: '1234566789',
+      });
+
+      const res = await request(server)
+        .get('/api/v1/reports/payouts.csv')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(200);
+      expect(res.text).toContain('PO-RPT-CSV');
+      expect(res.text).toContain('•••• 6789');
+      expect(res.text).toContain('In transit');
+      expect(res.text).not.toContain('1234566789');
     });
   });
 
@@ -1770,6 +2113,7 @@ describe('Reports (e2e — US-RPT)', () => {
           await download(staffJwt, 'income.csv').expect(403);
           await download(staffJwt, 'transactions.csv').expect(403);
           await download(staffJwt, 'discounts.csv').expect(403);
+          await download(staffJwt, 'payouts.csv').expect(403);
           // The staff-visible ones still answer.
           await download(staffJwt, 'registrations.csv').expect(200);
           await download(staffJwt, 'attendance.csv').expect(200);
@@ -1920,6 +2264,7 @@ describe('Reports (e2e — US-RPT)', () => {
           await file(staffJwt, 'income.xlsx').expect(403);
           await file(staffJwt, 'transactions.pdf').expect(403);
           await file(staffJwt, 'discounts.xlsx').expect(403);
+          await file(staffJwt, 'payouts.xlsx').expect(403);
           await file(staffJwt, 'attendance.pdf').expect(200);
           await file(staffJwt, 'events.xlsx').expect(200);
         });
@@ -2087,6 +2432,8 @@ async function cleanup(pool: Pool): Promise<void> {
     'outbox_events',
     'discount_redemptions',
     'discount_codes',
+    'payout_items',
+    'payouts',
     'refunds',
     'payments',
     'check_ins',

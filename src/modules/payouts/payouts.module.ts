@@ -3,7 +3,9 @@ import { AccessModule } from '../access/access.module';
 import { PaymentSettingsModule } from '../payment-settings/payment-settings.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { PayoutFeedPort } from '../notifications/ports/payout-feed.port';
+import { PayoutReportPort } from '../reports/ports/payout-report.port';
 import { PayoutFeedAdapter } from './payout-feed.adapter';
+import { PayoutReportAdapter } from './payout-report.adapter';
 import { PayoutsController } from './payouts.controller';
 import { PayoutsRepository } from './payouts.repository';
 import { PayoutsService } from './payouts.service';
@@ -29,7 +31,9 @@ import { PayoutsService } from './payouts.service';
     PayoutsRepository,
     // Completed transfers as feed items (US-MSG-03).
     { provide: PayoutFeedPort, useClass: PayoutFeedAdapter },
+    // Payouts and the events they cover, for the payouts report (US-RPT-07).
+    { provide: PayoutReportPort, useClass: PayoutReportAdapter },
   ],
-  exports: [PayoutsService, PayoutFeedPort],
+  exports: [PayoutsService, PayoutFeedPort, PayoutReportPort],
 })
 export class PayoutsModule {}
