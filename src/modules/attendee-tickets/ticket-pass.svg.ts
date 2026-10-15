@@ -39,12 +39,18 @@ export function renderPassSvg(pass: TicketPassDto, qrSvg: string): string {
 /**
  * Nest the QR's own SVG inside the pass at a fixed position. The generator's
  * output always opens with `<svg xmlns=…`, and a nested <svg> with x/y/width/
- * height is standard SVG — no re-parsing of the QR content required.
+ * height is standard SVG — no re-parsing of the QR content required. Its own
+ * width and height come off first: a second pair makes the pass invalid XML,
+ * which a browser refuses to draw at all. The viewBox stays, and scales it.
  */
 function embedQr(qrSvg: string): string {
-  return qrSvg.replace(
-    '<svg ',
-    `<svg x="${QR_X}" y="${QR_Y}" width="${QR_SIZE}" height="${QR_SIZE}" `,
+  return qrSvg.replace(/^<svg [^>]*>/, (opening) =>
+    opening
+      .replace(/ (width|height)="[^"]*"/g, '')
+      .replace(
+        '<svg ',
+        `<svg x="${QR_X}" y="${QR_Y}" width="${QR_SIZE}" height="${QR_SIZE}" `,
+      ),
   );
 }
 
