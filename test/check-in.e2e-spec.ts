@@ -333,6 +333,30 @@ describe('Check-in at the door (e2e — US-REG-11/12/13)', () => {
       const res = await scan(staffJwt, otherEventId, { qrToken: 'x' });
       expect(res.status).toBe(404);
     });
+
+    /*
+     * US-SET-12: "Staff can only view registrations and check attendees in."
+     * Both door screens start by listing the workspace's events to pick one,
+     * and that list needed evCreate, so a Staff member was turned away before
+     * they could scan anybody.
+     */
+    it('lets a check-in member list the events to choose one at the door', async () => {
+      const res = await request(server)
+        .get('/api/v1/events')
+        .set('Authorization', `Bearer ${staffJwt}`);
+
+      expect(res.status).toBe(200);
+      const ids = (res.body as Success<{ id: string }[]>).data.map((e) => e.id);
+      expect(ids).toContain(eventId);
+      expect(ids).not.toContain(otherEventId);
+    });
+
+    it('still refuses the event list to a member who may only view', async () => {
+      const res = await request(server)
+        .get('/api/v1/events')
+        .set('Authorization', `Bearer ${viewerJwt}`);
+      expect(res.status).toBe(403);
+    });
   });
 
   /**
