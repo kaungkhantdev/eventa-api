@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { DomainException } from '../../common/errors/domain.exception';
 import { Paginated } from '../../common/http/paginated';
 import type { AuthContext } from '../auth/auth.types';
 import {
@@ -18,6 +19,8 @@ const DEFAULT_LIMIT = 20;
  * hundred thousand sends is truncated rather than left to time out mid-download.
  */
 const EXPORT_LIMIT = 5000;
+const NOTHING_TO_EXPORT =
+  'There is nothing to export — no messages match these filters.';
 
 export type DeliveriesQuery = Partial<
   Pick<DeliveryFilter, 'status' | 'kind' | 'q' | 'page' | 'limit'>
@@ -58,6 +61,10 @@ export class MessageDeliveriesService {
   /**
    * The same rows the list would return under the same filters, unpaged.
    * A paged export is a bug, not a feature.
+   *
+   * US-MSG-07: an empty view is refused with a reason rather than downloaded
+   * as a header-only file, and an export that happens is recorded for audit,
+   * because the file is attendee contact data in bulk.
    */
   async forExport(
     auth: AuthContext,
@@ -70,6 +77,12 @@ export class MessageDeliveriesService {
       page: DEFAULT_PAGE,
       limit: EXPORT_LIMIT,
     });
+    if (rows.length === 0) throw DomainException.conflict(NOTHING_TO_EXPORT);
+    await this.repo.recordExport(
+      auth.organizationId,
+      auth.userId,
+      `Exported ${rows.length} delivery log rows`,
+    );
     return rows;
   }
 

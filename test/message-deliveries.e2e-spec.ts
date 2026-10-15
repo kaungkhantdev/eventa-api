@@ -296,6 +296,26 @@ describe('Delivery log (e2e — US-MSG-06)', () => {
         .get(`/api/v1/message-deliveries/export.csv${query}`)
         .set('Authorization', `Bearer ${jwt}`);
 
+    afterEach(async () => {
+      await pool.query(
+        `DELETE FROM audit_events WHERE organization_id = $1 AND type = 'xport'`,
+        [orgId],
+      );
+    });
+
+    const exportsRecorded = async (): Promise<
+      { title: string; actor: string }[]
+    > => {
+      const res = await pool.query<{ title: string; actor: string }>(
+        `SELECT a.title, u.email AS actor
+           FROM audit_events a JOIN users u ON u.id = a.actor_user_id
+          WHERE a.organization_id = $1 AND a.type = 'xport'
+          ORDER BY a.id`,
+        [orgId],
+      );
+      return res.rows;
+    };
+
     it('downloads a BOM-first file, outside the JSON envelope', async () => {
       await seedDelivery({ email: 'anong@x.test' });
 
@@ -329,6 +349,25 @@ describe('Delivery log (e2e — US-MSG-06)', () => {
       const res = await csv(adminJwt, '?page=2&limit=1').expect(200);
       expect(res.text).toContain('one@x.test');
       expect(res.text).toContain('two@x.test');
+    });
+
+    it('says there is nothing to export rather than handing back an empty file', async () => {
+      await seedDelivery({ email: 'ok@x.test', status: 'sent' });
+
+      const res = await csv(adminJwt, '?status=failed').expect(409);
+      expect(JSON.stringify(res.body)).toMatch(/nothing to export/i);
+      expect(await exportsRecorded()).toEqual([]);
+    });
+
+    it('records the export for audit, naming who exported it', async () => {
+      await seedDelivery({ email: 'one@x.test' });
+      await seedDelivery({ email: 'two@x.test' });
+
+      await csv(adminJwt).expect(200);
+
+      expect(await exportsRecorded()).toEqual([
+        { title: 'Exported 2 delivery log rows', actor: ADMIN },
+      ]);
     });
 
     it('refuses a member without the attendee-data permission', async () => {
