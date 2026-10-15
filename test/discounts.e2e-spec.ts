@@ -502,6 +502,45 @@ describe('Discount codes (e2e — US-TKT-07…12)', () => {
       expect(rows[0].status).toBe('expired');
     });
 
+    it('files a code under the tab its dates have since moved it to', async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      const startsLater = await create(jwt, {
+        code: 'GOESLIVE',
+        type: 'percent',
+        value: 5,
+        validFrom: '2030-01-01T00:00:00Z',
+      });
+      const endsLater = await create(jwt, {
+        code: 'WINDOWSHUT',
+        type: 'percent',
+        value: 5,
+        validUntil: '2030-01-01T00:00:00Z',
+      });
+      // both windows move while nobody is looking at any list
+      await pool.query(
+        `UPDATE discount_codes SET valid_from = now() - interval '1 day' WHERE id = $1`,
+        [(startsLater.body as Success<Discount>).data.id],
+      );
+      await pool.query(
+        `UPDATE discount_codes SET valid_until = now() - interval '1 day' WHERE id = $1`,
+        [(endsLater.body as Success<Discount>).data.id],
+      );
+
+      const codesUnder = async (status: string) =>
+        (
+          (
+            await request(server)
+              .get(`/api/v1/discounts?status=${status}&limit=100`)
+              .set('Authorization', `Bearer ${jwt}`)
+          ).body as Success<{ code: string; status: string }[]>
+        ).data.map((c) => c.code);
+
+      expect(await codesUnder('active')).toContain('GOESLIVE');
+      expect(await codesUnder('scheduled')).not.toContain('GOESLIVE');
+      expect(await codesUnder('expired')).toContain('WINDOWSHUT');
+      expect(await codesUnder('active')).not.toContain('WINDOWSHUT');
+    });
+
     it('never lists another tenant’s codes', async () => {
       const other = await token(ADMIN2, ORG2.slug);
       const res = await request(server)

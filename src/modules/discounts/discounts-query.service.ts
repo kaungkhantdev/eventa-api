@@ -21,8 +21,8 @@ const ALL_EVENTS_LABEL = 'All events';
  * Browsing promotions (US-TKT-12): type, scope, live redemption counts and
  * status, filterable and searchable. Read-only — counts are never edited here.
  *
- * It also settles US-TKT-10's "codes expire on schedule" without a cron: each
- * listed code's status is re-derived from its window and usage, and any drift is
+ * It also settles US-TKT-10's "codes expire on schedule" without a cron: every
+ * live code's status is re-derived from its window and usage, and any drift is
  * written back. Reading the list is what keeps it honest.
  */
 @Injectable()
@@ -45,6 +45,13 @@ export class DiscountsQueryService {
     );
     const search = query.search?.trim();
 
+    // Settled before the search, not after it: the status filter runs on the
+    // stored column, so a code that drifted would otherwise sit under its old
+    // tab and be missing from its new one.
+    await this.settleStatuses(
+      actor.organizationId,
+      await this.repo.liveCodes(actor.organizationId),
+    );
     const { items, total } = await this.repo.search(actor.organizationId, {
       limit,
       offset: (page - 1) * limit,
@@ -56,9 +63,8 @@ export class DiscountsQueryService {
         : undefined,
     });
 
-    const settled = await this.settleStatuses(actor.organizationId, items);
     return Paginated.of(
-      await this.decorate(actor.organizationId, settled),
+      await this.decorate(actor.organizationId, items),
       total,
       page,
       limit,
@@ -72,16 +78,14 @@ export class DiscountsQueryService {
   private async settleStatuses(
     organizationId: number,
     rows: DiscountRow[],
-  ): Promise<DiscountRow[]> {
+  ): Promise<void> {
     const now = this.clock.now();
     const changes: { id: string; status: DiscountStatus }[] = [];
-    const settled = rows.map((row) => {
+    for (const row of rows) {
       const status = this.policy.resolveStatus(toSnapshot(row), now);
       if (status !== row.status) changes.push({ id: row.id, status });
-      return status === row.status ? row : { ...row, status };
-    });
+    }
     await this.repo.syncStatuses(organizationId, changes);
-    return settled;
   }
 
   private async decorate(
