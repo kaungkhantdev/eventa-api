@@ -2302,8 +2302,10 @@ describe('Reports (e2e — US-RPT)', () => {
             'transactions.csv',
           ).expect(403);
           expect(refused.headers['content-type']).toContain('application/json');
-          expect((refused.body as { message: string }).message).toContain(
-            'regExport',
+          // Told in words, not handed the key: the console shows this
+          // message as it arrives, beside the Export menu.
+          expect((refused.body as { message: string }).message).toBe(
+            "You don't have permission to export attendee data.",
           );
           await download(bookkeeperJwt, 'transactions.xlsx').expect(403);
           await download(bookkeeperJwt, 'transactions.pdf').expect(403);
