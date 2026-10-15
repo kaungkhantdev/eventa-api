@@ -156,7 +156,9 @@ describe('Payment history (e2e — US-DISC-10)', () => {
    * organization details, then that past document is unchanged." The portal
    * receipt used to join the live organizations row, so the edit rewrote it.
    * The edit is written straight to the row here; the invoices suite drives
-   * the same change through PATCH /organization.
+   * the same change through PATCH /organization. The new name is this suite's
+   * own: `uq_organizations_name` is platform-wide and suites run in parallel,
+   * so sharing the invoices suite's new name could collide mid-test.
    */
   it('keeps the seller identity it was paid under after the workspace changes its details', async () => {
     const setIdentity = (name: string, address: string, taxId: string) =>
@@ -166,7 +168,7 @@ describe('Payment history (e2e — US-DISC-10)', () => {
         [ORG.slug, name, address, taxId],
       );
     await setIdentity(
-      'Siam Renamed Trading',
+      'MyPay Renamed Trading',
       '1 Silom Road, Bangkok 10500',
       '0105569999999',
     );
@@ -177,7 +179,7 @@ describe('Payment history (e2e — US-DISC-10)', () => {
       expect(svg).toContain(ORG.name);
       expect(svg).toContain(ADDRESS);
       expect(svg).toContain(TAX_ID);
-      expect(svg).not.toContain('Siam Renamed Trading');
+      expect(svg).not.toContain('MyPay Renamed Trading');
       expect(svg).not.toContain('1 Silom Road');
       expect(svg).not.toContain('0105569999999');
     } finally {
