@@ -22,6 +22,14 @@ describe('AccessService', () => {
       listMembers: jest.fn(),
       memberExists: jest.fn(),
       updateMemberRole: jest.fn().mockResolvedValue(undefined),
+      getRole: jest.fn().mockResolvedValue({
+        id: 7,
+        name: 'Organizer',
+        permissions: [],
+      }),
+      // The member being moved is not an Admin, so no last-Admin rule applies.
+      isActiveAdmin: jest.fn().mockResolvedValue(false),
+      countActiveAdmins: jest.fn().mockResolvedValue(1),
       getMember: jest.fn(),
       findMemberByEmail: jest.fn(),
       createInvitedMember: jest.fn(),

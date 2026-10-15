@@ -28,7 +28,7 @@ import type { RoleGrantRow } from './role-grants';
 
 const ACTIVE_STATUS = 'Active' as const;
 /** The role that must never be left without a holder. */
-const ADMIN_ROLE = 'Admin' as const;
+export const ADMIN_ROLE = 'Admin' as const;
 
 const MEMBER_COLUMNS = {
   id: memberships.id,

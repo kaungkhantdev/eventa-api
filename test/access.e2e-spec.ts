@@ -240,6 +240,26 @@ describe('Access / RBAC management (e2e)', () => {
     expect(res.status).toBe(403);
   });
 
+  /*
+   * US-SET-11: "Given the last remaining Admin, when I try to remove, suspend
+   * or demote them (or myself), then the action is blocked." ADMIN is the only
+   * Admin here, so demoting themselves is the case that would strand the
+   * workspace.
+   */
+  it('refuses to demote the last Admin, even by themselves (409)', async () => {
+    const jwt = await token(ADMIN);
+    const admin = (await membersOf(jwt)).data.find((m) => m.email === ADMIN);
+
+    const res = await request(server)
+      .patch(`/api/v1/members/${admin?.id}`)
+      .set('Authorization', `Bearer ${jwt}`)
+      .send({ roleId: organizerRoleId });
+
+    expect(res.status).toBe(409);
+    const after = (await membersOf(jwt)).data.find((m) => m.email === ADMIN);
+    expect(after?.role).toBe('Admin');
+  });
+
   describe('custom roles (US-SET-13)', () => {
     it('creates a custom role with the chosen capabilities', async () => {
       const adminJwt = await token(ADMIN);

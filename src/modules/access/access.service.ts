@@ -5,7 +5,7 @@ import { Paginated } from '../../common/http/paginated';
 import { Permission } from '../../common/decorators/require-permissions.decorator';
 import { TokenService } from '../auth/token.service';
 import { PermissionsService } from './permissions.service';
-import { AccessRepository } from './access.repository';
+import { ADMIN_ROLE, AccessRepository } from './access.repository';
 import { Clock } from '../../common/time/clock';
 import type { Env } from '../../config/env.validation';
 import { OutboxPort } from '../platform/outbox.port';
@@ -144,21 +144,25 @@ export class AccessService {
     };
   }
 
-  /** Re-assign a member to another role (both must belong to the caller org). */
+  /**
+   * Re-assign a member to another role (both must belong to the caller org).
+   * Moving somebody off the Admin role is a demotion, so the last Admin is
+   * protected here exactly as from suspend and remove (US-SET-11).
+   */
   async changeMemberRole(
     organizationId: number,
     membershipId: number,
     roleId: number,
   ): Promise<MemberRow> {
-    if (!(await this.repo.memberExists(organizationId, membershipId))) {
-      throw DomainException.notFound(
-        `Member ${membershipId} not found in this workspace.`,
-      );
-    }
+    await this.assertMemberExists(organizationId, membershipId);
     if (!(await this.repo.roleExists(organizationId, roleId))) {
       throw DomainException.notFound(
         `Role ${roleId} not found in this workspace.`,
       );
+    }
+    const target = await this.repo.getRole(organizationId, roleId);
+    if (target.name !== ADMIN_ROLE) {
+      await this.assertNotLastAdmin(organizationId, membershipId);
     }
     await this.repo.updateMemberRole(organizationId, membershipId, roleId);
     return this.repo.getMember(organizationId, membershipId);

@@ -6,6 +6,19 @@ import type { TokenService } from '../auth/token.service';
 
 const orgId = 1;
 
+/** A role as the repository returns it — only the name and grants matter here. */
+function role(name: string, permissions: string[]) {
+  return {
+    id: 3,
+    name,
+    description: '',
+    permissions,
+    neverOfferedPermissions: [],
+    memberCount: 1,
+    isSystem: true,
+  };
+}
+
 describe('AccessService — member lifecycle & escalation (US-SET-11/12)', () => {
   let repo: jest.Mocked<AccessRepository>;
   let permissions: jest.Mocked<PermissionsService>;
@@ -19,6 +32,9 @@ describe('AccessService — member lifecycle & escalation (US-SET-11/12)', () =>
       setMemberStatus: jest.fn().mockResolvedValue(undefined),
       removeMember: jest.fn().mockResolvedValue(undefined),
       getMember: jest.fn().mockResolvedValue({ id: 7, status: 'Suspended' }),
+      roleExists: jest.fn().mockResolvedValue(true),
+      getRole: jest.fn().mockResolvedValue(role('Organizer', ['evCreate'])),
+      updateMemberRole: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<AccessRepository>;
     permissions = {
       getFor: jest.fn().mockResolvedValue([]),
@@ -77,6 +93,32 @@ describe('AccessService — member lifecycle & escalation (US-SET-11/12)', () =>
       repo.countActiveAdmins.mockResolvedValue(2);
       await service.removeMember(orgId, 7);
       expect(repo.removeMember).toHaveBeenCalledWith(orgId, 7);
+    });
+
+    /*
+     * US-SET-11: "Given the last remaining Admin, when I try to remove, suspend
+     * or DEMOTE them (or myself), then the action is blocked." Suspend and
+     * remove were guarded; a role change was not, so the only Admin could be
+     * moved to Organizer and the workspace left with nobody to manage it.
+     */
+    it('refuses to demote the last Admin to another role', async () => {
+      repo.getRole.mockResolvedValue(role('Organizer', ['evCreate']));
+      await expect(service.changeMemberRole(orgId, 7, 3)).rejects.toMatchObject(
+        { code: 'CONFLICT' },
+      );
+      expect(repo.updateMemberRole).not.toHaveBeenCalled();
+    });
+
+    it('allows demoting an Admin while another Admin remains', async () => {
+      repo.countActiveAdmins.mockResolvedValue(2);
+      await service.changeMemberRole(orgId, 7, 3);
+      expect(repo.updateMemberRole).toHaveBeenCalledWith(orgId, 7, 3);
+    });
+
+    it('does not block the last Admin being given the Admin role', async () => {
+      repo.getRole.mockResolvedValue(role('Admin', ['setUsers']));
+      await service.changeMemberRole(orgId, 7, 1);
+      expect(repo.updateMemberRole).toHaveBeenCalledWith(orgId, 7, 1);
     });
   });
 
