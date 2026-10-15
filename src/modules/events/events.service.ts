@@ -1,6 +1,7 @@
 import { Inject, Injectable, forwardRef } from '@nestjs/common';
 import { Clock } from '../../common/time/clock';
 import { DomainException } from '../../common/errors/domain.exception';
+import { pgFields } from '../../common/errors/pg-error';
 import { pickDefined } from '../../common/util/pick-defined';
 import { OutboxPort } from '../platform/outbox.port';
 import { EventResponseDto } from './dto/event-response.dto';
@@ -34,6 +35,12 @@ const PUBLISHED_STATUS: EventStatus = 'upcoming';
 const CANCELLED_STATUS: EventStatus = 'cancelled';
 const COMPLETED_STATUS: EventStatus = 'completed';
 const PRIVATE_VISIBILITY: Visibility = 'private';
+
+/** Why an event with registrations or payment history is never hard-deleted. */
+const HAS_REGISTRATIONS =
+  "This event has registrations and can't be deleted. Cancel it instead to refund and notify attendees.";
+/** Postgres SQLSTATE for a delete that would orphan rows still referring to it. */
+const FOREIGN_KEY_VIOLATION = '23503';
 
 /** Human phrase per publish requirement, listed back when one is missing. */
 const PUBLISH_REQUIREMENTS = {
@@ -310,12 +317,29 @@ export class EventsService {
       );
     }
     const sold = await this.tickets.soldCount(actor.organizationId, eventId);
-    if (sold > 0) {
-      throw DomainException.conflict(
-        "This event has registrations and can't be deleted. Cancel it instead to refund and notify attendees.",
-      );
+    if (sold > 0) throw DomainException.conflict(HAS_REGISTRATIONS);
+    await this.hardDeleteOrRefuse(actor.organizationId, eventId);
+  }
+
+  /**
+   * The sold count misses history a draft can still hold: refunds give stock
+   * back, a retired tier's sales are not counted, and a pending or rejected
+   * order sold nothing. Orders, tickets, payments, invoices and check-ins keep
+   * their event ON DELETE RESTRICT, so the database's refusal to orphan them
+   * is the same answer as the count's, never a 500 (US-EVT-08).
+   */
+  private async hardDeleteOrRefuse(
+    organizationId: number,
+    eventId: string,
+  ): Promise<void> {
+    try {
+      await this.repo.hardDelete(organizationId, eventId);
+    } catch (cause) {
+      if (pgFields(cause)?.code === FOREIGN_KEY_VIOLATION) {
+        throw DomainException.conflict(HAS_REGISTRATIONS);
+      }
+      throw cause;
     }
-    await this.repo.hardDelete(actor.organizationId, eventId);
   }
 
   /**

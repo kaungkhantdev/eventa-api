@@ -126,6 +126,27 @@ describe('Cancel / delete (e2e — US-EVT-08)', () => {
     await del(id, adminJwt).expect(409);
   });
 
+  // Refunds give stock back, so a draft whose sales were all refunded counts 0
+  // sold — yet its orders are payment history the event must keep.
+  it('blocks deleting a draft whose sales were refunded back to 0 sold (409)', async () => {
+    const id = await createEvent(adminJwt, 'Draft With Refunds');
+    await pool.query(
+      `INSERT INTO orders (organization_id, reference, event_id, buyer_name,
+         buyer_email, status, payment_status, seats, subtotal_satang, total_satang)
+       SELECT organization_id, 'CD-REFUNDED-1', id, 'Malee', 'malee@cd-e2e.test',
+         'cancelled', 'refunded', 1, 10000, 10000
+         FROM events WHERE id = $1`,
+      [id],
+    );
+
+    const res = await del(id, adminJwt);
+    expect(res.status).toBe(409);
+    expect((res.body as { message: string }).message).toBe(
+      "This event has registrations and can't be deleted. Cancel it instead to refund and notify attendees.",
+    );
+    await getEvent(id, adminJwt).expect(200);
+  });
+
   it('cancels a published event: moves out of Active and notifies', async () => {
     const id = await createEvent(adminJwt, 'To Cancel');
     await pool.query(`UPDATE events SET status = 'upcoming' WHERE id = $1`, [
@@ -237,10 +258,14 @@ async function seedOrg(
 
 async function cleanup(pool: Pool): Promise<void> {
   const slugs = [ORG.slug, ORG2.slug];
-  await pool.query(
-    `DELETE FROM audit_events WHERE organization_id IN
-       (SELECT id FROM organizations WHERE slug = ANY($1))`,
-    [slugs],
-  );
+  // Both are ON DELETE RESTRICT: a sign-in writes an audit row, and the
+  // refunded-sales case seeds an order against its event.
+  for (const table of ['audit_events', 'orders']) {
+    await pool.query(
+      `DELETE FROM ${table} WHERE organization_id IN
+         (SELECT id FROM organizations WHERE slug = ANY($1))`,
+      [slugs],
+    );
+  }
   await pool.query(`DELETE FROM organizations WHERE slug = ANY($1)`, [slugs]);
 }
