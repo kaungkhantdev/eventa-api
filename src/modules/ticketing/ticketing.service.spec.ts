@@ -440,4 +440,28 @@ describe('TicketingService', () => {
       expect(repo.hardDelete).not.toHaveBeenCalled();
     });
   });
+
+  describe('cloneForEvent (US-EVT-13)', () => {
+    const statusOfCopy = async (source: TicketRow): Promise<unknown> => {
+      repo.listByEvent.mockResolvedValue([source]);
+      await service.cloneForEvent(actor, 'src1', 'new1');
+      const [values] = repo.insert.mock.calls[0];
+      return values.status;
+    };
+
+    it('a sold-out tier arrives on the copy On sale, since the copy has sold nothing', async () => {
+      const source = ticketRow({ status: 'soldout', sold: 100, total: 100 });
+      expect(await statusOfCopy(source)).toBe('onsale');
+    });
+
+    it('a tier scheduled for a window the copy clears arrives On sale', async () => {
+      const source = ticketRow({ status: 'scheduled', salesStartAt: FUTURE });
+      expect(await statusOfCopy(source)).toBe('onsale');
+    });
+
+    it('a paused tier stays paused, because pausing is the organizer choice', async () => {
+      const source = ticketRow({ status: 'paused', sold: 40 });
+      expect(await statusOfCopy(source)).toBe('paused');
+    });
+  });
 });
