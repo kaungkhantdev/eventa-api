@@ -12,7 +12,7 @@ import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
 import { listenOnLoopback } from './support/loopback';
 
-const PASSWORD = 'signin1password';
+const PASSWORD = 'signin-1password';
 /**
  * Emails are unique per run: the login throttle lives in Redis (15-minute lock
  * TTL), which outlives any database cleanup — a fixed email this suite

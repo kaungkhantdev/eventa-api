@@ -10,10 +10,12 @@ import {
   Post,
   Put,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiNoContentResponse, ApiTags } from '@nestjs/swagger';
 import { CurrentAuth } from '../../common/decorators/current-auth.decorator';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
+import { AttendeeGuard } from '../../common/guards/attendee.guard';
 import { ApiData, ApiPage } from '../../common/http/api-data.decorator';
 import type { Paginated } from '../../common/http/paginated';
 import type { AuthContext } from '../auth/auth.types';
@@ -33,6 +35,7 @@ import { SavedEventsService } from './saved-events.service';
  */
 @ApiTags('saved-events')
 @ApiBearerAuth()
+@UseGuards(AttendeeGuard)
 @Controller('me/saved-events')
 export class SavedEventsController {
   constructor(private readonly saved: SavedEventsService) {}

@@ -11,7 +11,7 @@ import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
 import { listenOnLoopback } from './support/loopback';
 
-const PASSWORD = 'strongpass1';
+const PASSWORD = 'strong-pass1';
 const OWNER = 'owner@signup-e2e.test';
 const OTHER = 'pending@signup-e2e.test';
 const SLUGS = ['acme-events', 'beta-co'];

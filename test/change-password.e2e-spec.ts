@@ -11,10 +11,10 @@ import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
 import { listenOnLoopback } from './support/loopback';
 
-const OLD_PASSWORD = 'oldpass1word';
-const NEW_PASSWORD = 'newpass2word';
-const THIRD_PASSWORD = 'thirdpass3word';
-const FOURTH_PASSWORD = 'fourthpass4word';
+const OLD_PASSWORD = 'old-pass1word';
+const NEW_PASSWORD = 'new-pass2word';
+const THIRD_PASSWORD = 'third-pass3word';
+const FOURTH_PASSWORD = 'fourth-pass4word';
 const OWNER = 'change-owner@change-e2e.test';
 const ORG_SLUG = 'change-co';
 
@@ -198,11 +198,29 @@ describe('Change password while signed in (US-ACC-05, e2e)', () => {
     const device = await tokensOf(FOURTH_PASSWORD);
     const res = await changePassword(device.accessToken, {
       currentPassword: 'totally-wrong',
-      newPassword: 'yetanother3pass',
+      newPassword: 'yet-another3pass',
     });
     expect(res.status).toBe(403);
     // Nothing changed, so nothing is announced — a confirmation for a change
     // that never happened would teach its reader to ignore the real one.
+    expect(await noticesSince(since)).toEqual([]);
+  });
+
+  /**
+   * US-SET-02: a strong password is "at least 8 characters with a number and a
+   * symbol"; given a weak one, "I'm told why and nothing changes".
+   */
+  it('refuses (400) a new password below the rule, and nothing changes', async () => {
+    const since = await lastOutboxId(pool);
+    const device = await tokensOf(FOURTH_PASSWORD);
+    const res = await changePassword(device.accessToken, {
+      currentPassword: FOURTH_PASSWORD,
+      newPassword: 'abc123',
+    });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).toMatch(/a number and a symbol/);
+
+    expect((await login(FOURTH_PASSWORD)).status).toBe(200);
     expect(await noticesSince(since)).toEqual([]);
   });
 
@@ -220,7 +238,7 @@ describe('Change password while signed in (US-ACC-05, e2e)', () => {
   it('requires authentication (401)', async () => {
     const res = await request(server)
       .post('/api/v1/auth/change-password')
-      .send({ currentPassword: NEW_PASSWORD, newPassword: 'brandnew9pass' });
+      .send({ currentPassword: NEW_PASSWORD, newPassword: 'brand-new9pass' });
     expect(res.status).toBe(401);
   });
 });

@@ -61,6 +61,37 @@ export class AuthRepository {
     return rows[0] ?? null;
   }
 
+  /**
+   * Access-token check, run on every authenticated request: is the session the
+   * token was issued under still live? Signing a device out (US-ACC-09), a
+   * password reset (US-ACC-04) and deleting the account (NFR-PDPA-03) revoke
+   * the row, and each promises the access ends then, not when the token lapses.
+   *
+   * `withTenant`, because `auth_sessions` is under RLS (migration 0002): under
+   * the non-owning role the app runs as outside development, an unscoped read
+   * sees no rows, and this check would refuse every request.
+   */
+  async isSessionLive(
+    organizationId: number,
+    sessionId: string,
+  ): Promise<boolean> {
+    const rows = await withTenant(this.db, organizationId, (tx) =>
+      tx
+        .select({ id: authSessions.id })
+        .from(authSessions)
+        .where(
+          and(
+            eq(authSessions.id, sessionId),
+            eq(authSessions.organizationId, organizationId),
+            isNull(authSessions.revokedAt),
+            gt(authSessions.expiresAt, new Date()),
+          ),
+        )
+        .limit(1),
+    );
+    return rows.length > 0;
+  }
+
   async createSession(input: CreateSessionInput): Promise<string> {
     const [row] = await this.db
       .insert(authSessions)

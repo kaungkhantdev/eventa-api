@@ -1,8 +1,16 @@
-import { Controller, Get, Header, Param, ParseUUIDPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Header,
+  Param,
+  ParseUUIDPipe,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentAuth } from '../../common/decorators/current-auth.decorator';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 import { SkipResponseEnvelope } from '../../common/decorators/skip-envelope.decorator';
+import { AttendeeGuard } from '../../common/guards/attendee.guard';
 import { ApiData } from '../../common/http/api-data.decorator';
 import type { AuthContext } from '../auth/auth.types';
 import { AttendeeTicketsService } from './attendee-tickets.service';
@@ -15,6 +23,7 @@ import { MyEventsDto, TicketPassDto } from './dto/my-events.dto';
  */
 @ApiTags('attendee-tickets')
 @ApiBearerAuth()
+@UseGuards(AttendeeGuard)
 @Controller('me/tickets')
 export class AttendeeTicketsController {
   constructor(private readonly tickets: AttendeeTicketsService) {}

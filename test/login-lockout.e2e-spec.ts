@@ -13,7 +13,7 @@ import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
 import { listenOnLoopback } from './support/loopback';
 
-const PASSWORD = 'lockpass1word';
+const PASSWORD = 'lock-pass1word';
 const OWNER = 'lockout-owner@lockout-e2e.test';
 const GHOST = 'ghost@lockout-e2e.test';
 const OTHER = 'other@lockout-e2e.test';
