@@ -301,8 +301,13 @@ export class ReportsController {
     return this.download('discounts', format, doc);
   }
 
+  /**
+   * Every ledger row names its payer, so taking the file away is exporting
+   * attendee data: `regExport` on top of `finView` (US-RPT-12). Reading the
+   * same rows on screen needs `finView` alone.
+   */
   @Get('transactions.:format')
-  @RequirePermissions(Permission.finView)
+  @RequirePermissions(Permission.finView, Permission.regExport)
   @SkipResponseEnvelope()
   @ApiParam({ name: 'format', enum: EXPORT_FORMATS })
   @ApiProduces(...PRODUCES)

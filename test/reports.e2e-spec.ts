@@ -28,11 +28,14 @@ const ORG = { slug: 'rpt-e2e', name: 'Reports E2E' };
 const ORG2 = { slug: 'rpt-e2e-2', name: 'Reports E2E 2' };
 const ADMIN = 'admin@rpt-e2e.test';
 const STAFF = 'staff@rpt-e2e.test';
+/** Finance access, but no permission to export attendee data. */
+const BOOKKEEPER = 'bookkeeper@rpt-e2e.test';
 const OUTSIDER = 'nobody@rpt-e2e.test';
 const ADMIN2 = 'admin@rpt-e2e-2.test';
 
 const PERM_GROUP: Record<string, string> = {
   regView: 'Registrations',
+  regExport: 'Registrations',
   finView: 'Finance',
   evCreate: 'Events',
 };
@@ -133,6 +136,7 @@ describe('Reports (e2e — US-RPT)', () => {
   let otherEventId: string;
   let adminJwt: string;
   let staffJwt: string;
+  let bookkeeperJwt: string;
   let outsiderJwt: string;
   let otherJwt: string;
   let seq = 0;
@@ -143,8 +147,17 @@ describe('Reports (e2e — US-RPT)', () => {
     pool = new Pool({ connectionString: process.env.DATABASE_URL });
     await cleanup(pool);
     orgId = await seedOrg(pool, ORG, [
-      { email: ADMIN, roleName: 'Admin', grants: ['regView', 'finView'] },
+      {
+        email: ADMIN,
+        roleName: 'Admin',
+        grants: ['regView', 'finView', 'regExport'],
+      },
       { email: STAFF, roleName: 'Staff', grants: ['regView'] },
+      {
+        email: BOOKKEEPER,
+        roleName: 'Bookkeeper',
+        grants: ['regView', 'finView'],
+      },
       // US-RPT-12: an admin-console user with no registration access at all.
       { email: OUTSIDER, roleName: 'Marketing', grants: ['evCreate'] },
     ]);
@@ -171,6 +184,7 @@ describe('Reports (e2e — US-RPT)', () => {
 
     adminJwt = await token(ADMIN, ORG.slug);
     staffJwt = await token(STAFF, ORG.slug);
+    bookkeeperJwt = await token(BOOKKEEPER, ORG.slug);
     outsiderJwt = await token(OUTSIDER, ORG.slug);
     otherJwt = await token(ADMIN2, ORG2.slug);
   }, 30000);
@@ -2214,6 +2228,30 @@ describe('Reports (e2e — US-RPT)', () => {
           // The staff-visible ones still answer.
           await download(staffJwt, 'registrations.csv').expect(200);
           await download(staffJwt, 'attendance.csv').expect(200);
+        });
+
+        it('refuses the ledger’s file to a reader who may not export attendee data', async () => {
+          // US-RPT-12 AC2: every ledger row names its payer, so its export
+          // needs "Export attendee data" (regExport) on top of finance access.
+          await seedPayment({ amountSatang: 10_000, payer: 'Ploy Srisai' });
+
+          const refused = await download(
+            bookkeeperJwt,
+            'transactions.csv',
+          ).expect(403);
+          expect(refused.headers['content-type']).toContain('application/json');
+          expect((refused.body as { message: string }).message).toContain(
+            'regExport',
+          );
+          await download(bookkeeperJwt, 'transactions.xlsx').expect(403);
+          await download(bookkeeperJwt, 'transactions.pdf').expect(403);
+          // Reading the ledger on screen is still theirs.
+          await request(server)
+            .get('/api/v1/reports/transactions')
+            .set('Authorization', `Bearer ${bookkeeperJwt}`)
+            .expect(200);
+          // A role that holds it still gets the file.
+          await download(adminJwt, 'transactions.csv').expect(200);
         });
 
         it('refuses a backwards window, like the report it mirrors', async () => {
