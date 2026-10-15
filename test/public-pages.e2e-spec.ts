@@ -42,6 +42,8 @@ interface Page {
   registration: { open: boolean; reason: string | null };
   share: { url: string; noIndex: boolean; image: string | null };
   sections: { agenda: string; speakers: string };
+  agenda: { title: string; speakerNames: string[] }[];
+  speakers: { name: string }[];
 }
 
 describe('Public event page (e2e — US-PAGE-01…08)', () => {
@@ -114,6 +116,35 @@ describe('Public event page (e2e — US-PAGE-01…08)', () => {
     const p = ((await page(LIVE)).body as Success<Page>).data;
     expect(p.highlights.map((h) => h.text)).toEqual(['First', 'Second']);
     expect(p.faqs[0].question).toBe('Parking?');
+  });
+
+  it('US-PROG-11: a deleted speaker leaves the public agenda and speakers section', async () => {
+    const speakers = await pool.query<{ id: string; name: string }>(
+      `INSERT INTO speakers (organization_id, event_id, name)
+       VALUES ($1,$2,'Dropout Dan'), ($1,$2,'Kanya') RETURNING id, name`,
+      [orgId, liveId],
+    );
+    const session = await pool.query<{ id: string }>(
+      `INSERT INTO sessions (organization_id, event_id, day, start_time, title, type)
+       VALUES ($1,$2,1,'09:00','Opening Panel','Panel') RETURNING id`,
+      [orgId, liveId],
+    );
+    for (const sp of speakers.rows) {
+      await pool.query(
+        `INSERT INTO session_speakers (session_id, speaker_id) VALUES ($1,$2)`,
+        [session.rows[0].id, sp.id],
+      );
+    }
+    // Removal is a soft delete that keeps the session links, as the console's does.
+    await pool.query(
+      `UPDATE speakers SET deleted_at = now() WHERE event_id = $1 AND name = 'Dropout Dan'`,
+      [liveId],
+    );
+
+    const p = ((await page(LIVE)).body as Success<Page>).data;
+    const panel = p.agenda.find((x) => x.title === 'Opening Panel');
+    expect(panel?.speakerNames).toEqual(['Kanya']);
+    expect(p.speakers.map((sp) => sp.name)).not.toContain('Dropout Dan');
   });
 
   it('US-PAGE-05: prices are VAT-inclusive Baht; sold-out cannot register', async () => {

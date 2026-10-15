@@ -100,7 +100,15 @@ export class PublicPagesRepository {
       })
       .from(sessions)
       .leftJoin(sessionSpeakers, eq(sessionSpeakers.sessionId, sessions.id))
-      .leftJoin(speakers, eq(speakers.id, sessionSpeakers.speakerId))
+      // Removing a speaker is a soft delete that keeps their session links, so
+      // the join itself must drop them or the agenda still names them (US-PROG-11).
+      .leftJoin(
+        speakers,
+        and(
+          eq(speakers.id, sessionSpeakers.speakerId),
+          isNull(speakers.deletedAt),
+        ),
+      )
       .where(and(eq(sessions.eventId, eventId), isNull(sessions.deletedAt)))
       .orderBy(
         asc(sessions.day),
