@@ -17,6 +17,8 @@ import { MAX_SEATS_PER_BOOKING } from '../../../common/booking/booking.limits';
 const MAX_NAME = 120;
 const MAX_EMAIL = 254;
 const MAX_PHONE = 24;
+/** US-REG-03's own wording, so the panel asks rather than quoting a validator. */
+const SEATS_PER_BOOKING = `Choose between 1 and ${MAX_SEATS_PER_BOOKING} seats per booking.`;
 
 /**
  * A walk-up or phone booking the organizer is entering (US-REG-03). Carries NO
@@ -36,8 +38,8 @@ export class AddRegistrationDto {
   @ApiProperty({ minimum: 1, maximum: MAX_SEATS_PER_BOOKING, example: 2 })
   @Type(() => Number)
   @IsInt()
-  @Min(1)
-  @Max(MAX_SEATS_PER_BOOKING)
+  @Min(1, { message: SEATS_PER_BOOKING })
+  @Max(MAX_SEATS_PER_BOOKING, { message: SEATS_PER_BOOKING })
   quantity!: number;
 
   @ApiProperty({ example: 'Anan Suksawat' })
