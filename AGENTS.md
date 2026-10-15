@@ -162,7 +162,7 @@ the development guide when implementing:
 - **Cross-cutting code lives in `src/common/`, never in a domain module.** A guard, decorator, pipe or
   helper used by more than one module belongs in `common/guards/`, `common/decorators/`, `common/util/`
   etc. — so a controller never imports from an unrelated domain module just to annotate a route
-  (`JwtAuthGuard`, `PermissionsGuard`, `AdminGuard`, `@CurrentAuth`, `@RequirePermissions`, `slugify`).
+  (`JwtAuthGuard`, `PermissionsGuard`, `AdminGuard`, `AttendeeGuard`, `@CurrentAuth`, `@RequirePermissions`, `slugify`).
   A module-local default belongs to the module (e.g. an event's slug fallback is a `const` in
   `events.service.ts`, not a wrapper file that shadows the shared util).
 - **Multi-tenancy: scope every query by `organization_id`** *and* Postgres **RLS**
@@ -267,8 +267,9 @@ its own `ports/` folder; the **owner** implements it as an adapter and binds it
 (`{ provide: EventStatsPort, useClass: RegistrationStatsAdapter }`). So Events reads registration numbers
 without importing Registration's tables. Use `forwardRef` **only** for a genuine bidirectional dependency
 (auth↔access, auth↔auth-signup, auth↔auth-password, auth↔auth-social, auth↔users, events↔ticketing,
-ticketing↔registration, ticketing↔checkout — which pulls discounts→ticketing into the cycle too) — not to
-paper over a bad boundary. Ports in play — the cross-context reads worth knowing; there are 45
+ticketing↔registration, ticketing↔checkout — which pulls discounts→ticketing into the cycle too, and
+payment-settings→ticketing now that checkout asks PaymentSettings which methods are on — invoices↔payments)
+— not to paper over a bad boundary. Ports in play — the cross-context reads worth knowing; there are 51
 `*Port` abstract classes today and `grep -rn 'abstract class .*Port' src` is the inventory (the
 `reports`/`dashboard` read families and the payment-setup ports are not listed here):
 `TicketAvailabilityPort` ·
@@ -282,7 +283,11 @@ paper over a bad boundary. Ports in play — the cross-context reads worth knowi
 `TicketCatalogPort` · `SeatMapPort` (Checkout reads the event, its tiers and its seats through their
 owners) · `OrderPaymentPort` (Payments settles "paid + ticketed" atomically through Checkout's
 transaction) · `InvoiceOrderPort` (Invoices bills an order Checkout owns) · `InvoicePaymentPort`
-(Invoices learns how and when that order settled, from Payments) · `TaxableSalesPort` (the VAT ledger asks
+(Invoices learns how and when that order settled, from Payments) · `OrderInvoicePort` (Payments turns
+that order's invoice Paid on settlement and Void on refund, in its own transaction) ·
+`CheckoutPaymentMethodsPort` (Checkout asks PaymentSettings which ways to pay are switched on) ·
+`RedemptionLedgerPort` (Checkout records a discount code's use through Discounts, in the order's
+transaction) · `TaxableSalesPort` (the VAT ledger asks
 Payments what was collected each month) · `SettledFundsPort` (Payouts asks Payments what has settled) ·
 `PayoutAccountPort` (Payouts asks PaymentSettings whether a payout account is connected) ·
 `CheckInEventPort` (the door asks Events whether it may admit, which is also its tenancy check). Provider seams
