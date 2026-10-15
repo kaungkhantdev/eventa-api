@@ -1,11 +1,13 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { AccessModule } from '../access/access.module';
 import { CheckoutModule } from '../checkout/checkout.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { OrderInvoicePort } from '../payments/ports/order-invoice.port';
 import { InvoicesController } from './invoices.controller';
 import { InvoicesLedgerService } from './invoices-ledger.service';
 import { InvoicesRepository } from './invoices.repository';
 import { InvoicesService } from './invoices.service';
+import { OrderInvoiceAdapter } from './order-invoice.adapter';
 
 /**
  * Invoices: raising, ageing, printing and voiding Thai tax invoices
@@ -23,13 +25,24 @@ import { InvoicesService } from './invoices.service';
  *   · `InvoicePaymentPort` (Payments) — how and when that order was settled, so
  *     an invoice for a paid order reads Paid rather than outstanding.
  * `AccessModule` supplies `PermissionsService` for the `PermissionsGuard` that
- * enforces the US-FIN-14 role split. No `forwardRef`: neither Checkout nor
- * Payments needs Invoices back.
+ * enforces the US-FIN-14 role split.
+ *
+ * It binds Payments' `OrderInvoicePort` in turn: an invoice issued before its
+ * order was paid must turn Paid when the money lands, and a refunded sale's
+ * invoice must turn Void (US-FIN-02, US-FIN-06/07), both inside Payments' own
+ * transaction. That makes Invoices ↔ Payments a genuine two-way dependency —
+ * each asks the other about the half it owns — hence the `forwardRef`.
+ * Checkout does not need Invoices back.
  */
 @Module({
-  imports: [AccessModule, CheckoutModule, PaymentsModule],
+  imports: [AccessModule, CheckoutModule, forwardRef(() => PaymentsModule)],
   controllers: [InvoicesController],
-  providers: [InvoicesService, InvoicesLedgerService, InvoicesRepository],
-  exports: [InvoicesService, InvoicesLedgerService],
+  providers: [
+    InvoicesService,
+    InvoicesLedgerService,
+    InvoicesRepository,
+    { provide: OrderInvoicePort, useClass: OrderInvoiceAdapter },
+  ],
+  exports: [InvoicesService, InvoicesLedgerService, OrderInvoicePort],
 })
 export class InvoicesModule {}

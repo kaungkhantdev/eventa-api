@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { type SQL, and, desc, eq, ilike, like, or, sql } from 'drizzle-orm';
+import { type SQL, and, desc, eq, ilike, like, ne, or, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { auditEvents, events, invoices, orders } from '../../db/schema';
 import { withTenant, type Tx } from '../../db/tenant';
@@ -38,6 +38,20 @@ export interface VoidInvoiceInput {
   voidedBy: string;
   voidReason: string | null;
   now: Date;
+}
+
+/** An order's money landed (US-FIN-06/07). `paidOn` is a Bangkok `YYYY-MM-DD`. */
+export interface OrderPaidInput {
+  organizationId: number;
+  orderId: string;
+  paidVia: string;
+  paidOn: string;
+}
+
+/** An order's money went back (US-FIN-02). */
+export interface OrderRefundedInput extends VoidInvoiceInput {
+  organizationId: number;
+  orderId: string;
 }
 
 const AUDIT_TYPE = 'invoice' as const;
@@ -143,6 +157,61 @@ export class InvoicesRepository {
       const invoice = await this.findByIdIn(tx, organizationId, invoiceId);
       return invoice as InvoiceRow;
     });
+  }
+
+  /**
+   * The order's money landed, inside the caller's settlement transaction: its
+   * live invoice still awaiting payment now reads Paid, with how and when
+   * (US-FIN-06/07). Only an `issued` row moves — Paid and Void are terminal —
+   * so a redelivered or duplicate settlement changes nothing.
+   */
+  async markPaidForOrderIn(tx: Tx, input: OrderPaidInput): Promise<void> {
+    await tx
+      .update(invoices)
+      .set({
+        status: 'paid',
+        paidVia: input.paidVia as typeof invoices.$inferInsert.paidVia,
+        paidOn: input.paidOn,
+      })
+      .where(
+        and(
+          eq(invoices.organizationId, input.organizationId),
+          eq(invoices.orderId, input.orderId),
+          eq(invoices.status, 'issued'),
+        ),
+      );
+  }
+
+  /**
+   * The order's money went back, inside the caller's refund transaction: its
+   * live invoice is Void and drops out of receivables (US-FIN-02). The number
+   * is kept, and the void is audited exactly as an Admin's own would be.
+   */
+  async voidForRefundIn(tx: Tx, input: OrderRefundedInput): Promise<void> {
+    const voided = await tx
+      .update(invoices)
+      .set({
+        status: 'void',
+        voidedAt: input.now,
+        voidedBy: input.voidedBy,
+        voidReason: input.voidReason,
+      })
+      .where(
+        and(
+          eq(invoices.organizationId, input.organizationId),
+          eq(invoices.orderId, input.orderId),
+          ne(invoices.status, 'void'),
+        ),
+      )
+      .returning({ number: invoices.number });
+    for (const row of voided) {
+      await this.audit(tx, {
+        organizationId: input.organizationId,
+        actorUserId: input.voidedBy,
+        title: `Voided invoice ${row.number}`,
+        meta: input.voidReason,
+      });
+    }
   }
 
   /** One page of the ledger, newest issued first (US-FIN-06). */

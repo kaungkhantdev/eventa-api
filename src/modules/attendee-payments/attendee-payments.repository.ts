@@ -1,7 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
-import { events, orders, organizations, payments } from '../../db/schema';
+import {
+  events,
+  invoices,
+  orders,
+  organizations,
+  payments,
+} from '../../db/schema';
 import { stampedSeller } from '../../db/seller-identity';
 import type {
   ReceiptRow,
@@ -15,6 +21,19 @@ const SETTLED: readonly TransactionStatus[] = ['paid', 'refunded'];
 /** An export is one person's purchases — bounded, but capped for sanity. */
 const MAX_EXPORT = 1000;
 const DEFAULT_VAT_RATE = 0.07;
+
+/**
+ * The number of the invoice issued for the payment's order (US-DISC-10). At
+ * most one is live (`uq_invoices_live_order`), and it wins; with none live — a
+ * refunded sale's was voided — the last one issued still names the invoice
+ * that sale was billed on. Null when the organizer never issued one.
+ */
+const invoiceNumber = sql<string | null>`(
+  SELECT ${invoices.number} FROM ${invoices}
+  WHERE ${invoices.orderId} = ${orders.id}
+  ORDER BY ${invoices.status} = 'void', ${invoices.id} DESC
+  LIMIT 1
+)`;
 
 /**
  * The attendee's payment-history read model (US-DISC-10), in the mould of
@@ -84,6 +103,7 @@ export class AttendeePaymentsRepository {
         paymentId: payments.id,
         orderId: orders.id,
         reference: orders.reference,
+        invoiceNumber,
         eventName: events.name,
         method: payments.method,
         status: payments.status,
@@ -121,6 +141,7 @@ export class AttendeePaymentsRepository {
         paymentId: payments.id,
         orderId: orders.id,
         reference: orders.reference,
+        invoiceNumber,
         eventName: events.name,
         method: payments.method,
         status: payments.status,

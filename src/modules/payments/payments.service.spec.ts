@@ -3,6 +3,7 @@ import { DomainException } from '../../common/errors/domain.exception';
 import type { Clock } from '../../common/time/clock';
 import type { Env } from '../../config/env.validation';
 import type { Tx } from '../../db/tenant';
+import type { OrderInvoicePort } from './ports/order-invoice.port';
 import type {
   OrderPaymentPort,
   PayableOrder,
@@ -88,9 +89,13 @@ function merchantPort(
   account: Partial<MerchantAccount> = {},
 ): jest.Mocked<MerchantAccountPort> {
   return {
-    findAccount: jest
-      .fn()
-      .mockResolvedValue({ connected: true, accountId: ACCOUNT, ...account }),
+    findAccount: jest.fn().mockResolvedValue({
+      connected: true,
+      accountId: ACCOUNT,
+      statementDescriptor: null,
+      acceptedMethods: ['Card', 'PromptPay'],
+      ...account,
+    }),
   };
 }
 
@@ -108,6 +113,14 @@ function credentialsPort(): jest.Mocked<GatewayCredentialsPort> {
 
 const message = (e: unknown) => (e as DomainException).message;
 
+/** The order's invoice, kept in step with its money (US-FIN-06/07). */
+function invoicesDouble(): jest.Mocked<OrderInvoicePort> {
+  return {
+    markPaidIn: jest.fn().mockResolvedValue(undefined),
+    voidForRefundIn: jest.fn(),
+  };
+}
+
 /** Finishing a pending refund is RefundsService's job; this double stands in. */
 function refundsDouble(): jest.Mocked<RefundsService> {
   return {
@@ -119,6 +132,7 @@ describe('PaymentsService (US-DISC-05)', () => {
   let repo: jest.Mocked<PaymentsRepository>;
   let provider: jest.Mocked<PaymentProviderPort>;
   let orders: jest.Mocked<OrderPaymentPort>;
+  let invoices: jest.Mocked<OrderInvoicePort>;
   let merchants: jest.Mocked<MerchantAccountPort>;
   let credentials: jest.Mocked<GatewayCredentialsPort>;
   let refunds: jest.Mocked<RefundsService>;
@@ -156,6 +170,7 @@ describe('PaymentsService (US-DISC-05)', () => {
       queueRefund: jest.fn().mockResolvedValue(undefined),
       refundOrder: jest.fn(),
     };
+    invoices = invoicesDouble();
     merchants = merchantPort();
     credentials = credentialsPort();
     refunds = refundsDouble();
@@ -167,6 +182,7 @@ describe('PaymentsService (US-DISC-05)', () => {
       repo,
       provider,
       orders,
+      invoices,
       merchants,
       credentials,
       refunds,
@@ -230,6 +246,43 @@ describe('PaymentsService (US-DISC-05)', () => {
     });
 
     /**
+     * US-SET-10: the label an Admin saves on Settings → Payments "appears on
+     * attendees' card statements for later charges". Only the duplicate field
+     * on the Organization page ever reached the provider.
+     */
+    it('charges under the statement label saved on Settings → Payments', async () => {
+      merchants.findAccount.mockResolvedValue({
+        connected: true,
+        accountId: ACCOUNT,
+        statementDescriptor: 'MY LABEL',
+        acceptedMethods: ['Card', 'PromptPay'],
+      });
+      await pay();
+      expect(provider.start).toHaveBeenCalledWith(
+        expect.objectContaining({ statementDescriptor: 'MY LABEL' }),
+      );
+    });
+
+    /**
+     * US-SET-09: "Given I disable a method, when new orders are placed, then
+     * that method no longer appears at checkout." Hiding it on the page is not
+     * the control — a request naming it is refused here.
+     */
+    it('refuses a method the workspace switched off, before asking the provider', async () => {
+      merchants.findAccount.mockResolvedValue({
+        connected: true,
+        accountId: ACCOUNT,
+        statementDescriptor: null,
+        acceptedMethods: ['Card'],
+      });
+      const err = await pay({ method: 'PromptPay' }).catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(409);
+      expect(message(err)).toMatch(/PromptPay/);
+      expect(provider.start).not.toHaveBeenCalled();
+      expect(repo.upsertAttempt).not.toHaveBeenCalled();
+    });
+
+    /**
      * The provider is not told WHICH account to use — it authenticates as the
      * workspace with that workspace's own key. What this service still owes is
      * the check that there IS one, before a buyer is sent to a payment page
@@ -261,6 +314,8 @@ describe('PaymentsService (US-DISC-05)', () => {
         merchants.findAccount.mockResolvedValue({
           connected: false,
           accountId: null,
+          statementDescriptor: null,
+          acceptedMethods: ['Card', 'PromptPay'],
         });
         await expect(pay()).rejects.toBeInstanceOf(DomainException);
         expect(provider.start).not.toHaveBeenCalled();
@@ -270,6 +325,8 @@ describe('PaymentsService (US-DISC-05)', () => {
         merchants.findAccount.mockResolvedValue({
           connected: false,
           accountId: null,
+          statementDescriptor: null,
+          acceptedMethods: ['Card', 'PromptPay'],
         });
         // The buyer cannot fix this and did nothing wrong, so the message
         // names the organizer's setup rather than blaming the attempt.
@@ -284,6 +341,8 @@ describe('PaymentsService (US-DISC-05)', () => {
         merchants.findAccount.mockResolvedValue({
           connected: true,
           accountId: null,
+          statementDescriptor: null,
+          acceptedMethods: ['Card', 'PromptPay'],
         });
         await expect(pay()).rejects.toBeInstanceOf(DomainException);
         expect(provider.start).not.toHaveBeenCalled();
@@ -448,6 +507,27 @@ describe('PaymentsService (US-DISC-05)', () => {
         ORG,
         'processed',
       );
+    });
+
+    /**
+     * US-FIN-06: "Given a paid invoice, when I view its row, then it shows how
+     * and when it was paid". An invoice issued while the order was unpaid was
+     * only ever stamped at issue, so a buyer who then paid had it age to
+     * Overdue with nothing to say they had.
+     */
+    it('marks the order’s invoice paid, by how and when, inside that transaction', async () => {
+      const tx = {} as Tx;
+      orders.settle.mockImplementation(async (_org, _order, record) => {
+        await record(tx);
+        return { outcome: 'settled', reference: 'ORD-1', ticketCount: 2 };
+      });
+      await service.handleWebhook(WEBHOOK_TOKEN, raw, 'sig');
+      expect(invoices.markPaidIn).toHaveBeenCalledWith(tx, {
+        organizationId: ORG,
+        orderId: ORDER_ID,
+        method: 'Card',
+        paidAt: NOW,
+      });
     });
 
     it('does not settle twice for a payment already marked paid', async () => {
@@ -622,6 +702,7 @@ describe('PaymentsService — money-path defences', () => {
       repo,
       provider,
       orders,
+      invoicesDouble(),
       merchantPort(),
       credentialsPort(),
       refundsDouble(),

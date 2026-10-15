@@ -6,6 +6,12 @@ export type PaymentMethodChoice = Extract<
   'Card' | 'PromptPay'
 >;
 
+/** The same methods as a list — every one checkout can collect. */
+export const PAYMENT_METHOD_CHOICES: readonly PaymentMethodChoice[] = [
+  'Card',
+  'PromptPay',
+];
+
 /** What the provider is asked to collect. Note what is absent: any card detail. */
 export interface StartPaymentInput {
   orderId: string;
@@ -183,8 +189,8 @@ export abstract class PaymentProviderPort {
   abstract refund(input: RefundPaymentInput): Promise<RefundedPayment>;
 
   /**
-   * A one-time URL onto the provider's own hosted dashboard, where an Admin
-   * manages bank details, the payout schedule and tax forms (US-FIN-05).
+   * A URL onto the provider's own hosted dashboard, where an Admin manages
+   * bank details, the payout schedule and tax forms (US-FIN-05).
    *
    * The link is how bank details stay OUT of this service: Eventa never sees an
    * account number, only that a connected account exists. Returns null when the

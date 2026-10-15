@@ -5,10 +5,15 @@ import { formatBaht } from '../../common/money/baht';
 import { Clock } from '../../common/time/clock';
 import { ticketsUrlFor } from '../checkout/ticket-links';
 import type { Env } from '../../config/env.validation';
+import type { Tx } from '../../db/tenant';
 import type { PayOrderDto } from './dto/pay-order.dto';
 import type { PaymentIntentDto } from './dto/payment-intent.dto';
 import { GatewayCredentialsPort } from './ports/gateway-credentials.port';
-import { MerchantAccountPort } from './ports/merchant-account.port';
+import {
+  MerchantAccountPort,
+  type MerchantAccount,
+} from './ports/merchant-account.port';
+import { OrderInvoicePort } from './ports/order-invoice.port';
 import {
   OrderPaymentPort,
   type PayableOrder,
@@ -39,6 +44,10 @@ export interface WebhookAck {
 const NO_MERCHANT_ACCOUNT =
   'This event cannot take payment yet — the organizer has not finished connecting their payment account.';
 
+/** Written for the buyer: the organizer turned this way to pay off (US-SET-09). */
+const methodOff = (method: string): string =>
+  `This event doesn't take ${method} — please choose another way to pay.`;
+
 /** A refund callback carries a REFUND's reference, not a payment's. */
 type RefundWebhook = VerifiedWebhook & { type: RefundWebhookType };
 
@@ -64,6 +73,17 @@ const WEBHOOK_STATUS_FOR: Readonly<
   amount_mismatch: 'failed',
   failed_after_settled: 'failed',
 };
+
+/**
+ * A method the workspace switched off is refused (US-SET-09). Checkout no
+ * longer offers it; this is the control behind that, for a page left open or a
+ * request made by hand.
+ */
+function assertAccepted(account: MerchantAccount, method: string): void {
+  if (!(account.acceptedMethods as readonly string[]).includes(method)) {
+    throw DomainException.conflict(methodOff(method));
+  }
+}
 
 function isRefundWebhook(verified: VerifiedWebhook): verified is RefundWebhook {
   return (REFUND_WEBHOOK_TYPES as readonly string[]).includes(verified.type);
@@ -95,6 +115,7 @@ export class PaymentsService {
     private readonly repo: PaymentsRepository,
     private readonly provider: PaymentProviderPort,
     private readonly orders: OrderPaymentPort,
+    private readonly invoices: OrderInvoicePort,
     private readonly merchants: MerchantAccountPort,
     private readonly credentials: GatewayCredentialsPort,
     private readonly refunds: RefundsService,
@@ -107,7 +128,8 @@ export class PaymentsService {
   /** Start collecting. Safe to replay — the idempotency key finds its own attempt. */
   async pay(input: PayOrderDto): Promise<PaymentIntentDto> {
     const order = await this.requirePayable(input.orderId);
-    const accountId = await this.requireMerchantAccount(order.organizationId);
+    const account = await this.requireMerchantAccount(order.organizationId);
+    assertAccepted(account, input.method);
     const started = await this.provider.start({
       orderId: order.id,
       organizationId: order.organizationId,
@@ -115,8 +137,9 @@ export class PaymentsService {
       currency: order.currency,
       method: input.method,
       buyerEmail: order.buyerEmail,
-      statementDescriptor: await this.repo.orgStatementDescriptor(
+      statementDescriptor: await this.statementDescriptorFor(
         order.organizationId,
+        account,
       ),
       description: order.eventName,
       // Where the provider sends the buyer back: their own copy of the order,
@@ -135,7 +158,7 @@ export class PaymentsService {
       gatewayRef: started.gatewayRef,
       // Stamped now, so the refund reverses on this account however the
       // workspace's settings row changes later.
-      gatewayAccountId: accountId,
+      gatewayAccountId: account.accountId,
       statementDescriptor: null,
       idempotencyKey: input.idempotencyKey,
       status: started.status === 'failed' ? 'failed' : 'pending',
@@ -281,7 +304,7 @@ export class PaymentsService {
       const result = await this.orders.settle(
         payment.organizationId,
         payment.orderId,
-        (tx) => this.repo.markPaidIn(tx, payment.id, this.clock.now()),
+        (tx) => this.recordPaid(tx, payment),
       );
       if (result.outcome === 'refund_required') {
         this.logger.warn(
@@ -298,6 +321,23 @@ export class PaymentsService {
       payment.organizationId,
       'processed',
     );
+  }
+
+  /**
+   * Inside the settlement transaction: the ledger line flips to paid, and so
+   * does an invoice already issued against the order (US-FIN-06/07) — it was
+   * stamped at issue, when nothing had been paid yet, and would otherwise age
+   * to Overdue on a buyer who has paid.
+   */
+  private async recordPaid(tx: Tx, payment: PaymentRow): Promise<void> {
+    const paidAt = this.clock.now();
+    await this.repo.markPaidIn(tx, payment.id, paidAt);
+    await this.invoices.markPaidIn(tx, {
+      organizationId: payment.organizationId,
+      orderId: payment.orderId,
+      method: payment.method,
+      paidAt,
+    });
   }
 
   /**
@@ -357,12 +397,26 @@ export class PaymentsService {
    */
   private async requireMerchantAccount(
     organizationId: number,
-  ): Promise<string> {
+  ): Promise<MerchantAccount & { accountId: string }> {
     const account = await this.merchants.findAccount(organizationId);
     if (!account.connected || !account.accountId) {
       throw DomainException.conflict(NO_MERCHANT_ACCOUNT);
     }
-    return account.accountId;
+    return { ...account, accountId: account.accountId };
+  }
+
+  /**
+   * What the buyer's card statement shows (US-SET-10): the label saved on
+   * Settings → Payments, else the one on the workspace's organization record.
+   */
+  private async statementDescriptorFor(
+    organizationId: number,
+    account: MerchantAccount,
+  ): Promise<string | null> {
+    return (
+      account.statementDescriptor ??
+      (await this.repo.orgStatementDescriptor(organizationId))
+    );
   }
 
   private async requirePayable(orderId: string): Promise<PayableOrder> {

@@ -6,6 +6,16 @@ import type { PaymentSettingsRow } from './payment-settings.types';
 
 const orgId = 1;
 
+type StoredRows = Awaited<ReturnType<PaymentSettingsRepository['listMethods']>>;
+
+/** Stored switches, as the repository returns them. */
+function rows(enabled: Record<string, boolean>): StoredRows {
+  return Object.entries(enabled).map(([method, on]) => ({
+    method,
+    enabled: on,
+  })) as StoredRows;
+}
+
 describe('PaymentMethodsService (US-SET-09)', () => {
   let repo: jest.Mocked<PaymentSettingsRepository>;
   let sales: jest.Mocked<TicketSalesPort>;
@@ -18,7 +28,6 @@ describe('PaymentMethodsService (US-SET-09)', () => {
     repo = {
       listMethods: jest.fn().mockResolvedValue([]),
       setMethod: jest.fn().mockResolvedValue(undefined),
-      countEnabledMethods: jest.fn().mockResolvedValue(2),
       findOrCreate: jest.fn().mockResolvedValue(connected()),
     } as unknown as jest.Mocked<PaymentSettingsRepository>;
     sales = {
@@ -27,16 +36,54 @@ describe('PaymentMethodsService (US-SET-09)', () => {
     service = new PaymentMethodsService(repo, sales);
   });
 
-  it('lists every known method, defaulting an absent row to disabled', async () => {
-    repo.listMethods.mockResolvedValue([
+  /**
+   * Checkout has always offered Card and PromptPay, and no workspace has a row
+   * saying otherwise. Now that checkout honours these switches (US-SET-09),
+   * reading an absent row as "off" would take every way to pay away from
+   * every live checkout — so those two stay on until an Admin turns them off.
+   * Anything else still needs turning on.
+   */
+  it('lists every known method, leaving Card and PromptPay on until turned off', async () => {
+    const res = await service.list(orgId);
+
+    expect(res).toEqual([
+      { method: 'Card', enabled: true },
       { method: 'PromptPay', enabled: true },
-    ] as Awaited<ReturnType<PaymentSettingsRepository['listMethods']>>);
+      { method: 'Bank transfer', enabled: false },
+      { method: 'Apple Pay', enabled: false },
+      { method: 'Google Pay', enabled: false },
+    ]);
+  });
+
+  it('keeps a method an Admin turned off, off', async () => {
+    repo.listMethods.mockResolvedValue(
+      rows({ Card: false, 'Apple Pay': true }),
+    );
 
     const res = await service.list(orgId);
 
-    expect(res.find((m) => m.method === 'PromptPay')?.enabled).toBe(true);
     expect(res.find((m) => m.method === 'Card')?.enabled).toBe(false);
-    expect(res).toHaveLength(5); // Card, PromptPay, Bank transfer, Apple Pay, Google Pay
+    expect(res.find((m) => m.method === 'Apple Pay')?.enabled).toBe(true);
+  });
+
+  /**
+   * US-SET-09: "Given I disable a method, when new orders are placed, then
+   * that method no longer appears at checkout." Only Card and PromptPay can
+   * be collected today, so a wallet switched on is not offered at checkout.
+   */
+  describe('acceptedAtCheckout', () => {
+    it('offers the methods checkout can collect that are switched on', async () => {
+      repo.listMethods.mockResolvedValue(rows({ 'Apple Pay': true }));
+      expect(await service.acceptedAtCheckout(orgId)).toEqual([
+        'Card',
+        'PromptPay',
+      ]);
+    });
+
+    it('drops a method an Admin switched off', async () => {
+      repo.listMethods.mockResolvedValue(rows({ PromptPay: false }));
+      expect(await service.acceptedAtCheckout(orgId)).toEqual(['Card']);
+    });
   });
 
   it('enables a method', async () => {
@@ -45,15 +92,20 @@ describe('PaymentMethodsService (US-SET-09)', () => {
   });
 
   it('blocks disabling the last enabled method while paid tickets are sold', async () => {
-    repo.countEnabledMethods.mockResolvedValue(1);
+    repo.listMethods.mockResolvedValue(rows({ Card: false }));
     await expect(
       service.setEnabled(orgId, 'PromptPay', false),
     ).rejects.toBeInstanceOf(DomainException);
     expect(repo.setMethod).not.toHaveBeenCalled();
   });
 
+  it('counts a method that is on by default as enabled', async () => {
+    await service.setEnabled(orgId, 'PromptPay', false);
+    expect(repo.setMethod).toHaveBeenCalledWith(orgId, 'PromptPay', false);
+  });
+
   it('allows disabling the last method when nothing paid is sold', async () => {
-    repo.countEnabledMethods.mockResolvedValue(1);
+    repo.listMethods.mockResolvedValue(rows({ Card: false }));
     sales.hasPaidTickets.mockResolvedValue(false);
     await service.setEnabled(orgId, 'PromptPay', false);
     expect(repo.setMethod).toHaveBeenCalledWith(orgId, 'PromptPay', false);

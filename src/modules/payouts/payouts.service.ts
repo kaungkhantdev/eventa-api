@@ -22,7 +22,7 @@ const NOT_CONNECTED =
 
 export interface PayoutSettingsLink {
   connected: boolean;
-  /** A one-time provider URL, or null when there is no account to manage. */
+  /** The provider's dashboard URL, or null when there is no account to manage. */
   url: string | null;
 }
 
@@ -32,7 +32,7 @@ export interface PayoutSettingsLink {
  *
  * Bank details never enter this service. The destination is a masked
  * descriptor, and everything an organizer might want to CHANGE about it lives
- * behind a one-time link to the provider's own dashboard — which is what keeps
+ * behind a link to the provider's own dashboard — which is what keeps
  * Eventa out of PCI/bank-data scope.
  */
 @Injectable()
@@ -146,7 +146,7 @@ export class PayoutsService {
     return toPayoutDetail(updated);
   }
 
-  /** A one-time link onto the provider's dashboard (US-FIN-05). */
+  /** A link onto the provider's dashboard (US-FIN-05). */
   async settingsLink(auth: AuthContext): Promise<PayoutSettingsLink> {
     const account = await this.account.findAccount(auth.organizationId);
     if (!account.connected) return { connected: false, url: null };

@@ -1,9 +1,10 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Clock } from '../../common/time/clock';
 import type { Env } from '../../config/env.validation';
 import { AccessModule } from '../access/access.module';
 import { CheckoutModule } from '../checkout/checkout.module';
+import { InvoicesModule } from '../invoices/invoices.module';
 import { PaymentSettingsModule } from '../payment-settings/payment-settings.module';
 import { InvoicePaymentPort } from '../invoices/ports/invoice-payment.port';
 import { SettledFundsPort } from '../payouts/ports/settled-funds.port';
@@ -42,12 +43,22 @@ import { RegistrationRefundAdapter } from './registration-refund.adapter';
  * a stand-in that can mint a "paid" order does not belong in the shipped app,
  * so the test suite supplies its own. Both Stripe secrets are required at
  * boot rather than discovered at the till.
+ *
+ * Invoices binds the Payments-owned `OrderInvoicePort`, so an order's invoice
+ * turns Paid when its money lands and Void when it goes back (US-FIN-02,
+ * US-FIN-06/07) — and Invoices asks Payments how an order settled. A genuine
+ * two-way dependency, hence the `forwardRef`.
  */
 @Module({
   // PaymentSettings binds `MerchantAccountPort` — whose connected account a
   // charge is made on. Without it every workspace's money lands in the
   // platform's own Stripe balance.
-  imports: [AccessModule, CheckoutModule, PaymentSettingsModule],
+  imports: [
+    AccessModule,
+    CheckoutModule,
+    PaymentSettingsModule,
+    forwardRef(() => InvoicesModule),
+  ],
   controllers: [PaymentsController, FinanceController],
   providers: [
     { provide: RevenueInsightsPort, useClass: RevenueInsightsAdapter },

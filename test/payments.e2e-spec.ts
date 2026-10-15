@@ -216,6 +216,72 @@ describe('Paying for an order (e2e — US-DISC-05)', () => {
       expect(Date.parse(intent.expiresAt ?? '')).toBeGreaterThan(Date.now());
     });
 
+    /**
+     * US-SET-10: the label saved on Settings → Payments "appears on attendees'
+     * card statements for later charges". Only the Organization page's own
+     * field (EVENTA*SUMMIT, seeded below) ever reached the provider.
+     */
+    it('charges under the statement label saved on Settings → Payments', async () => {
+      const provider = app.get(PaymentProviderPort);
+      const start = jest.spyOn(provider, 'start');
+      await pool.query(
+        `UPDATE payment_settings SET statement_descriptor = 'PAYE2E LABEL'
+         WHERE organization_id = $1`,
+        [orgId],
+      );
+      try {
+        await pay(await placeOrder());
+        expect(start).toHaveBeenCalledWith(
+          expect.objectContaining({ statementDescriptor: 'PAYE2E LABEL' }),
+        );
+      } finally {
+        start.mockRestore();
+        await pool.query(
+          `UPDATE payment_settings SET statement_descriptor = NULL
+           WHERE organization_id = $1`,
+          [orgId],
+        );
+      }
+    });
+
+    /**
+     * US-SET-09: "Given I disable a method, when new orders are placed, then
+     * that method no longer appears at checkout." Checkout offered Card and
+     * PromptPay whatever the workspace had switched off.
+     */
+    it('no longer offers or takes a method the workspace switched off', async () => {
+      const offered = async () => {
+        const res = await request(server).get(
+          `/api/v1/public/checkout/${SUMMIT}`,
+        );
+        expect(res.status).toBe(200);
+        return (res.body as Success<{ paymentMethods: string[] }>).data
+          .paymentMethods;
+      };
+      expect(await offered()).toEqual(['Card', 'PromptPay']);
+
+      await pool.query(
+        `INSERT INTO payment_method_settings (organization_id, method, enabled)
+         VALUES ($1, 'PromptPay', false)`,
+        [orgId],
+      );
+      try {
+        expect(await offered()).toEqual(['Card']);
+        const orderId = await placeOrder();
+        const refused = await pay(orderId, 'PromptPay');
+        expect(refused.status).toBe(409);
+        expect((refused.body as { message: string }).message).toMatch(
+          /PromptPay/,
+        );
+        expect((await pay(orderId, 'Card')).status).toBe(201);
+      } finally {
+        await pool.query(
+          `DELETE FROM payment_method_settings WHERE organization_id = $1`,
+          [orgId],
+        );
+      }
+    });
+
     it('ignores any amount a hostile client tries to send', async () => {
       const orderId = await placeOrder();
       const res = await request(server)

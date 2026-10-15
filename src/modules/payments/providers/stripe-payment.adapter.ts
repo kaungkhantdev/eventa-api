@@ -33,6 +33,16 @@ const MAX_SUFFIX_LENGTH = 12;
 const MIN_SUFFIX_LENGTH = 5;
 const NON_LATIN = /[^A-Za-z0-9 ]/g;
 
+/**
+ * Where a workspace manages its own bank account, payout schedule, tax forms
+ * and statements (US-FIN-05): its own Stripe dashboard. Test mode lives under
+ * `/test`, and a key says which mode it belongs to (`sk_test_…`, `rk_live_…`).
+ */
+const STRIPE_DASHBOARD = 'https://dashboard.stripe.com';
+const TEST_MODE_PATH = '/test';
+const PAYOUT_SETTINGS_PATH = '/settings/payouts';
+const TEST_MODE_KEY = /^(sk|rk)_test_/;
+
 /** Stripe's code for "the buyer never completed it in time" (PromptPay lapse). */
 const ATTEMPT_EXPIRED = 'payment_intent_payment_attempt_expired';
 
@@ -280,19 +290,23 @@ export class StripePaymentAdapter extends PaymentProviderPort {
   }
 
   /**
-   * A single-use login link onto the connected account's Express dashboard,
-   * where the organizer manages bank details, schedule and tax forms
-   * (US-FIN-05). This is what keeps bank data out of Eventa entirely: Stripe
-   * collects and shows it, we only hold the `acct_…` reference.
+   * The payout settings page of the workspace's own Stripe dashboard, in the
+   * mode it is working in, where the organizer manages bank details, schedule
+   * and tax forms (US-FIN-05). This is what keeps bank data out of Eventa
+   * entirely: Stripe collects and shows it, behind Stripe's own sign-in.
+   *
+   * Not `accounts.createLoginLink`: that exists only for a platform's Express
+   * accounts, and a workspace connects its own account with its own keys. No
+   * call to Stripe is made — the key is read only for the mode it names.
    */
   async payoutSettingsLink(
     organizationId: number,
     accountId: string | null,
   ): Promise<string | null> {
     if (!accountId) return null;
-    const stripe = await this.as(organizationId);
-    const link = await stripe.accounts.createLoginLink(accountId);
-    return link.url;
+    const key = await this.credentials.secretKeyFor(organizationId);
+    const mode = TEST_MODE_KEY.test(key) ? TEST_MODE_PATH : '';
+    return `${STRIPE_DASHBOARD}${mode}${PAYOUT_SETTINGS_PATH}`;
   }
 
   /**
