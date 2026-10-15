@@ -343,15 +343,27 @@ describe('PaymentKeysService (US-SET-08)', () => {
       );
     });
 
-    it('passes Stripe’s reason through when the key stopped working', async () => {
+    /**
+     * US-SET-08: "I'm told whether they work … or given a clear reason they
+     * failed." A failed check used to come back as a 200 the console read as
+     * success, so a revoked key was reported as "Connection is working."
+     */
+    it('refuses with Stripe’s reason when the key stopped working', async () => {
       provider.verifyKey.mockResolvedValue({
         ok: false,
         reason: 'Key revoked',
       });
-      expect(await service.testConnection(ORG)).toMatchObject({
-        ok: false,
-        reason: 'Key revoked',
-      });
+      const err = await service.testConnection(ORG).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(DomainException);
+      expect((err as DomainException).getStatus()).toBe(422);
+      expect((err as DomainException).message).toMatch(/Key revoked/);
+    });
+
+    it('still refuses when Stripe gave no reason', async () => {
+      provider.verifyKey.mockResolvedValue({ ok: false });
+      await expect(service.testConnection(ORG)).rejects.toBeInstanceOf(
+        DomainException,
+      );
     });
   });
 });

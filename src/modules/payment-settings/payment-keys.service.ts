@@ -127,11 +127,21 @@ export class PaymentKeysService {
     };
   }
 
-  /** Prove the stored key still works. Read-only — no money moves. */
+  /**
+   * Prove the stored key still works. Read-only — no money moves. A key that
+   * fails is refused with Stripe's reason (US-SET-08): answering 200 with
+   * `ok: false` read as success to every caller that branches on the status.
+   */
   async testConnection(organizationId: number): Promise<VerifyResult> {
     const settings = await this.settings.findOrCreate(organizationId);
     const secret = await this.secretFor(organizationId, settings.mode);
-    return this.provider.verifyKey(secret);
+    const check = await this.provider.verifyKey(secret);
+    if (!check.ok) {
+      throw DomainException.validation(
+        `That key could not be used: ${check.reason ?? 'Stripe gave no reason'}`,
+      );
+    }
+    return check;
   }
 
   /**

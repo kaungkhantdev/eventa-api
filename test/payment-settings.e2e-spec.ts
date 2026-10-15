@@ -179,6 +179,19 @@ describe('Payment settings (e2e — US-SET-08/09/10)', () => {
     expect((res.body as Success<{ ok: boolean }>).data.ok).toBe(true);
   });
 
+  // US-SET-08: "… or given a clear reason they failed". A failed check used to
+  // answer 200, which the console read as "Connection is working."
+  it('SET-08: tells why a saved key no longer works (422)', async () => {
+    jest
+      .spyOn(app.get(KeyVerifierPort), 'verifyKey')
+      .mockResolvedValueOnce({ ok: false, reason: 'API key expired.' });
+    const res = await post('test');
+    expect(res.status).toBe(422);
+    expect((res.body as { message: string }).message).toMatch(
+      /API key expired/,
+    );
+  });
+
   it('SET-09: lists every method, all disabled until turned on', async () => {
     const res = await request(server)
       .get('/api/v1/payment-settings/methods')
