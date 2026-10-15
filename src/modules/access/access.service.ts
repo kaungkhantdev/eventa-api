@@ -9,11 +9,17 @@ import { Clock } from '../../common/time/clock';
 import type { Env } from '../../config/env.validation';
 import { OutboxPort } from '../platform/outbox.port';
 import { memberInvitedEvent } from './events/member-invited.event';
+import {
+  memberRoleChangeAudit,
+  permAuditRecord,
+} from './permission-change.audit';
 import type {
+  Actor,
   InviteMemberInput,
   ListMembersQuery,
   MemberRow,
   MemberStatusCounts,
+  RoleWithPermissions,
 } from './access.types';
 
 const DEFAULT_LIMIT = 20;
@@ -148,31 +154,59 @@ export class AccessService {
    * Assigning a role hands out its grants, so the actor must hold them all
    * (US-SET-12). Moving somebody off the Admin role is a demotion, so the
    * last Admin is protected here exactly as from suspend and remove
-   * (US-SET-11).
+   * (US-SET-11). The move is recorded with who made it, from which role to
+   * which, and from where (US-SET-05, NFR-SUP-02).
    */
   async changeMemberRole(
     organizationId: number,
     membershipId: number,
     roleId: number,
-    actorUserId: string,
+    actor: Actor,
   ): Promise<MemberRow> {
     await this.assertMemberExists(organizationId, membershipId);
-    if (!(await this.repo.roleExists(organizationId, roleId))) {
-      throw DomainException.notFound(
-        `Role ${roleId} not found in this workspace.`,
-      );
-    }
-    const target = await this.repo.getRole(organizationId, roleId);
+    const target = await this.existingRole(organizationId, roleId);
     await this.assertNoEscalation(
       organizationId,
-      actorUserId,
+      actor.userId,
       target.permissions,
     );
     if (target.name !== ADMIN_ROLE) {
       await this.assertNotLastAdmin(organizationId, membershipId);
     }
-    await this.repo.updateMemberRole(organizationId, membershipId, roleId);
+    const member = await this.repo.getMember(organizationId, membershipId);
+    if (member.roleId === roleId) return member; // nothing changes, nothing to record
+    await this.moveToRole(organizationId, member, roleId, target, actor);
     return this.repo.getMember(organizationId, membershipId);
+  }
+
+  private async existingRole(
+    organizationId: number,
+    roleId: number,
+  ): Promise<RoleWithPermissions> {
+    if (!(await this.repo.roleExists(organizationId, roleId))) {
+      throw DomainException.notFound(
+        `Role ${roleId} not found in this workspace.`,
+      );
+    }
+    return this.repo.getRole(organizationId, roleId);
+  }
+
+  /** Move the member, recording who did it and from which role to which. */
+  private async moveToRole(
+    organizationId: number,
+    member: MemberRow,
+    roleId: number,
+    target: RoleWithPermissions,
+    actor: Actor,
+  ): Promise<void> {
+    const from = await this.repo.getRole(organizationId, member.roleId);
+    const text = memberRoleChangeAudit(member.name, from, target);
+    await this.repo.updateMemberRole(
+      organizationId,
+      member.id,
+      roleId,
+      permAuditRecord(text, actor),
+    );
   }
 
   /** Pause access without losing the role, so reactivating restores it exactly. */

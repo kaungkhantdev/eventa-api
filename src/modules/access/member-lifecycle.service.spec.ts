@@ -5,7 +5,7 @@ import type { PermissionsService } from './permissions.service';
 import type { TokenService } from '../auth/token.service';
 
 const orgId = 1;
-const actor = 'u1';
+const actor = { userId: 'u1', ip: null };
 
 /** A role as the repository returns it — only the name and grants matter here. */
 function role(name: string, permissions: string[]) {
@@ -32,7 +32,13 @@ describe('AccessService — member lifecycle & escalation (US-SET-11/12)', () =>
       countActiveAdmins: jest.fn().mockResolvedValue(2),
       setMemberStatus: jest.fn().mockResolvedValue(undefined),
       removeMember: jest.fn().mockResolvedValue(undefined),
-      getMember: jest.fn().mockResolvedValue({ id: 7, status: 'Suspended' }),
+      getMember: jest.fn().mockResolvedValue({
+        id: 7,
+        name: 'Ann',
+        roleId: 2,
+        role: 'Admin',
+        status: 'Suspended',
+      }),
       roleExists: jest.fn().mockResolvedValue(true),
       getRole: jest.fn().mockResolvedValue(role('Organizer', ['evCreate'])),
       updateMemberRole: jest.fn().mockResolvedValue(undefined),
@@ -115,13 +121,23 @@ describe('AccessService — member lifecycle & escalation (US-SET-11/12)', () =>
     it('allows demoting an Admin while another Admin remains', async () => {
       repo.countActiveAdmins.mockResolvedValue(2);
       await service.changeMemberRole(orgId, 7, 3, actor);
-      expect(repo.updateMemberRole).toHaveBeenCalledWith(orgId, 7, 3);
+      expect(repo.updateMemberRole).toHaveBeenCalledWith(
+        orgId,
+        7,
+        3,
+        expect.anything(),
+      );
     });
 
     it('does not block the last Admin being given the Admin role', async () => {
       repo.getRole.mockResolvedValue(role('Admin', ['setUsers']));
       await service.changeMemberRole(orgId, 7, 1, actor);
-      expect(repo.updateMemberRole).toHaveBeenCalledWith(orgId, 7, 1);
+      expect(repo.updateMemberRole).toHaveBeenCalledWith(
+        orgId,
+        7,
+        1,
+        expect.anything(),
+      );
     });
   });
 
@@ -162,7 +178,7 @@ describe('AccessService — member lifecycle & escalation (US-SET-11/12)', () =>
       await expect(
         service.changeMemberRole(orgId, 7, 1, actor),
       ).rejects.toMatchObject({ code: 'FORBIDDEN' });
-      expect(permissions.getFor).toHaveBeenCalledWith(orgId, actor);
+      expect(permissions.getFor).toHaveBeenCalledWith(orgId, 'u1');
       expect(repo.updateMemberRole).not.toHaveBeenCalled();
     });
 
@@ -170,7 +186,12 @@ describe('AccessService — member lifecycle & escalation (US-SET-11/12)', () =>
       permissions.getFor.mockResolvedValue(['setUsers', 'evCreate']);
       repo.getRole.mockResolvedValue(role('Organizer', ['evCreate']));
       await service.changeMemberRole(orgId, 7, 3, actor);
-      expect(repo.updateMemberRole).toHaveBeenCalledWith(orgId, 7, 3);
+      expect(repo.updateMemberRole).toHaveBeenCalledWith(
+        orgId,
+        7,
+        3,
+        expect.anything(),
+      );
     });
   });
 });

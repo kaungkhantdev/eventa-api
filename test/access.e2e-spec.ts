@@ -168,6 +168,23 @@ describe('Access / RBAC management (e2e)', () => {
       .expect(201);
   });
 
+  /*
+   * NFR-SUP-02: every permission change is recorded with who, when and from
+   * where. The grant above is that change.
+   */
+  it('records the permission change in the audit trail, with who and from where', async () => {
+    const rows = await permAudit(pool, orgId);
+    const entry = rows.find(
+      (r) => r.title === 'Changed the permissions of the Staff role',
+    );
+
+    expect(entry).toMatchObject({
+      meta: 'Granted: Create & edit events',
+      actorEmail: ADMIN,
+    });
+    expect(entry?.ipAddress).toBeTruthy();
+  });
+
   it('revokes all permissions when given an empty set', async () => {
     const jwt = await token(ADMIN);
     const res = await request(server)
@@ -227,6 +244,38 @@ describe('Access / RBAC management (e2e)', () => {
       .send({ roleId: organizerRoleId });
     expect(res.status).toBe(200);
     expect((res.body as Success<{ role: string }>).data.role).toBe('Organizer');
+  });
+
+  /*
+   * US-SET-05: "Given a teammate's role was changed, when I open the audit log,
+   * then I see an entry showing who changed it, from which role to which, and
+   * when." The previous case moved STAFF from Staff to Organizer.
+   */
+  it('shows the role change in the audit log: who, from which role to which, and when', async () => {
+    const jwt = await token(ADMIN);
+    const res = await request(server)
+      .get('/api/v1/audit')
+      .query({ type: 'perm' })
+      .set('Authorization', `Bearer ${jwt}`);
+
+    expect(res.status).toBe(200);
+    const entry = (
+      res.body as Success<
+        { title: string; actorName: string | null; occurredAt: string }[]
+      >
+    ).data.find(
+      (e) => e.title === "Changed Seed User's role from Staff to Organizer",
+    );
+    expect(entry?.actorName).toBe('Seed User');
+    expect(Number.isNaN(Date.parse(entry?.occurredAt ?? ''))).toBe(false);
+
+    // Every seeded teammate is called "Seed User", so the name alone does not
+    // say who: the row's actor is the Admin who made the change.
+    const row = (await permAudit(pool, orgId)).find(
+      (r) => r.title === "Changed Seed User's role from Staff to Organizer",
+    );
+    expect(row?.actorEmail).toBe(ADMIN);
+    expect(row?.ipAddress).toBeTruthy();
   });
 
   it('refuses to assign a role from another tenant (404)', async () => {
@@ -637,6 +686,38 @@ async function seedOrg(
     );
   }
   return { orgId, roleIdByName };
+}
+
+/** The workspace's permission-change audit rows, with the actor's email. */
+async function permAudit(
+  pool: Pool,
+  orgId: number,
+): Promise<
+  {
+    title: string;
+    meta: string | null;
+    actorEmail: string | null;
+    ipAddress: string | null;
+  }[]
+> {
+  const res = await pool.query<{
+    title: string;
+    meta: string | null;
+    actor_email: string | null;
+    ip_address: string | null;
+  }>(
+    `SELECT a.title, a.meta, u.email AS actor_email, a.ip_address
+       FROM audit_events a LEFT JOIN users u ON u.id = a.actor_user_id
+      WHERE a.organization_id = $1 AND a.type = 'perm'
+      ORDER BY a.id`,
+    [orgId],
+  );
+  return res.rows.map((r) => ({
+    title: r.title,
+    meta: r.meta,
+    actorEmail: r.actor_email,
+    ipAddress: r.ip_address,
+  }));
 }
 
 async function cleanup(pool: Pool): Promise<void> {

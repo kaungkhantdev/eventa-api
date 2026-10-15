@@ -4,6 +4,7 @@ import type { SQL } from 'drizzle-orm';
 import { DomainException } from '../../common/errors/domain.exception';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
+  auditEvents,
   authSessions,
   memberships,
   organizations,
@@ -23,6 +24,7 @@ import type {
   PermissionCatalogItem,
   RoleWithPermissions,
 } from './access.types';
+import type { PermAuditRecord } from './permission-change.audit';
 import { roleGrantStates } from './role-grants';
 import type { RoleGrantRow } from './role-grants';
 
@@ -121,11 +123,15 @@ export class AccessRepository {
    * `insertDefaultRoles`): the default matrix is the product's choice, not a
    * decision anybody at this workspace made, so a key outside it stays an open
    * question until an organizer answers it.
+   *
+   * `audit`, when given, is the permission-change entry recording this save
+   * (NFR-SUP-02), written in the same transaction so neither lands alone.
    */
   async setRolePermissions(
     organizationId: number,
     roleId: number,
     keys: PermissionKey[],
+    audit: PermAuditRecord | null,
   ): Promise<void> {
     await withTenant(this.db, organizationId, async (tx) => {
       if (keys.length > 0) {
@@ -152,6 +158,9 @@ export class AccessRepository {
          where p.key <> all(${keyArray(keys)})
         on conflict (role_id, permission_key) do update set granted = false
       `);
+      if (audit) {
+        await tx.insert(auditEvents).values({ organizationId, ...audit });
+      }
     });
   }
 
@@ -354,11 +363,15 @@ export class AccessRepository {
     });
   }
 
-  /** Re-assign a membership to another role (also updates the denormalized name). */
+  /**
+   * Re-assign a membership to another role (also updates the denormalized
+   * name), recording the change in the audit trail in the same transaction.
+   */
   async updateMemberRole(
     organizationId: number,
     membershipId: number,
     roleId: number,
+    audit: PermAuditRecord,
   ): Promise<void> {
     await withTenant(this.db, organizationId, async (tx) => {
       const [role] = await tx
@@ -378,6 +391,7 @@ export class AccessRepository {
             eq(memberships.organizationId, organizationId),
           ),
         );
+      await tx.insert(auditEvents).values({ organizationId, ...audit });
     });
   }
 

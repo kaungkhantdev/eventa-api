@@ -4,6 +4,8 @@ import type { AccessService } from './access.service';
 import { RolesService } from './roles.service';
 
 const orgId = 1;
+/** Who acts, and from where — what the audit trail records (NFR-SUP-02). */
+const actor = { userId: 'u1', ip: '203.0.113.9' };
 
 describe('RolesService', () => {
   let repo: jest.Mocked<AccessRepository>;
@@ -54,7 +56,7 @@ describe('RolesService', () => {
       repo.roleExists.mockResolvedValue(false);
 
       const err = await service
-        .setRolePermissions(orgId, 'actor', 999, ['evCreate'])
+        .setRolePermissions(orgId, actor, 999, ['evCreate'])
         .catch((e: unknown) => e);
 
       expect(err).toBeInstanceOf(DomainException);
@@ -74,16 +76,55 @@ describe('RolesService', () => {
         isSystem: true,
       });
 
-      const role = await service.setRolePermissions(orgId, 'actor', 5, [
+      const role = await service.setRolePermissions(orgId, actor, 5, [
         'regView',
         'regCheckin',
       ]);
 
-      expect(repo.setRolePermissions).toHaveBeenCalledWith(orgId, 5, [
-        'regView',
-        'regCheckin',
-      ]);
+      expect(repo.setRolePermissions).toHaveBeenCalledWith(
+        orgId,
+        5,
+        ['regView', 'regCheckin'],
+        null, // the role already granted exactly these: nothing to record
+      );
       expect(role.permissions).toEqual(['regView', 'regCheckin']);
+    });
+
+    /*
+     * NFR-SUP-02 asks for every permission change to be recorded with who,
+     * when and from where; US-SET-12 for a sensitive grant to be "clearly
+     * flagged in the record".
+     */
+    it('records who changed which permissions, from where, in the same write', async () => {
+      repo.roleExists.mockResolvedValue(true);
+      repo.getRole.mockResolvedValue({
+        id: 5,
+        name: 'Staff',
+        description: 'seed',
+        permissions: ['regView', 'finView'],
+        neverOfferedPermissions: [],
+        memberCount: 0,
+        isSystem: true,
+      });
+
+      await service.setRolePermissions(orgId, actor, 5, [
+        'regView',
+        'finRefund',
+      ]);
+
+      expect(repo.setRolePermissions).toHaveBeenCalledWith(
+        orgId,
+        5,
+        ['regView', 'finRefund'],
+        {
+          type: 'perm',
+          title:
+            'Changed the permissions of the Staff role — sensitive access granted',
+          meta: 'Granted: Issue refunds (sensitive) · Revoked: View payments & payouts',
+          actorUserId: 'u1',
+          ipAddress: '203.0.113.9',
+        },
+      );
     });
 
     it('de-duplicates the incoming keys before persisting', async () => {
@@ -98,14 +139,14 @@ describe('RolesService', () => {
         isSystem: true,
       });
 
-      await service.setRolePermissions(orgId, 'actor', 5, [
-        'regView',
-        'regView',
-      ]);
+      await service.setRolePermissions(orgId, actor, 5, ['regView', 'regView']);
 
-      expect(repo.setRolePermissions).toHaveBeenCalledWith(orgId, 5, [
-        'regView',
-      ]);
+      expect(repo.setRolePermissions).toHaveBeenCalledWith(
+        orgId,
+        5,
+        ['regView'],
+        null,
+      );
     });
   });
 
