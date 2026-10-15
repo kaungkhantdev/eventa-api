@@ -39,7 +39,7 @@ export class EventPerformanceRowDto {
     type: Number,
     nullable: true,
     description:
-      'Net of VAT and refunds, integer satang, all time for this event. Null when the caller has no finance access — withheld, never zeroed.',
+      'Gross less refunds and fees (the Income report’s net), integer satang, all time for this event. Null when the caller has no finance access — withheld, never zeroed.',
   })
   revenueSatang!: number | null;
 

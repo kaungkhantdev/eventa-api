@@ -640,33 +640,36 @@ describe('Reports (e2e — US-RPT)', () => {
       expect(t.vatSatang).toBe(7_000);
       expect(t.refundsSatang).toBe(10_000);
       expect(t.feesSatang).toBe(3_000);
-      // net is gross less VAT and refunds — fees are NOT in it.
-      expect(t.netSatang).toBe(90_000);
-      // settled is what reaches the bank.
+      // US-RPT-05: net is gross less refunds less fees — VAT is NOT taken off.
+      expect(t.netSatang).toBe(94_000);
+      // settled takes the VAT off as well.
       expect(t.settledSatang).toBe(87_000);
     });
 
-    it('agrees with the dashboard about the same money', async () => {
-      // The whole point of sharing the arithmetic: the overview's revenue and
-      // this report's net are the same number for the same scope (US-RPT-01).
+    it('makes every row’s Net its Gross less Refunds less Fees', async () => {
+      // US-RPT-05 AC1 — the three columns beside Net on screen, and nothing
+      // else, are what Net is made of.
       await seedPayment({
-        amountSatang: 50_000,
+        event: summitId,
+        amountSatang: 107_000,
+        vatSatang: 7_000,
+        refundSatang: 10_000,
+        feeSatang: 3_000,
+      });
+      await seedPayment({
+        event: galaId,
+        amountSatang: 53_500,
         vatSatang: 3_500,
-        feeSatang: 1_500,
+        feeSatang: 1_200,
       });
 
-      const net = income(await getIncome(adminJwt).expect(200)).totals
-        .netSatang;
-      const dash = await request(server)
-        .get('/api/v1/dashboard?range=year')
-        .set('Authorization', `Bearer ${adminJwt}`)
-        .expect(200);
-      const revenue = (
-        dash.body as Success<{
-          kpis: { revenueSatang: { value: number | null } | null };
-        }>
-      ).data.kpis.revenueSatang;
-      expect(revenue?.value).toBe(net);
+      const report = income(await getIncome(adminJwt).expect(200));
+      expect(report.rows).toHaveLength(2);
+      for (const row of [...report.rows, report.totals]) {
+        expect(row.netSatang).toBe(
+          row.grossSatang - row.refundsSatang - row.feesSatang,
+        );
+      }
     });
 
     it('does not double-count a payment refunded twice', async () => {
@@ -1281,7 +1284,8 @@ describe('Reports (e2e — US-RPT)', () => {
         .netSatang;
       const view = overview(await getOverview(adminJwt).expect(200));
       expect(view.kpis.revenueSatang?.value).toBe(net);
-      expect(view.kpis.revenueSatang?.value).toBe(90_000);
+      // US-RPT-05 AC2: gross − refunds − fees, for the overview's tile too.
+      expect(view.kpis.revenueSatang?.value).toBe(94_000);
     });
 
     it('counts registrations as confirmed seats', async () => {
@@ -1379,7 +1383,7 @@ describe('Reports (e2e — US-RPT)', () => {
         ).revenue;
         const summed = trend!.points.reduce((a, p) => a + p.netSatang, 0);
         expect(summed).toBe(trend?.totalSatang);
-        expect(trend?.totalSatang).toBe(91_000);
+        expect(trend?.totalSatang).toBe(95_000);
       });
 
       it('gives a zero total and a neutral change for a window with no revenue', async () => {
@@ -1639,7 +1643,8 @@ describe('Reports (e2e — US-RPT)', () => {
         const row = performance(
           await getEvents(adminJwt, `${spanningWindow()}&q=Earner`).expect(200),
         ).rows[0];
-        expect(row.revenueSatang).toBe(90_000);
+        // The income report's net for this event: gross less refunds.
+        expect(row.revenueSatang).toBe(97_000);
       });
 
       it('reports ฿0 for an event that has taken nothing', async () => {

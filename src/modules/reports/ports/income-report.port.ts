@@ -5,9 +5,9 @@ import type { NetRevenueDay } from '../revenue-trend';
  * (US-RPT-05).
  *
  * Payments implements it, because only Payments knows what these words mean —
- * the same reason `RevenueInsightsPort` exists for the dashboard. `net` here is
- * computed by exactly the arithmetic that port already uses, so the income
- * report and the overview cannot disagree about the same period.
+ * the same reason `RevenueInsightsPort` exists for the dashboard. `net` here
+ * serves both the income report and the overview, so they cannot disagree
+ * about the same period.
  */
 
 /** One event's money for the window. Integer satang throughout. */
@@ -30,15 +30,12 @@ export interface IncomeRow {
   /** Charged by the payment provider. */
   feesSatang: number;
   /**
-   * `gross − vat − refunds`. THE revenue figure, matching the dashboard's.
-   *
-   * Fees are deliberately not in it: this is the number US-RPT-01 requires the
-   * overview to agree with, and the overview's revenue is net of VAT and
-   * refunds only. What lands in the bank after the provider takes its cut is
-   * `settled`, below.
+   * `gross − refunds − fees` (US-RPT-05). THE revenue figure, matching the
+   * overview's (US-RPT-01). VAT is not taken off — it is reported beside
+   * gross, in `vatSatang`.
    */
   netSatang: number;
-  /** `net − fees` — what actually reaches the organization's account. */
+  /** `gross − vat − refunds − fees`. */
   settledSatang: number;
 }
 

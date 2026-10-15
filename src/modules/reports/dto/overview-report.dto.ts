@@ -23,7 +23,9 @@ export class RevenueTrendPointDto {
   })
   at!: string;
 
-  @ApiProperty({ description: 'Net of VAT and refunds, integer satang.' })
+  @ApiProperty({
+    description: 'Gross less refunds and fees, integer satang.',
+  })
   netSatang!: number;
 }
 
@@ -37,7 +39,7 @@ export class RevenueTrendDto {
 
   @ApiProperty({
     description:
-      'The same figure as the revenue tile — the sum of the points, net of VAT and refunds.',
+      'The same figure as the revenue tile — the sum of the points, gross less refunds and fees.',
   })
   totalSatang!: number;
 
@@ -76,7 +78,7 @@ export class OverviewKpisDto {
     type: OverviewKpiDto,
     nullable: true,
     description:
-      'Net of VAT and refunds, integer satang — the same figure as the Income report’s net for this scope.',
+      'Gross less refunds and fees, integer satang — the same figure as the Income report’s net for this scope.',
   })
   revenueSatang!: OverviewKpiDto | null;
 

@@ -20,13 +20,12 @@ export class IncomeFiguresDto {
 
   @ApiProperty({
     description:
-      'gross − VAT − refunds. The revenue figure, matching the dashboard and the overview.',
+      'gross − refunds − fees. The revenue figure, matching the overview.',
   })
   netSatang!: number;
 
   @ApiProperty({
-    description:
-      'net − fees. What actually reaches the organization’s account.',
+    description: 'gross − VAT − refunds − fees.',
   })
   settledSatang!: number;
 }

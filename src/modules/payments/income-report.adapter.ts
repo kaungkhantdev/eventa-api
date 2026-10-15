@@ -28,14 +28,17 @@ const SETTLED_REFUND = 'succeeded';
  * Payments' implementation of the income report (US-RPT-05), so Reports never
  * reads a payments table.
  *
- * `net` uses the SAME arithmetic as `RevenueInsightsAdapter.netIn` — amount,
- * less the order's VAT, less refunds raised against that payment. That is not a
- * coincidence to be maintained by hand: US-RPT-01 requires the overview's
- * revenue to equal this report's net for the same scope, and the only way that
- * holds is for one definition to serve both.
+ * `net` is gross less refunds less fees — exactly the three columns beside it
+ * on the Income screen, as US-RPT-05 requires of every row and of the tiles.
+ * VAT is NOT taken off: it stays inside gross and is reported beside it for
+ * reconciliation. One expression serves the report, the overview's revenue
+ * (US-RPT-01, US-RPT-12 require them to agree) and the event-performance
+ * figure, so none of them can drift from the others.
  *
- * Fees come off separately as `settled`, which is what reconciliation actually
- * needs: the organizer compares the bank against that, not against net.
+ * This is deliberately NOT the dashboard's `RevenueInsightsAdapter.netIn`,
+ * which US-DASH-08 defines as net of VAT and refunds.
+ *
+ * `settled` takes the VAT off as well.
  *
  * The arithmetic stays in Postgres — a year of payments must not marshal a row
  * each into JavaScript to be added up.
@@ -227,7 +230,7 @@ export class IncomeReportAdapter extends IncomeReportPort {
       refundsSatang: sql<string>`coalesce(sum(${refunded}), 0)::bigint`,
       feesSatang: sql<string>`coalesce(sum(coalesce(${payments.feeAmountSatang}, 0)), 0)::bigint`,
       netSatang: sql<string>`coalesce(sum(
-        ${payments.amountSatang} - coalesce(${orders.vatAmountSatang}, 0) - ${refunded}
+        ${payments.amountSatang} - ${refunded} - coalesce(${payments.feeAmountSatang}, 0)
       ), 0)::bigint`,
       settledSatang: sql<string>`coalesce(sum(
         ${payments.amountSatang} - coalesce(${orders.vatAmountSatang}, 0) - ${refunded}
