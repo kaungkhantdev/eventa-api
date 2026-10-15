@@ -18,6 +18,44 @@ const ORG = { slug: 'bookclaim-e2e', name: 'Booking Claim E2E' };
 const BUYER = { name: 'Anan Suksawat', email: 'anan@bookclaim.test' };
 /** Somebody whose address a stranger booked with — they never asked for this. */
 const VICTIM = { name: 'Malee Wongsa', email: 'malee@bookclaim.test' };
+/**
+ * Addresses that hold SOME account, but none attendee sign-in can find: each
+ * must be treated exactly like an address with no account at all.
+ */
+const OTHER_ACCOUNTS = [
+  {
+    label: 'an organizer account only',
+    buyer: { name: 'Somchai Organizer', email: 'organizer@bookclaim.test' },
+    persona: 'admin',
+    inPlatform: false,
+    deleted: false,
+  },
+  {
+    // Same organization as attendee accounts, different audience: only the
+    // persona tells the two apart.
+    label: 'a staff account in the platform organization',
+    buyer: { name: 'Kanya Staff', email: 'staff@bookclaim.test' },
+    persona: 'admin',
+    inPlatform: true,
+    deleted: false,
+  },
+  {
+    label: 'a deleted attendee account',
+    buyer: { name: 'Pim Returning', email: 'returning@bookclaim.test' },
+    persona: 'attendee',
+    inPlatform: true,
+    deleted: true,
+  },
+  {
+    label: 'an attendee row in another workspace',
+    buyer: { name: 'Niran Elsewhere', email: 'elsewhere@bookclaim.test' },
+    persona: 'attendee',
+    inPlatform: false,
+    deleted: false,
+  },
+] as const;
+/** Longer than `CLAIM_TOKEN_MAX_LENGTH` (2048) — no link this API signs is near it. */
+const OVERSIZED_TOKEN = 'x'.repeat(2049);
 const UNKNOWN_ORDER = '6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b';
 const LINK_ROUTING_KEY = 'identity.booking_account_link_requested';
 const PUBLIC_WEB_URL = 'http://localhost:5173';
@@ -47,6 +85,7 @@ interface Success<T> {
 interface Failure {
   message: string;
   code?: string;
+  errors?: { field: string; message: string }[];
 }
 interface Session {
   twoFactorRequired: boolean;
@@ -96,6 +135,7 @@ describe('Account from a booking (e2e — US-DISC-15)', () => {
   let pool: Pool;
   let redis: Redis;
   let platformOrgId: number;
+  let seeded: Seeded;
   /** The buyer's earlier booking, made before any account existed. */
   let earlierOrderId: string;
   /** The booking the buyer turns into an account. */
@@ -110,7 +150,7 @@ describe('Account from a booking (e2e — US-DISC-15)', () => {
       ? new Redis(process.env.REDIS_URL)
       : new Redis();
     await cleanup(pool, redis);
-    const seeded = await seed(pool);
+    seeded = await seed(pool);
     platformOrgId = seeded.platformOrgId;
 
     const moduleRef = await Test.createTestingModule({
@@ -410,6 +450,23 @@ describe('Account from a booking (e2e — US-DISC-15)', () => {
       expectDeadLink(await inspect(''));
     });
 
+    it('refuses a token longer than any link carries before verifying it (400)', async () => {
+      for (const res of [
+        await inspect(OVERSIZED_TOKEN),
+        await claim({
+          token: OVERSIZED_TOKEN,
+          password: PASSWORD,
+          acceptTerms: true,
+        }),
+      ]) {
+        expect(res.status).toBe(400);
+        // The validator's refusal, naming the field — not the verifier's.
+        expect((res.body as Failure).errors).toEqual(
+          expect.arrayContaining([expect.objectContaining({ field: 'token' })]),
+        );
+      }
+    });
+
     it('refuses an expired link', async () => {
       const expired = await jwt.signAsync({
         sub: orderId,
@@ -613,10 +670,77 @@ describe('Account from a booking (e2e — US-DISC-15)', () => {
       expect(await linkRows(earlierOrderId)).toHaveLength(0);
     });
   });
+
+  /**
+   * "Sign in instead" is only ever said for an account attendee sign-in can
+   * find: a live attendee in the platform organization (US-DISC-08). An
+   * address that runs a workspace, deleted its attendee account, or appears as
+   * an attendee row in somebody's workspace has no such account — offered only
+   * "Sign in", it would be sent to a sign-in page with nothing to sign in to.
+   */
+  describe('an address whose only account is not one attendee sign-in finds', () => {
+    const orders = new Map<string, string>();
+
+    beforeAll(async () => {
+      for (const other of OTHER_ACCOUNTS) {
+        await pool.query(
+          `INSERT INTO users (organization_id, name, email, persona, status, deleted_at)
+           VALUES ($1, $2, $3, $4, 'Active', $5)`,
+          [
+            other.inPlatform ? platformOrgId : seeded.orgId,
+            other.buyer.name,
+            other.buyer.email,
+            other.persona,
+            other.deleted ? new Date() : null,
+          ],
+        );
+        const placed = await placeFreeOrder(
+          server,
+          seeded.latest,
+          other.buyer,
+          `other-${other.persona}-${other.buyer.email}`,
+        );
+        orders.set(other.buyer.email, placed.orderId);
+      }
+    });
+
+    it.each(OTHER_ACCOUNTS)(
+      '$label: is offered an account, sent the link, and given the account',
+      async ({ buyer }) => {
+        const id = orders.get(buyer.email) ?? '';
+
+        const offered = await accountFor(id);
+        expect((offered.body as Success<unknown>).data).toEqual({
+          accountExists: false,
+        });
+        expect((await requestLink(id)).status).toBe(202);
+        const token = await claimTokenFor(id);
+        expect((await inspect(token)).body).toMatchObject({
+          data: { accountExists: false },
+        });
+        const res = await claim({
+          token,
+          password: PASSWORD,
+          acceptTerms: true,
+        });
+
+        expect(res.status).toBe(201);
+        const { rows } = await pool.query(
+          `SELECT status FROM users
+            WHERE email = $1 AND persona = 'attendee'
+              AND organization_id = $2 AND deleted_at IS NULL`,
+          [buyer.email, platformOrgId],
+        );
+        expect(rows).toEqual([{ status: 'Active' }]);
+      },
+    );
+  });
 });
 
 interface Seeded {
   platformOrgId: number;
+  /** The organizer's workspace — not the platform. */
+  orgId: number;
   earlier: { eventId: string; tierId: string };
   latest: { eventId: string; tierId: string };
 }
@@ -632,6 +756,7 @@ async function seed(pool: Pool): Promise<Seeded> {
   const orgId = Number(org.rows[0].id);
   return {
     platformOrgId: Number(platform.rows[0].id),
+    orgId,
     earlier: await insertEvent(pool, orgId, 'bookclaim-first', 'First Meetup'),
     latest: await insertEvent(pool, orgId, 'bookclaim-latest', 'Latest Meetup'),
   };
@@ -687,7 +812,11 @@ async function placeFreeOrder(
 }
 
 async function cleanup(pool: Pool, redis: Redis): Promise<void> {
-  await redis.del(coolOffKey(BUYER.email), coolOffKey(VICTIM.email));
+  await redis.del(
+    coolOffKey(BUYER.email),
+    coolOffKey(VICTIM.email),
+    ...OTHER_ACCOUNTS.map(({ buyer }) => coolOffKey(buyer.email)),
+  );
   await pool.query(
     `DELETE FROM outbox_events WHERE routing_key = $1
         AND payload->>'email' LIKE '%@bookclaim.test'`,
