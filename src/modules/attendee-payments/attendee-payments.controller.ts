@@ -5,11 +5,13 @@ import {
   Param,
   ParseUUIDPipe,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentAuth } from '../../common/decorators/current-auth.decorator';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 import { SkipResponseEnvelope } from '../../common/decorators/skip-envelope.decorator';
+import { AttendeeGuard } from '../../common/guards/attendee.guard';
 import { ApiData, ApiPage } from '../../common/http/api-data.decorator';
 import type { Paginated } from '../../common/http/paginated';
 import type { AuthContext } from '../auth/auth.types';
@@ -26,6 +28,7 @@ import {
  */
 @ApiTags('attendee-payments')
 @ApiBearerAuth()
+@UseGuards(AttendeeGuard)
 @Controller('me/payments')
 export class AttendeePaymentsController {
   constructor(private readonly payments: AttendeePaymentsService) {}
