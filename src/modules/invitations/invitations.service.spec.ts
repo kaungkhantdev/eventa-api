@@ -59,7 +59,9 @@ describe('InvitationsService (US-REG-06)', () => {
     const buildEvent = repo.record.mock.calls[0][1];
     const event = buildEvent(NOW);
     expect(event.routingKey).toBe(INVITE_SENT_ROUTING_KEY);
-    expect(event.payload.registerUrl).toBe('https://eventa.test/events/btw');
+    // `/e/:slug` is the public event page eventa-web serves, and the way into
+    // its registration flow; anything else falls through to its 404 page.
+    expect(event.payload.registerUrl).toBe('https://eventa.test/e/btw');
     expect(event.payload.version).toBe(1);
   });
 

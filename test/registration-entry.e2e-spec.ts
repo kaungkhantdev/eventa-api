@@ -234,6 +234,14 @@ describe('Adding a registration by hand (e2e — US-REG-03)', () => {
     it('asks for 1–8 seats and reserves nothing when too many are requested', async () => {
       const res = await add(organizerJwt, entry({ quantity: MAX_SEATS + 1 }));
       expect(res.status).toBe(400);
+      // The story's own question, not class-validator's "must not be greater
+      // than 8" — the panel shows this field message as it arrives.
+      expect((res.body as Failure).errors).toEqual([
+        {
+          field: 'quantity',
+          message: `Choose between 1 and ${MAX_SEATS} seats per booking.`,
+        },
+      ]);
       const { rows } = await pool.query<{ sold: number }>(
         `SELECT sold FROM ticket_types WHERE id = $1`,
         [freeTier],

@@ -68,7 +68,7 @@ export class InvitationsService {
           recipientName: input.recipientName.trim(),
           recipientEmail: email,
           message: input.message?.trim() || null,
-          registerUrl: `${this.publicWebUrl}/events/${event.slug}`,
+          registerUrl: `${this.publicWebUrl}/e/${event.slug}`,
           sentAt,
         }),
     );
