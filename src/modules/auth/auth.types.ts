@@ -86,3 +86,16 @@ export interface PasswordResetClaims {
   pv: string; // password fingerprint
   typ: 'reset_password';
 }
+
+/**
+ * Claims of the link that lets a booking's buyer create their account from it
+ * (US-DISC-15). It is emailed to the booking's address and nowhere else, so
+ * holding it is the proof that the person choosing a password reads that inbox
+ * — which is why it names the address it was sent to, and why nothing else
+ * this service signs may stand in for it.
+ */
+export interface BookingClaimClaims {
+  sub: string; // orderId
+  email: string; // the booking's buyer email the link was sent to
+  typ: 'booking_claim';
+}
