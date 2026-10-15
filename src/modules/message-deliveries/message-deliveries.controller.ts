@@ -23,13 +23,15 @@ import { MessageDeliveriesService } from './message-deliveries.service';
 /**
  * The delivery log (US-MSG-06).
  *
- * Read-only: nothing here re-sends. Gated on `regView`, the same permission as
- * the attendee list — every row names a person and their address.
+ * Read-only: nothing here re-sends. Every row names a person and their address,
+ * so it needs `regView` — and `regManage` as well, because Staff hold `regView`
+ * and US-MSG-03/06 deny Staff the log. `regManage` is the key that already gates
+ * composing an announcement, which Staff are denied for the same story.
  */
 @ApiTags('message-deliveries')
 @ApiBearerAuth()
 @UseGuards(AdminGuard, PermissionsGuard)
-@RequirePermissions(Permission.regView)
+@RequirePermissions(Permission.regView, Permission.regManage)
 @ApiForbiddenResponse({
   type: ApiErrorDto,
   description: 'Every row names an attendee and their address.',
@@ -51,8 +53,17 @@ export class MessageDeliveriesController {
   /**
    * The log as a file (US-MSG-07), under whatever filters are in the query —
    * so what downloads is what was on screen.
+   *
+   * The file is attendee contact data in bulk, so it also needs `regExport`.
+   * A method-level requirement REPLACES the class one (the guard reads it with
+   * `getAllAndOverride`), so all three keys are named here.
    */
   @Get('export.csv')
+  @RequirePermissions(
+    Permission.regView,
+    Permission.regManage,
+    Permission.regExport,
+  )
   @SkipResponseEnvelope()
   @Header('Content-Type', CSV_MIME)
   @Header('Content-Disposition', 'attachment; filename="delivery-log.csv"')
