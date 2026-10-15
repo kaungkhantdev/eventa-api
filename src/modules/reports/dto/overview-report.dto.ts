@@ -63,7 +63,8 @@ export class RevenueTrendDto {
 export class OverviewKpisDto {
   @ApiProperty({
     type: OverviewKpiDto,
-    description: 'Confirmed seats registered in the window.',
+    description:
+      'Seats registered in the window — the registrations report’s total for the same scope.',
   })
   registrations!: OverviewKpiDto;
 
@@ -104,7 +105,8 @@ export class TicketMixSliceDto {
   @ApiProperty({ example: 'General Admission' }) ticketTypeName!: string;
 
   @ApiProperty({
-    description: 'Seats sold of this type, confirmed orders only.',
+    description:
+      'Seats of this type, in the same order states as the registrations total.',
   })
   seats!: number;
 

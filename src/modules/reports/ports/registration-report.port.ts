@@ -75,7 +75,7 @@ export interface RegistrationSplitPage {
 /**
  * One ticket type's share of the sign-ups (US-RPT-03).
  *
- * SEATS, not order lines — the same definition `confirmed` uses, so the donut's
+ * SEATS, not order lines, in the same four states as `total`, so the donut's
  * centre can show the overview's own registrations figure rather than a second
  * number that nearly matches it.
  */

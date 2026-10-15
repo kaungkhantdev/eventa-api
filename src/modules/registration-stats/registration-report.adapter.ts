@@ -114,9 +114,9 @@ export class RegistrationReportAdapter extends RegistrationReportPort {
   /**
    * The split by ticket type (US-RPT-03).
    *
-   * Sums SEATS rather than counting order lines, so the donut's centre is the
-   * same registrations figure the tile above it shows. Confirmed orders only,
-   * for the same reason every other report counts them.
+   * Sums SEATS rather than counting order lines, over the same four states
+   * as `total`, so the donut's centre is the same registrations figure the
+   * tile above it shows (US-RPT-03).
    */
   async ticketMix(
     organizationId: number,
@@ -133,7 +133,7 @@ export class RegistrationReportAdapter extends RegistrationReportPort {
         .where(
           and(
             this.matching(organizationId, window),
-            eq(orders.status, 'confirmed'),
+            inArray(orders.status, REGISTERED),
           ),
         )
         .groupBy(ticketTypes.name)

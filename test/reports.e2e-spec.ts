@@ -231,20 +231,33 @@ describe('Reports (e2e — US-RPT)', () => {
     seats?: number;
     /** SQL for `registered_at`; defaults to now. */
     at?: string;
+    /** Book the seats on a ticket type of this name, for the ticket mix. */
+    tier?: string;
   }): Promise<void> {
     seq += 1;
-    await pool.query(
+    const org = o.org ?? orgId;
+    const event = o.event ?? summitId;
+    const seats = o.seats ?? 1;
+    const order = await pool.query<{ id: string }>(
       `INSERT INTO orders (organization_id, reference, event_id, buyer_name, buyer_email,
                            status, payment_status, seats, subtotal_satang,
                            vat_amount_satang, total_satang, registered_at)
-       VALUES ($1,$2,$3,'Anan Suksawat','anan@rpt.test',$4,'pending',$5,0,0,0, ${o.at ?? 'now()'})`,
-      [
-        o.org ?? orgId,
-        `ORD-RPT-${seq}`,
-        o.event ?? summitId,
-        o.status ?? 'confirmed',
-        o.seats ?? 1,
-      ],
+       VALUES ($1,$2,$3,'Anan Suksawat','anan@rpt.test',$4,'pending',$5,0,0,0, ${o.at ?? 'now()'})
+       RETURNING id`,
+      [org, `ORD-RPT-${seq}`, event, o.status ?? 'confirmed', seats],
+    );
+    if (!o.tier) return;
+    const tier = await pool.query<{ id: string }>(
+      `INSERT INTO ticket_types (organization_id, event_id, name, price_satang,
+                                 status, total, sold, min_per_order, max_per_order)
+       VALUES ($1,$2,$3,0,'onsale',100,0,1,8) RETURNING id`,
+      [org, event, `Tier ${o.tier} ${seq}`],
+    );
+    await pool.query(
+      `INSERT INTO order_items (organization_id, order_id, ticket_type_id, quantity,
+                                unit_price_satang, line_subtotal_satang)
+       VALUES ($1,$2,$3,$4,0,0)`,
+      [org, order.rows[0].id, tier.rows[0].id, seats],
     );
   }
 
@@ -1297,12 +1310,19 @@ describe('Reports (e2e — US-RPT)', () => {
       expect(view.kpis.revenueSatang?.value).toBe(94_000);
     });
 
-    it('counts registrations as confirmed seats', async () => {
-      await seedOrder({ status: 'confirmed', seats: 4 });
-      await seedOrder({ status: 'cancelled', seats: 3 });
+    it('counts registrations as the registrations report’s total', async () => {
+      // US-RPT-08 AC2 / US-RPT-12 AC5: the overview's registrations figure
+      // equals the registrations report's total for the same scope, and
+      // US-RPT-03 AC1 puts the same figure in the donut's centre.
+      await seedOrder({ status: 'confirmed', seats: 4, tier: 'GA' });
+      await seedOrder({ status: 'cancelled', seats: 3, tier: 'VIP' });
 
       const view = overview(await getOverview(adminJwt).expect(200));
-      expect(view.kpis.registrations.value).toBe(4);
+      const split = report(await get(adminJwt).expect(200)).totals;
+      const donut = view.ticketMix.reduce((sum, s) => sum + s.seats, 0);
+      expect(view.kpis.registrations.value).toBe(7);
+      expect(split.total).toBe(7);
+      expect(donut).toBe(7);
     });
 
     it('prices the average ticket over the seats that were paid for', async () => {
