@@ -108,14 +108,25 @@ describe('AuthBookingSignupService (US-DISC-15)', () => {
       expect(refusal.getStatus()).toBe(HttpStatus.NOT_FOUND);
     });
 
+    /**
+     * Anybody can place an unpaid order with anybody's address and is handed
+     * its uuid — and an owed order emails nobody. Answering for it would let a
+     * stranger ask, silently and as often as they liked, whether that address
+     * has an Eventa account. The offer is only made for a confirmed booking
+     * with tickets to keep, so the question is refused for any other, exactly
+     * as the link is, before any account is looked up.
+     */
     it.each(NOT_CONFIRMED_STATUSES)(
-      'still answers when the booking is %s — only sending the link is refused',
+      'refuses the question when the booking is %s (409), never looking the address up',
       async (status) => {
         bookings.findBooking.mockResolvedValue({ ...booking, status });
+        accounts.findPlatformAttendee.mockResolvedValue(CONFIRMED);
 
-        await expect(service.accountFor(ORDER_ID)).resolves.toEqual({
-          accountExists: false,
-        });
+        const refusal = await refusalOf(service.accountFor(ORDER_ID));
+
+        expect(refusal.getStatus()).toBe(HttpStatus.CONFLICT);
+        expect(refusal.message).toBe(BOOKING_NOT_CONFIRMED);
+        expect(accounts.findPlatformAttendee).not.toHaveBeenCalled();
       },
     );
   });

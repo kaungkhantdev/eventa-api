@@ -74,9 +74,17 @@ export class AuthBookingSignupService {
    * Which offer the confirmation page makes: create an account, or sign in.
    * Says no more than the order page already shows its holder — the address
    * is on it — plus whether that address has an account to sign in to.
+   *
+   * Only for a confirmed booking, refused (409) like the link for any other.
+   * Anybody can place an unpaid order with anybody's address and is handed
+   * its uuid, and an owed order emails nobody — answering for it would tell a
+   * stranger, silently and as often as they asked, whether the address has an
+   * account. A confirmed booking has at least mailed its tickets to the
+   * address, and only it is made the offer.
    */
   async accountFor(orderId: string): Promise<BookingAccountDto> {
     const booking = await this.bookingOrNotFound(orderId);
+    assertConfirmed(booking);
     return { accountExists: await this.hasAccount(booking.buyerEmail) };
   }
 
@@ -130,8 +138,8 @@ export class AuthBookingSignupService {
 }
 
 /**
- * Only a confirmed booking has tickets to keep, so only it is sent a link;
- * every other status is refused (409).
+ * Only a confirmed booking has tickets to keep, so only it is told whether its
+ * address has an account and sent a link; every other status is refused (409).
  */
 function assertConfirmed(booking: ClaimableBooking): void {
   if (booking.status !== CONFIRMED) {

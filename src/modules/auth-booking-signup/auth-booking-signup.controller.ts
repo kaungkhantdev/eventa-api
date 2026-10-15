@@ -62,6 +62,11 @@ export class AuthBookingSignupController {
   @ResponseMessage('Booking account checked.')
   @ApiData(BookingAccountDto)
   @ApiNotFoundResponse({ description: 'No such order', type: ApiErrorDto })
+  @ApiConflictResponse({
+    description:
+      'The booking is not confirmed, so it has no tickets to keep and is not told whether its email has an account',
+    type: ApiErrorDto,
+  })
   account(
     @Param('orderId', ParseUUIDPipe) orderId: string,
   ): Promise<BookingAccountDto> {

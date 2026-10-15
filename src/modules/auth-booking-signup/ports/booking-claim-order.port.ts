@@ -14,8 +14,9 @@ export interface ClaimableBooking {
   locale: Locale;
   /**
    * Where the order stands. Only a confirmed booking has tickets to keep, so
-   * only a confirmed one is sent a link; a link already sent is honoured
-   * whatever the order has become since, because it proves the inbox.
+   * only a confirmed one is told whether its address has an account and sent
+   * a link; a link already sent is honoured whatever the order has become
+   * since, because it proves the inbox.
    */
   status: OrderStatus;
 }

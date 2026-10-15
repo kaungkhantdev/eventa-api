@@ -435,15 +435,20 @@ describe('Account from a booking (e2e — US-DISC-15)', () => {
       },
     );
 
-    it('still says whether the address has an account — only the link is refused', async () => {
+    /**
+     * Anybody can place an unpaid order with anybody's address and is handed
+     * its uuid, and an owed order emails nobody — so an answer here would tell
+     * a stranger, silently and as often as they asked, whether the address has
+     * an account. The question is refused exactly as the link is.
+     */
+    it('refuses to say whether the address has an account, as it refuses the link (409)', async () => {
       expect([...unsettled.keys()]).toEqual(NOT_CONFIRMED_STATUSES);
       for (const id of unsettled.values()) {
         const res = await accountFor(id);
 
-        expect(res.status).toBe(200);
-        expect((res.body as Success<unknown>).data).toEqual({
-          accountExists: false,
-        });
+        expect(res.status).toBe(409);
+        expect((res.body as Failure).message).toBe(BOOKING_NOT_CONFIRMED);
+        expect(res.body).not.toHaveProperty('data');
       }
     });
 
@@ -800,6 +805,28 @@ describe('Account from a booking (e2e — US-DISC-15)', () => {
       expect(res.status).toBe(409);
       expect((res.body as Failure).message).toBe(SIGN_IN_INSTEAD);
       expect(await linkRows(earlierOrderId)).toHaveLength(0);
+    });
+
+    /**
+     * What a stranger holding an unpaid order for this address sees: the same
+     * refusal an address with no account gets — never that one exists.
+     */
+    it('a booking for the address that isn’t confirmed does not reveal the account (409)', async () => {
+      const { orderId: id } = await placeFreeOrder(
+        server,
+        seeded.latest,
+        BUYER,
+        'buyer-pending',
+      );
+      await pool.query(`UPDATE orders SET status = 'pending' WHERE id = $1`, [
+        id,
+      ]);
+
+      const res = await accountFor(id);
+
+      expect(res.status).toBe(409);
+      expect((res.body as Failure).message).toBe(BOOKING_NOT_CONFIRMED);
+      expect(res.body).not.toHaveProperty('data');
     });
   });
 
