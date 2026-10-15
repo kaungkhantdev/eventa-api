@@ -7,14 +7,17 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lt,
   max,
   ne,
+  or,
   sql,
 } from 'drizzle-orm';
 import { DomainException } from '../../common/errors/domain.exception';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
   attendees,
+  discountCodes,
   discountRedemptions,
   events,
   orderItems,
@@ -341,6 +344,9 @@ const PAID_WHILE_DECIDING =
 /** An allocation of 0 means unlimited — mirrors `TicketingPolicy`. */
 const UNLIMITED = 0;
 const ACTIVE_HOLD = 'active';
+/** A redemption limit of 0 means unlimited — mirrors `DiscountsPolicy`. */
+const UNLIMITED_REDEMPTIONS = 0;
+const REDEMPTION_LIMIT_REACHED = 'This code has reached its redemption limit.';
 /** A ticket that still admits someone — the set a refund takes back. */
 const LIVE_TICKET_STATUSES = ['issued', 'checked_in'] as const;
 
@@ -1730,14 +1736,17 @@ export class CheckoutRepository {
       );
   }
 
-  /** The row set that `discount_codes.used` counts (US-TKT-11). */
+  /**
+   * The row set that `discount_codes.used` counts (US-TKT-11), and the count
+   * itself, moved together so the two can never disagree.
+   */
   private async recordRedemption(
     tx: Tx,
     input: PlaceOrderInput,
     orderId: string,
   ): Promise<void> {
     if (!input.discountCodeId || input.totals.discountSatang === 0) return;
-    await tx
+    const recorded = await tx
       .insert(discountRedemptions)
       .values({
         organizationId: input.organizationId,
@@ -1746,7 +1755,49 @@ export class CheckoutRepository {
         buyerEmail: input.buyer.email,
         amountSatang: input.totals.discountSatang,
       })
-      .onConflictDoNothing();
+      .onConflictDoNothing()
+      .returning({ id: discountRedemptions.id });
+    if (recorded.length === 0) return;
+    await this.countRedemption(tx, input.organizationId, input.discountCodeId);
+  }
+
+  /**
+   * One more use of the code, refused once its limit is spent. The quote checked
+   * the limit before this transaction opened; this conditional update is what
+   * holds when two buyers race for the last one, and the loser's whole order
+   * rolls back. The final redemption expires the code on the spot
+   * (US-TKT-10) — unless the organizer switched it off, which is never derived
+   * away.
+   */
+  private async countRedemption(
+    tx: Tx,
+    organizationId: number,
+    discountCodeId: string,
+  ): Promise<void> {
+    const counted = await tx
+      .update(discountCodes)
+      .set({
+        used: sql`${discountCodes.used} + 1`,
+        status: sql`CASE
+          WHEN ${discountCodes.status} <> 'disabled'
+            AND ${discountCodes.redemptionLimit} <> ${UNLIMITED_REDEMPTIONS}
+            AND ${discountCodes.used} + 1 >= ${discountCodes.redemptionLimit}
+          THEN 'expired' ELSE ${discountCodes.status} END`,
+      })
+      .where(
+        and(
+          eq(discountCodes.id, discountCodeId),
+          eq(discountCodes.organizationId, organizationId),
+          or(
+            eq(discountCodes.redemptionLimit, UNLIMITED_REDEMPTIONS),
+            lt(discountCodes.used, discountCodes.redemptionLimit),
+          ),
+        ),
+      )
+      .returning({ id: discountCodes.id });
+    if (counted.length === 0) {
+      throw DomainException.validation(REDEMPTION_LIMIT_REACHED);
+    }
   }
 
   /**
