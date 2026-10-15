@@ -12,12 +12,15 @@ import { CheckoutRepository } from './checkout.repository';
  * workspace from the tables Checkout owns, so the account flow never touches
  * them.
  *
- * The language is the one the booking's own confirmation email is written in:
- * eventa-worker picks the buyer's account language first, then the event's,
- * then the workspace's. The first never applies here — a claim link is only
- * ever sent to an address with no account — so it is the event's, else the
- * workspace's, and the claim email reads in the same language as the ticket it
- * follows.
+ * The language follows the booking's own confirmation email. eventa-worker
+ * writes that in the language of the attendee account using the buyer's
+ * address, else the event's, else the workspace's. The first is skipped here.
+ * A claim link never goes to an address with a confirmed account; it may go
+ * to one whose only account is an Unconfirmed sign-up, which the claim then
+ * takes over — but whoever made that sign-up proved nothing, so its language
+ * is not taken as the address owner's. So it is the event's, else the
+ * workspace's: the confirmation's own language, unless such a sign-up had
+ * chosen another.
  */
 @Injectable()
 export class BookingClaimOrderAdapter extends BookingClaimOrderPort {
