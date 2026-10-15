@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DomainException } from '../../common/errors/domain.exception';
-import { ResendThrottleService } from '../../common/throttle/resend-throttle.service';
+import {
+  ResendThrottleService,
+  type SendBudget,
+} from '../../common/throttle/resend-throttle.service';
 import { Clock } from '../../common/time/clock';
 import type { Env } from '../../config/env.validation';
 import { SignupRepository } from '../auth-signup/auth-signup.repository';
@@ -26,6 +29,20 @@ const ORDER_NOT_FOUND = 'That order could not be found.';
  * and address and asks only for a password.
  */
 const CLAIM_PAGE = '/portal/register';
+
+const SECONDS_PER_DAY = 24 * 60 * 60;
+
+/**
+ * How many claim emails one address may be sent a day, on top of the
+ * one-a-minute cool-off. Whoever holds an order id can ask — the booker, not
+ * only the buyer, and anybody can book with anybody's address — so the
+ * cool-off alone would let a stranger have Eventa mail somebody ~1,440 times a
+ * day. A handful covers a buyer whose first link went to spam.
+ */
+const CLAIM_LINK_BUDGET: SendBudget = {
+  max: 5,
+  windowSeconds: SECONDS_PER_DAY,
+};
 
 /**
  * The cool-off key for a booking's claim email: per address, in a space no
@@ -90,6 +107,7 @@ export class AuthBookingSignupService {
     await this.throttle.claim(
       claimThrottleIdentity(booking.buyerEmail),
       'link',
+      CLAIM_LINK_BUDGET,
     );
     await this.sendLink(booking, platformOrganizationId);
     return { sentTo: booking.buyerEmail };

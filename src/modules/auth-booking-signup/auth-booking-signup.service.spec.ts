@@ -170,12 +170,18 @@ describe('AuthBookingSignupService (US-DISC-15)', () => {
       expect(accounts.createAttendeeAccount).not.toHaveBeenCalled();
     });
 
-    it('rations the link per address, in a key space of its own', async () => {
+    /**
+     * Anybody holding an order id can ask — the booker, not only the buyer —
+     * so the cool-off's one-a-minute is no bound on how many the buyer gets.
+     * A daily total is.
+     */
+    it('rations the link per address, in a key space of its own, a few a day', async () => {
       await service.requestLink(ORDER_ID);
 
       expect(throttle.claim).toHaveBeenCalledWith(
         'booking-claim:anan@example.com',
         'link',
+        { max: 5, windowSeconds: 24 * 60 * 60 },
       );
       expect(throttle.claim.mock.invocationCallOrder[0]).toBeLessThan(
         tokens.signBookingClaim.mock.invocationCallOrder[0],

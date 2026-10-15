@@ -60,6 +60,8 @@ const OTHER_ACCOUNTS = [
  */
 const PLANTED = { name: 'Ratana Owner', email: 'planted@bookclaim.test' };
 const STRANGERS_PASSWORD = 'chosen-by-stranger1!';
+/** Somebody whose booking a stranger keeps pressing "Create account" on. */
+const PESTERED = { name: 'Suda Pestered', email: 'pestered@bookclaim.test' };
 /** Longer than `CLAIM_TOKEN_MAX_LENGTH` (2048) — no link this API signs is near it. */
 const OVERSIZED_TOKEN = 'x'.repeat(2049);
 const UNKNOWN_ORDER = '6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b';
@@ -124,6 +126,11 @@ interface OutboxRow {
 /** The throttle's own key for a booking-claim email, as the service spells it. */
 const coolOffKey = (email: string) =>
   `verify:resend:booking-claim:${email.toLowerCase()}`;
+/** …and its daily total for the same address. */
+const budgetKey = (email: string) =>
+  `verify:budget:booking-claim:${email.toLowerCase()}`;
+/** Claim emails one address may be sent a day. */
+const CLAIM_LINKS_PER_DAY = 5;
 
 /**
  * Create my account from my confirmation (US-DISC-15), through the real
@@ -329,6 +336,31 @@ describe('Account from a booking (e2e — US-DISC-15)', () => {
         'A confirmation link was just sent. Give it a minute before asking for another.',
       );
       expect(await linkRows(orderId)).toHaveLength(1);
+    });
+
+    it('caps the links one address is sent at a few a day, whoever asks', async () => {
+      const { orderId: pesteredOrderId } = await placeFreeOrder(
+        server,
+        seeded.latest,
+        PESTERED,
+        'pestered',
+      );
+      const statuses: number[] = [];
+      for (let i = 0; i <= CLAIM_LINKS_PER_DAY; i++) {
+        // Time passing: the one-a-minute cool-off is not what is under test.
+        await redis.del(coolOffKey(PESTERED.email));
+        const res = await requestLink(pesteredOrderId);
+        statuses.push(res.status);
+        if (res.status === 429) {
+          expect((res.body as Failure).message).toContain('as many links');
+        }
+      }
+
+      expect(statuses).toEqual([
+        ...Array<number>(CLAIM_LINKS_PER_DAY).fill(202),
+        429,
+      ]);
+      expect(await linkRows(pesteredOrderId)).toHaveLength(CLAIM_LINKS_PER_DAY);
     });
 
     it('rations per address: the same buyer’s other booking waits too', async () => {
@@ -931,12 +963,14 @@ async function placeFreeOrder(
 }
 
 async function cleanup(pool: Pool, redis: Redis): Promise<void> {
-  await redis.del(
-    coolOffKey(BUYER.email),
-    coolOffKey(VICTIM.email),
-    coolOffKey(PLANTED.email),
-    ...OTHER_ACCOUNTS.map(({ buyer }) => coolOffKey(buyer.email)),
-  );
+  const addresses = [
+    BUYER.email,
+    VICTIM.email,
+    PLANTED.email,
+    PESTERED.email,
+    ...OTHER_ACCOUNTS.map(({ buyer }) => buyer.email),
+  ];
+  await redis.del(...addresses.flatMap((a) => [coolOffKey(a), budgetKey(a)]));
   await pool.query(
     `DELETE FROM outbox_events WHERE routing_key = $1
         AND payload->>'email' LIKE '%@bookclaim.test'`,
