@@ -8,6 +8,7 @@ import { PlatformModule } from '../platform/platform.module';
 import { UsersModule } from '../users/users.module';
 import { AuthBookingSignupController } from './auth-booking-signup.controller';
 import { AuthBookingSignupService } from './auth-booking-signup.service';
+import { BookingClaimLinkService } from './booking-claim-link.service';
 import { BookingClaimService } from './booking-claim.service';
 
 /**
@@ -21,6 +22,7 @@ import { BookingClaimService } from './booking-claim.service';
  * chosen, until that link is opened: `BookingClaimService` creates the account
  * — Active, in the platform organization, signed straight in — from the link's
  * token alone, with the address from the token and the name from the order.
+ * The link itself — signed, mailed, and read back — is `BookingClaimLinkService`.
  *
  * What it uses, all through what their owners export:
  *   · `BookingClaimOrderPort` (declared here, bound by Checkout, which owns
@@ -56,6 +58,7 @@ import { BookingClaimService } from './booking-claim.service';
   controllers: [AuthBookingSignupController],
   providers: [
     AuthBookingSignupService,
+    BookingClaimLinkService,
     BookingClaimService,
     ResendThrottleService,
   ],

@@ -9,13 +9,13 @@ import {
   type PlatformAttendee,
 } from '../auth-signup/auth-signup.repository';
 import { AuthService, type LoginResult } from '../auth/auth.service';
-import { TokenService } from '../auth/token.service';
 import { UsersRepository } from '../users/users.repository';
 import {
   attendeeAccountsUnavailable,
   invalidClaimLink,
   signInInstead,
 } from './auth-booking-signup.errors';
+import { BookingClaimLinkService } from './booking-claim-link.service';
 import type { BookingClaimPreviewDto } from './dto/booking-claim-preview.dto';
 import { BookingClaimOrderPort } from './ports/booking-claim-order.port';
 
@@ -58,7 +58,7 @@ interface Claimant {
 export class BookingClaimService {
   constructor(
     private readonly bookings: BookingClaimOrderPort,
-    private readonly tokens: TokenService,
+    private readonly links: BookingClaimLinkService,
     private readonly accounts: SignupRepository,
     private readonly passwords: PasswordService,
     private readonly users: UsersRepository,
@@ -102,20 +102,12 @@ export class BookingClaimService {
    * inbox the booking no longer names, so it is dead.
    */
   private async claimantOfGoodLink(token: string): Promise<Claimant> {
-    const claims = await this.decode(token);
-    const booking = await this.bookings.findBooking(claims.sub);
-    if (!booking || !sameAddress(booking.buyerEmail, claims.email)) {
+    const link = await this.links.read(token);
+    const booking = await this.bookings.findBooking(link.orderId);
+    if (!booking || !sameAddress(booking.buyerEmail, link.email)) {
       throw invalidClaimLink();
     }
-    return { name: booking.buyerName, email: claims.email };
-  }
-
-  private async decode(token: string): Promise<{ sub: string; email: string }> {
-    try {
-      return await this.tokens.verifyBookingClaim(token);
-    } catch {
-      throw invalidClaimLink();
-    }
+    return { name: booking.buyerName, email: link.email };
   }
 
   /**

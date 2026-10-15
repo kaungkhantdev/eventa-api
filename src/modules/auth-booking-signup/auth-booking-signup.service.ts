@@ -1,34 +1,23 @@
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { DomainException } from '../../common/errors/domain.exception';
 import {
   ResendThrottleService,
   type SendBudget,
 } from '../../common/throttle/resend-throttle.service';
-import { Clock } from '../../common/time/clock';
-import type { Env } from '../../config/env.validation';
 import { SignupRepository } from '../auth-signup/auth-signup.repository';
-import { TokenService } from '../auth/token.service';
-import { OutboxPort } from '../platform/outbox.port';
 import {
   attendeeAccountsUnavailable,
   signInInstead,
 } from './auth-booking-signup.errors';
+import { BookingClaimLinkService } from './booking-claim-link.service';
 import type { BookingAccountDto } from './dto/booking-account.dto';
 import type { BookingLinkSentDto } from './dto/booking-link-sent.dto';
-import { bookingAccountLinkRequestedEvent } from './events/booking-account-link-requested.event';
 import {
   BookingClaimOrderPort,
   type ClaimableBooking,
 } from './ports/booking-claim-order.port';
 
 const ORDER_NOT_FOUND = 'That order could not be found.';
-
-/**
- * The page on the web app the emailed link opens. It shows the booking's name
- * and address and asks only for a password.
- */
-const CLAIM_PAGE = '/portal/register';
 
 const SECONDS_PER_DAY = 24 * 60 * 60;
 
@@ -68,19 +57,12 @@ function claimThrottleIdentity(email: string): string {
  */
 @Injectable()
 export class AuthBookingSignupService {
-  private readonly publicWebUrl: string;
-
   constructor(
     private readonly bookings: BookingClaimOrderPort,
     private readonly accounts: SignupRepository,
-    private readonly tokens: TokenService,
-    private readonly outbox: OutboxPort,
+    private readonly links: BookingClaimLinkService,
     private readonly throttle: ResendThrottleService,
-    private readonly clock: Clock,
-    config: ConfigService<Env, true>,
-  ) {
-    this.publicWebUrl = config.getOrThrow('PUBLIC_WEB_URL', { infer: true });
-  }
+  ) {}
 
   /**
    * Which offer the confirmation page makes: create an account, or sign in.
@@ -109,31 +91,8 @@ export class AuthBookingSignupService {
       'link',
       CLAIM_LINK_BUDGET,
     );
-    await this.sendLink(booking, platformOrganizationId);
+    await this.links.send(booking, platformOrganizationId);
     return { sentTo: booking.buyerEmail };
-  }
-
-  private async sendLink(
-    booking: ClaimableBooking,
-    platformOrganizationId: number,
-  ): Promise<void> {
-    const { token, expiresAt } = await this.tokens.signBookingClaim({
-      orderId: booking.orderId,
-      email: booking.buyerEmail,
-    });
-    await this.outbox.enqueue(
-      bookingAccountLinkRequestedEvent({
-        organizationId: platformOrganizationId,
-        orderId: booking.orderId,
-        name: booking.buyerName,
-        email: booking.buyerEmail,
-        eventName: booking.eventName,
-        claimUrl: `${this.publicWebUrl}${CLAIM_PAGE}?claim=${token}`,
-        expiresAt: expiresAt.toISOString(),
-        locale: booking.locale,
-        occurredAt: this.clock.now().toISOString(),
-      }),
-    );
   }
 
   /**

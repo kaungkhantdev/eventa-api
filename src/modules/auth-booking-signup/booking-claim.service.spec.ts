@@ -4,8 +4,9 @@ import { refusalOf } from '../../../test/support/refusal';
 import type { PasswordService } from '../auth-password/auth-password.service';
 import type { SignupRepository } from '../auth-signup/auth-signup.repository';
 import type { AuthService } from '../auth/auth.service';
-import type { TokenService } from '../auth/token.service';
 import type { UsersRepository } from '../users/users.repository';
+import { invalidClaimLink } from './auth-booking-signup.errors';
+import type { BookingClaimLinkService } from './booking-claim-link.service';
 import { BookingClaimService } from './booking-claim.service';
 import type {
   BookingClaimOrderPort,
@@ -29,10 +30,9 @@ const booking: ClaimableBooking = {
 };
 
 /** What the emailed link carries: the order, and the address it went to. */
-const claims = {
-  sub: ORDER_ID,
+const link = {
+  orderId: ORDER_ID,
   email: 'Anan@Example.com',
-  typ: 'booking_claim' as const,
 };
 
 /** An account whose address was proven — by its own link, an invite or a provider. */
@@ -67,7 +67,7 @@ function raceLost(): Error {
  */
 describe('BookingClaimService (US-DISC-15)', () => {
   let bookings: jest.Mocked<BookingClaimOrderPort>;
-  let tokens: jest.Mocked<TokenService>;
+  let links: jest.Mocked<BookingClaimLinkService>;
   let accounts: jest.Mocked<SignupRepository>;
   let passwords: jest.Mocked<PasswordService>;
   let users: jest.Mocked<UsersRepository>;
@@ -78,9 +78,9 @@ describe('BookingClaimService (US-DISC-15)', () => {
     bookings = {
       findBooking: jest.fn().mockResolvedValue(booking),
     };
-    tokens = {
-      verifyBookingClaim: jest.fn().mockResolvedValue(claims),
-    } as unknown as jest.Mocked<TokenService>;
+    links = {
+      read: jest.fn().mockResolvedValue(link),
+    } as unknown as jest.Mocked<BookingClaimLinkService>;
     accounts = {
       findPlatformAttendee: jest.fn().mockResolvedValue(null),
       createAttendeeAccount: jest
@@ -104,7 +104,7 @@ describe('BookingClaimService (US-DISC-15)', () => {
     } as unknown as jest.Mocked<AuthService>;
     service = new BookingClaimService(
       bookings,
-      tokens,
+      links,
       accounts,
       passwords,
       users,
@@ -130,7 +130,7 @@ describe('BookingClaimService (US-DISC-15)', () => {
         email: 'Anan@Example.com',
         accountExists: false,
       });
-      expect(tokens.verifyBookingClaim).toHaveBeenCalledWith(TOKEN);
+      expect(links.read).toHaveBeenCalledWith(TOKEN);
       expect(bookings.findBooking).toHaveBeenCalledWith(ORDER_ID);
     });
 
@@ -154,7 +154,7 @@ describe('BookingClaimService (US-DISC-15)', () => {
     });
 
     it('refuses a link that does not verify — forged, expired or not a claim', async () => {
-      tokens.verifyBookingClaim.mockRejectedValue(new Error('jwt expired'));
+      links.read.mockRejectedValue(invalidClaimLink());
 
       await expectDeadLink(service.inspect(TOKEN));
     });
@@ -259,7 +259,7 @@ describe('BookingClaimService (US-DISC-15)', () => {
     });
 
     it('refuses a dead link before a password is even hashed', async () => {
-      tokens.verifyBookingClaim.mockRejectedValue(new Error('invalid typ'));
+      links.read.mockRejectedValue(invalidClaimLink());
 
       await expectDeadLink(claim());
       expect(passwords.hash).not.toHaveBeenCalled();
