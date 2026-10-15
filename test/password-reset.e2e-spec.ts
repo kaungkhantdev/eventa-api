@@ -12,8 +12,8 @@ import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
 import { listenOnLoopback } from './support/loopback';
 
-const OLD_PASSWORD = 'oldpass1word';
-const NEW_PASSWORD = 'newpass2word';
+const OLD_PASSWORD = 'old-pass1word';
+const NEW_PASSWORD = 'new-pass2word';
 const OWNER = 'reset-owner@reset-e2e.test';
 const ORG_SLUG = 'reset-co';
 /**
@@ -151,7 +151,7 @@ describe('Forgotten-password reset (US-ACC-04, e2e)', () => {
     const token = await tokenFrom('identity.password_reset_requested');
     const res = await request(server)
       .post('/api/v1/auth/reset-password')
-      .send({ token, newPassword: 'another3pass' });
+      .send({ token, newPassword: 'another-3pass' });
     expect(res.status).toBe(422);
   });
 

@@ -14,8 +14,8 @@ import { buildValidationPipe } from '../src/common/http/validation';
 import { buildOpenApiDocument } from '../src/openapi';
 import { listenOnLoopback } from './support/loopback';
 
-const PASSWORD = 'oldpass1word';
-const NEW_PASSWORD = 'newpass2word';
+const PASSWORD = 'old-pass1word';
+const NEW_PASSWORD = 'new-pass2word';
 const WORKSPACE = 'Reset Link E2E';
 const ORG_SLUG = 'reset-link-e2e';
 const OWNER = 'owner@reset-link-e2e.test';
@@ -180,7 +180,7 @@ describe('Checking a password-reset link (US-ACC-04, e2e)', () => {
     const onOpen = await check(ownerLink);
     const onSubmit = await request(server)
       .post('/api/v1/auth/reset-password')
-      .send({ token: ownerLink, newPassword: 'another3pass' });
+      .send({ token: ownerLink, newPassword: 'another-3pass' });
 
     expectRefusedAsInvalid(onOpen);
     expect((onSubmit.body as { message: string }).message).toBe(INVALID_LINK);
@@ -245,7 +245,7 @@ describe('Checking a password-reset link (US-ACC-04, e2e)', () => {
       const onOpen = await check(link);
       const onSubmit = await request(server)
         .post('/api/v1/auth/reset-password')
-        .send({ token: link, newPassword: 'deleted4pass' });
+        .send({ token: link, newPassword: 'deleted-4pass' });
 
       expectRefusedAsInvalid(onOpen);
       expectRefusedAsInvalid(onSubmit);
