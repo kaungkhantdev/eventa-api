@@ -149,6 +149,24 @@ describe('SpeakersService', () => {
       expect(repo.softDelete).not.toHaveBeenCalled();
     });
   });
+
+  describe('cloneForEvent (US-EVT-13)', () => {
+    it("copies the speaker's whole profile onto the duplicate", async () => {
+      const profile = {
+        bio: 'Wrote the first program.',
+        photoUrl: 'https://cdn.example.test/ada.jpg',
+        website: 'https://ada.example.test',
+        socialLinks: { linkedin: 'https://linkedin.example.test/ada' },
+      };
+      repo.listByEvent.mockResolvedValue([speakerRow(profile)]);
+      await service.cloneForEvent(actor, 'src1', 'new1');
+      expect(repo.insert.mock.calls[0][0]).toMatchObject({
+        ...profile,
+        eventId: 'new1',
+        name: 'Ada Lovelace',
+      });
+    });
+  });
 });
 
 describe('SpeakersService — session counts (US-PROG-02/04/08/09)', () => {

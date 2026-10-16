@@ -2,6 +2,7 @@ import { BANGKOK_OFFSET_MS, DAY_MS } from '../../common/time/bangkok';
 import type { AttendanceReportDto } from './dto/attendance-report.dto';
 import type { DiscountsReportDto } from './dto/discounts-report.dto';
 import type { TransactionsReportDto } from './dto/transactions-report.dto';
+import type { PayoutsReportDto } from './dto/payouts-report.dto';
 import type { EventsReportDto } from './dto/events-report.dto';
 import type { IncomeReportDto } from './dto/income-report.dto';
 import type { OverviewReportDto } from './dto/overview-report.dto';
@@ -10,6 +11,7 @@ import type { ReportPeriodDto } from './dto/report-common.dto';
 import type { AttendanceReportView } from './attendance-report.service';
 import type { DiscountsReportView } from './discounts-report.service';
 import type { TransactionsReportView } from './transactions-report.service';
+import type { PayoutsReportView } from './payouts-report.service';
 import type { EventsReportView } from './events-report.service';
 import type { IncomeReportView } from './income-report.service';
 import type { OverviewReportView } from './overview-report.service';
@@ -68,6 +70,15 @@ export function toTransactionsReport(
     period: toPeriod(view.period),
     rows: view.rows.map((row) => ({ ...row, at: row.at.toISOString() })),
     matchedEntries: view.matchedEntries,
+    totals: view.totals,
+  };
+}
+
+export function toPayoutsReport(view: PayoutsReportView): PayoutsReportDto {
+  return {
+    period: toPeriod(view.period),
+    rows: view.rows.map((row) => ({ ...row, at: row.at.toISOString() })),
+    matchedPayouts: view.matchedPayouts,
     totals: view.totals,
   };
 }

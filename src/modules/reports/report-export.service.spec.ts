@@ -10,6 +10,7 @@ import type { ReportScopePort } from './ports/report-scope.port';
 import type { RegistrationsReportService } from './registrations-report.service';
 import { ReportExportService } from './report-export.service';
 import type { TransactionsReportService } from './transactions-report.service';
+import type { PayoutsReportService } from './payouts-report.service';
 
 /**
  * Turning a report into a file (US-RPT-11).
@@ -76,6 +77,7 @@ function build(eventName: string | null = 'Charity Gala') {
     income,
     other as unknown as DiscountsReportService,
     other as unknown as TransactionsReportService,
+    other as unknown as PayoutsReportService,
     scope,
     new FixedClock(),
   );

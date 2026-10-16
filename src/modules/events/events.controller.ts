@@ -24,6 +24,7 @@ import type { AuthContext } from '../auth/auth.types';
 import { CurrentAuth } from '../../common/decorators/current-auth.decorator';
 import {
   Permission,
+  RequireAnyPermission,
   RequirePermissions,
 } from '../../common/decorators/require-permissions.decorator';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
@@ -126,7 +127,10 @@ export class EventsController {
   }
 
   @Get()
-  @RequirePermissions(Permission.evCreate)
+  // Check-in too: both door screens start by picking the event, and Staff,
+  // who may "only view registrations and check attendees in" (US-SET-12),
+  // hold regCheckin but not evCreate. A row carries no money.
+  @RequireAnyPermission(Permission.evCreate, Permission.regCheckin)
   @ResponseMessage('Events retrieved.')
   @ApiPage(EventListItemDto)
   list(

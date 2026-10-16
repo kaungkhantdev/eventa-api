@@ -9,6 +9,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { LANDING_TEMPLATES } from '../src/modules/events/landing-templates';
 import { listenOnLoopback } from './support/loopback';
 
 const ORG = { slug: 'page-e2e', name: 'Page E2E' };
@@ -42,6 +43,8 @@ interface Page {
   registration: { open: boolean; reason: string | null };
   share: { url: string; noIndex: boolean; image: string | null };
   sections: { agenda: string; speakers: string };
+  agenda: { title: string; speakerNames: string[] }[];
+  speakers: { name: string }[];
 }
 
 describe('Public event page (e2e — US-PAGE-01…08)', () => {
@@ -114,6 +117,53 @@ describe('Public event page (e2e — US-PAGE-01…08)', () => {
     const p = ((await page(LIVE)).body as Success<Page>).data;
     expect(p.highlights.map((h) => h.text)).toEqual(['First', 'Second']);
     expect(p.faqs[0].question).toBe('Parking?');
+  });
+
+  // Ids are random UUIDs, so these are chosen to sort apart from the order of
+  // entry, and the names likewise: only the entry order gives Somchai first.
+  it('US-PAGE-04: speakers render in the order the organizer added them', async () => {
+    await pool.query(
+      `INSERT INTO speakers (id, organization_id, event_id, name, created_at)
+       VALUES ('cccccccc-0000-4000-8000-000000000001',$1,$2,'Somchai', now() - interval '3 minutes'),
+              ('eeeeeeee-0000-4000-8000-000000000002',$1,$2,'Ada', now() - interval '2 minutes'),
+              ('aaaaaaaa-0000-4000-8000-000000000003',$1,$2,'Malee', now() - interval '1 minute')`,
+      [orgId, liveId],
+    );
+    const p = ((await page(LIVE)).body as Success<Page>).data;
+    expect(p.speakers.map((sp) => sp.name)).toEqual([
+      'Somchai',
+      'Ada',
+      'Malee',
+    ]);
+  });
+
+  it('US-PROG-11: a deleted speaker leaves the public agenda and speakers section', async () => {
+    const speakers = await pool.query<{ id: string; name: string }>(
+      `INSERT INTO speakers (organization_id, event_id, name)
+       VALUES ($1,$2,'Dropout Dan'), ($1,$2,'Kanya') RETURNING id, name`,
+      [orgId, liveId],
+    );
+    const session = await pool.query<{ id: string }>(
+      `INSERT INTO sessions (organization_id, event_id, day, start_time, title, type)
+       VALUES ($1,$2,1,'09:00','Opening Panel','Panel') RETURNING id`,
+      [orgId, liveId],
+    );
+    for (const sp of speakers.rows) {
+      await pool.query(
+        `INSERT INTO session_speakers (session_id, speaker_id) VALUES ($1,$2)`,
+        [session.rows[0].id, sp.id],
+      );
+    }
+    // Removal is a soft delete that keeps the session links, as the console's does.
+    await pool.query(
+      `UPDATE speakers SET deleted_at = now() WHERE event_id = $1 AND name = 'Dropout Dan'`,
+      [liveId],
+    );
+
+    const p = ((await page(LIVE)).body as Success<Page>).data;
+    const panel = p.agenda.find((x) => x.title === 'Opening Panel');
+    expect(panel?.speakerNames).toEqual(['Kanya']);
+    expect(p.speakers.map((sp) => sp.name)).not.toContain('Dropout Dan');
   });
 
   it('US-PAGE-05: prices are VAT-inclusive Baht; sold-out cannot register', async () => {
@@ -195,6 +245,16 @@ describe('Public event page (e2e — US-PAGE-01…08)', () => {
 });
 
 async function seed(pool: Pool): Promise<{ orgId: number; liveId: string }> {
+  // The live event below names the 'aurora' template, and a fresh database
+  // has none until a later suite or `pnpm seed` writes them. Seeded here, as
+  // publish.e2e-spec.ts does, so this suite never depends on run order.
+  for (const t of LANDING_TEMPLATES) {
+    await pool.query(
+      `INSERT INTO landing_templates (id, title, badge, description)
+       VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING`,
+      [t.id, t.title, t.badge, t.description],
+    );
+  }
   const org = await pool.query<{ id: string }>(
     `INSERT INTO organizations (name, slug) VALUES ($1,$2) RETURNING id`,
     [ORG.name, ORG.slug],

@@ -5,8 +5,14 @@ export type TransactionStatus = 'paid' | 'refunded';
 export interface TransactionRow {
   paymentId: string;
   orderId: string;
-  /** The order reference doubles as the invoice number until E9 mints its own. */
+  /** The order's own reference. */
   reference: string;
+  /**
+   * The number of the tax invoice the organizer issued for the order
+   * (US-DISC-10) — its live one, else the last one voided. Null when none was
+   * ever issued: invoices are raised by the organizer, not at checkout.
+   */
+  invoiceNumber: string | null;
   eventName: string;
   method: string;
   status: TransactionStatus;

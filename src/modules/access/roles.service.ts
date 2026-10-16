@@ -4,9 +4,16 @@ import { DomainException } from '../../common/errors/domain.exception';
 import { AccessRepository } from './access.repository';
 import { AccessService } from './access.service';
 import type {
+  Actor,
   PermissionCatalogItem,
   RoleWithPermissions,
 } from './access.types';
+import {
+  type PermAuditRecord,
+  permAuditRecord,
+  roleCreatedAudit,
+  rolePermissionsAudit,
+} from './permission-change.audit';
 
 /** Without this key nobody can administer the workspace's people. */
 const MANAGE_USERS: PermissionKey = 'setUsers';
@@ -33,17 +40,19 @@ export class RolesService {
 
   /**
    * Create a custom role (US-SET-13) — e.g. "Volunteer" — with exactly the
-   * capabilities chosen. The creator cannot hand out access they don't hold.
+   * capabilities chosen. The creator cannot hand out access they don't hold,
+   * and the creation is recorded with who made it and what it grants
+   * (NFR-SUP-02), a sensitive grant flagged (US-SET-12).
    */
   async createRole(
     organizationId: number,
-    actorUserId: string,
+    actor: Actor,
     input: { name: string; description: string; permissions: PermissionKey[] },
   ): Promise<RoleWithPermissions> {
     const name = input.name.trim();
     await this.access.assertNoEscalation(
       organizationId,
-      actorUserId,
+      actor.userId,
       input.permissions,
     );
     if (await this.repo.roleNameTaken(organizationId, name)) {
@@ -56,20 +65,28 @@ export class RolesService {
       name,
       input.description,
     );
-    await this.repo.setRolePermissions(organizationId, roleId, [
-      ...new Set(input.permissions),
-    ]);
+    const keys = [...new Set(input.permissions)];
+    await this.repo.setRolePermissions(
+      organizationId,
+      roleId,
+      keys,
+      permAuditRecord(roleCreatedAudit(name, keys), actor),
+    );
     return this.repo.getRole(organizationId, roleId);
   }
 
-  /** Replace a role's granted permission keys (must be a role in the caller org). */
+  /**
+   * Replace a role's granted permission keys (must be a role in the caller
+   * org). A save that changes a grant is recorded with who made it, what was
+   * granted and revoked (NFR-SUP-02), a sensitive grant flagged (US-SET-12).
+   */
   async setRolePermissions(
     organizationId: number,
-    actorUserId: string,
+    actor: Actor,
     roleId: number,
     keys: PermissionKey[],
   ): Promise<RoleWithPermissions> {
-    await this.access.assertNoEscalation(organizationId, actorUserId, keys);
+    await this.access.assertNoEscalation(organizationId, actor.userId, keys);
     await this.assertUserManagementSurvives(organizationId, roleId, keys);
     if (!(await this.repo.roleExists(organizationId, roleId))) {
       throw DomainException.notFound(
@@ -77,8 +94,25 @@ export class RolesService {
       );
     }
     const unique = [...new Set(keys)];
-    await this.repo.setRolePermissions(organizationId, roleId, unique);
+    await this.repo.setRolePermissions(
+      organizationId,
+      roleId,
+      unique,
+      await this.permissionChange(organizationId, roleId, unique, actor),
+    );
     return this.repo.getRole(organizationId, roleId);
+  }
+
+  /** The audit row for a save, or `null` when it changes no grant. */
+  private async permissionChange(
+    organizationId: number,
+    roleId: number,
+    keys: readonly PermissionKey[],
+    actor: Actor,
+  ): Promise<PermAuditRecord | null> {
+    const before = await this.repo.getRole(organizationId, roleId);
+    const text = rolePermissionsAudit(before.name, before.permissions, keys);
+    return text && permAuditRecord(text, actor);
   }
 
   /**

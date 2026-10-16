@@ -9,8 +9,10 @@ import {
   Post,
   Put,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { ApiBearerAuth, ApiForbiddenResponse, ApiTags } from '@nestjs/swagger';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 import { ApiErrorDto } from '../../common/errors/error-envelope';
@@ -24,6 +26,7 @@ import {
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { RolesService } from './roles.service';
+import { actorOf } from './actor';
 import { PermissionResponseDto } from './dto/permission-response.dto';
 import { RoleResponseDto } from './dto/role-response.dto';
 import { UpdateRolePermissionsDto } from './dto/update-role-permissions.dto';
@@ -64,8 +67,9 @@ export class RolesController {
   createRole(
     @CurrentAuth() auth: AuthContext,
     @Body() dto: CreateRoleDto,
+    @Req() req: Request,
   ): Promise<RoleResponseDto> {
-    return this.roles.createRole(auth.organizationId, auth.userId, dto);
+    return this.roles.createRole(auth.organizationId, actorOf(auth, req), dto);
   }
 
   @Put('roles/:id/permissions')
@@ -76,10 +80,11 @@ export class RolesController {
     @CurrentAuth() auth: AuthContext,
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateRolePermissionsDto,
+    @Req() req: Request,
   ): Promise<RoleResponseDto> {
     return this.roles.setRolePermissions(
       auth.organizationId,
-      auth.userId,
+      actorOf(auth, req),
       id,
       dto.permissions,
     );

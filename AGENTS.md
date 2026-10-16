@@ -28,7 +28,7 @@ enumerate the finished epics and list what was "still to come", and it was wrong
 named payouts, VAT periods, check-in, the dashboard and messaging as unbuilt long after all five shipped.
 A reader who trusted it would have rebuilt working modules. So the inventory lives where it cannot drift:
 
-- **What exists** — `ls src/modules` (53 today), `ls src/db/migrations` (`0000`…`0071`), and the
+- **What exists** — `ls src/modules` (54 today), `ls src/db/migrations` (`0000`…`0071`), and the
   committed `pgTable` definitions in `src/db/schema` (57 tables).
 - **What is left** — the `US-*` backlog in
   [`../eventa-docs/01-requirements-and-features/functional-requirements.md`](../eventa-docs/01-requirements-and-features/functional-requirements.md),
@@ -92,7 +92,7 @@ docker compose up -d   # Postgres :5432 · Redis :6379 · RabbitMQ :5672 (+ mgmt
                        # · Mailpit :1025 (inbox :8025) · MinIO :9000 (console :9001)
 pnpm dev               # HTTP API in watch mode (http://localhost:3000, prefix /api/v1)
 pnpm generate          # drizzle-kit: diff src/db/schema → SQL migration in src/db/migrations
-pnpm migrate           # drizzle-kit: apply pending migrations
+pnpm migrate           # apply pending migrations, each in its own transaction (scripts/migrate.ts)
 pnpm seed              # seeds the `acme` tenant + admin@acme.test, idempotent (src/db/seed.ts)
 pnpm db:studio         # drizzle-kit studio — browse the local DB
 ```
@@ -147,10 +147,11 @@ the development guide when implementing:
   (`event-categories.service.ts` → `EventCategoriesService`). Related modules share a **name prefix** so
   they sort together: `auth`, `auth-signup`, `auth-password` · `events`, `event-categories`,
   `event-program`, `event-seating`, `event-sharing`, `event-monitoring`, `event-duplication`.
-  **`ls src/modules` is the list** — 53 of them, and a prose copy here went stale by fourteen before
+  **`ls src/modules` is the list** — 54 of them, and a prose copy here went stale by fourteen before
   anybody noticed. What a listing cannot tell you is which name means what, so these are the ones worth
   knowing before you add a sibling next to them: `auth` (sign-in, tokens, sessions) and its prefix family
-  (`auth-signup`, `auth-password`, `auth-sessions`, `auth-two-factor`, `auth-social`) · `users` (the user
+  (`auth-signup`, `auth-booking-signup` — an account from a booking, only via the link emailed to the
+  booking's address, `auth-password`, `auth-sessions`, `auth-two-factor`, `auth-social`) · `users` (the user
   record) · `access` (members, roles, RBAC) · `events` and its `event-*` sub-domains · `discover`
   (anonymous cross-tenant browse/search) · `checkout` (order placement — the money path) · `payments`
   (provider seam + webhooks) · the finance family (`invoices`, `tax-periods` — the monthly VAT ledger and
@@ -162,7 +163,7 @@ the development guide when implementing:
 - **Cross-cutting code lives in `src/common/`, never in a domain module.** A guard, decorator, pipe or
   helper used by more than one module belongs in `common/guards/`, `common/decorators/`, `common/util/`
   etc. — so a controller never imports from an unrelated domain module just to annotate a route
-  (`JwtAuthGuard`, `PermissionsGuard`, `AdminGuard`, `@CurrentAuth`, `@RequirePermissions`, `slugify`).
+  (`JwtAuthGuard`, `PermissionsGuard`, `AdminGuard`, `AttendeeGuard`, `@CurrentAuth`, `@RequirePermissions`, `slugify`).
   A module-local default belongs to the module (e.g. an event's slug fallback is a `const` in
   `events.service.ts`, not a wrapper file that shadows the shared util).
 - **Multi-tenancy: scope every query by `organization_id`** *and* Postgres **RLS**
@@ -173,7 +174,12 @@ the development guide when implementing:
   (email/SMS, calendar, read-models, search) → write a row to **`outbox_events`** in the *same* transaction;
   the relay ships it to RabbitMQ and a consumer (in `eventa-worker`) handles it. **Never dual-write.**
 - **Drizzle ORM** (SQL-first). Schema in `src/db/schema` (TS) → `pnpm drizzle-kit generate --name <x>`
-  diffs it to **plain-SQL** migrations (reviewed in the PR) → `pnpm drizzle-kit migrate` applies them.
+  diffs it to **plain-SQL** migrations (reviewed in the PR) → `pnpm migrate` applies them, each in its own
+  transaction (`scripts/migrate.ts` → `src/db/migrator.ts`). **Never `drizzle-kit migrate` directly**: it applies
+  every pending migration in ONE transaction, Postgres refuses to use an enum value in the transaction that
+  added it, and 0052 uses keys that 0034/0038/0042 add — so on a fresh database (CI, a new machine, a first
+  deploy) the whole batch rolls back to an empty schema. The journal is drizzle's own, so either tool can
+  continue the other's database.
   Non-diffable SQL (RLS **policies**, functions) goes in a `--custom` migration. This repo **owns**
   migrations; keep the schema consistent with `entities.md`/`erd.md`, and **never edit a shipped
   migration** — add a new one (expand/contract for zero-downtime).
@@ -262,8 +268,9 @@ its own `ports/` folder; the **owner** implements it as an adapter and binds it
 (`{ provide: EventStatsPort, useClass: RegistrationStatsAdapter }`). So Events reads registration numbers
 without importing Registration's tables. Use `forwardRef` **only** for a genuine bidirectional dependency
 (auth↔access, auth↔auth-signup, auth↔auth-password, auth↔auth-social, auth↔users, events↔ticketing,
-ticketing↔registration, ticketing↔checkout — which pulls discounts→ticketing into the cycle too) — not to
-paper over a bad boundary. Ports in play — the cross-context reads worth knowing; there are 45
+ticketing↔registration, ticketing↔checkout — which pulls discounts→ticketing into the cycle too, and
+payment-settings→ticketing now that checkout asks PaymentSettings which methods are on — invoices↔payments)
+— not to paper over a bad boundary. Ports in play — the cross-context reads worth knowing; there are 52
 `*Port` abstract classes today and `grep -rn 'abstract class .*Port' src` is the inventory (the
 `reports`/`dashboard` read families and the payment-setup ports are not listed here):
 `TicketAvailabilityPort` ·
@@ -277,10 +284,15 @@ paper over a bad boundary. Ports in play — the cross-context reads worth knowi
 `TicketCatalogPort` · `SeatMapPort` (Checkout reads the event, its tiers and its seats through their
 owners) · `OrderPaymentPort` (Payments settles "paid + ticketed" atomically through Checkout's
 transaction) · `InvoiceOrderPort` (Invoices bills an order Checkout owns) · `InvoicePaymentPort`
-(Invoices learns how and when that order settled, from Payments) · `TaxableSalesPort` (the VAT ledger asks
+(Invoices learns how and when that order settled, from Payments) · `OrderInvoicePort` (Payments turns
+that order's invoice Paid on settlement and Void on refund, in its own transaction) ·
+`CheckoutPaymentMethodsPort` (Checkout asks PaymentSettings which ways to pay are switched on) ·
+`RedemptionLedgerPort` (Checkout records a discount code's use through Discounts, in the order's
+transaction) · `TaxableSalesPort` (the VAT ledger asks
 Payments what was collected each month) · `SettledFundsPort` (Payouts asks Payments what has settled) ·
 `PayoutAccountPort` (Payouts asks PaymentSettings whether a payout account is connected) ·
-`CheckInEventPort` (the door asks Events whether it may admit, which is also its tenancy check). Provider seams
+`CheckInEventPort` (the door asks Events whether it may admit, which is also its tenancy check) ·
+`BookingClaimOrderPort` (AuthBookingSignup asks Checkout which booking a claim link names, US-DISC-15). Provider seams
 (infrastructure behind an abstract class, not cross-context reads): `SocialVerifierPort` (OAuth token
 verification) · `PaymentProviderPort` (the PSP adapter — PCI SAQ-A; also carries the payout settings link
 and payout retry) · `ObjectStoragePort` (S3 for profile photos).

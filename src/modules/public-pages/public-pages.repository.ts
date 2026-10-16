@@ -100,7 +100,15 @@ export class PublicPagesRepository {
       })
       .from(sessions)
       .leftJoin(sessionSpeakers, eq(sessionSpeakers.sessionId, sessions.id))
-      .leftJoin(speakers, eq(speakers.id, sessionSpeakers.speakerId))
+      // Removing a speaker is a soft delete that keeps their session links, so
+      // the join itself must drop them or the agenda still names them (US-PROG-11).
+      .leftJoin(
+        speakers,
+        and(
+          eq(speakers.id, sessionSpeakers.speakerId),
+          isNull(speakers.deletedAt),
+        ),
+      )
       .where(and(eq(sessions.eventId, eventId), isNull(sessions.deletedAt)))
       .orderBy(
         asc(sessions.day),
@@ -110,6 +118,11 @@ export class PublicPagesRepository {
     return rows;
   }
 
+  /**
+   * In the order they were added (US-PAGE-04): speakers have no position
+   * column, and their ids are random UUIDs, so entry order is the only
+   * arrangement the organizer has made.
+   */
   speakers(eventId: string) {
     return this.db
       .select({
@@ -121,7 +134,7 @@ export class PublicPagesRepository {
       })
       .from(speakers)
       .where(and(eq(speakers.eventId, eventId), isNull(speakers.deletedAt)))
-      .orderBy(asc(speakers.id));
+      .orderBy(asc(speakers.createdAt), asc(speakers.id));
   }
 
   tickets(eventId: string) {

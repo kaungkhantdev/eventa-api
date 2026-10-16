@@ -8,6 +8,7 @@ import type {
   CheckoutTier,
 } from './checkout.types';
 import type { CheckoutEventPort } from './ports/checkout-event.port';
+import type { CheckoutPaymentMethodsPort } from './ports/checkout-payment-methods.port';
 import type { SeatMapPort } from './ports/seat-map.port';
 import type { TicketCatalogPort } from './ports/ticket-catalog.port';
 
@@ -76,6 +77,7 @@ describe('CheckoutViewService (US-DISC-04)', () => {
   let events: jest.Mocked<CheckoutEventPort>;
   let catalog: jest.Mocked<TicketCatalogPort>;
   let seatMap: jest.Mocked<SeatMapPort>;
+  let paymentMethods: jest.Mocked<CheckoutPaymentMethodsPort>;
   let service: CheckoutViewService;
 
   beforeEach(() => {
@@ -89,11 +91,15 @@ describe('CheckoutViewService (US-DISC-04)', () => {
       tierById: jest.fn().mockResolvedValue(tier()),
     };
     seatMap = { seatsForEvent: jest.fn().mockResolvedValue([]) };
+    paymentMethods = {
+      acceptedMethods: jest.fn().mockResolvedValue(['Card', 'PromptPay']),
+    };
     const clock: Clock = { now: () => NOW };
     service = new CheckoutViewService(
       events,
       catalog,
       seatMap,
+      paymentMethods,
       new CheckoutPolicy(),
       clock,
     );
@@ -115,6 +121,17 @@ describe('CheckoutViewService (US-DISC-04)', () => {
         priceSatang: 1_200 * BAHT,
         canSelect: true,
       });
+    });
+
+    /**
+     * US-SET-09: "Given I disable a method, when new orders are placed, then
+     * that method no longer appears at checkout." The page offered Card and
+     * PromptPay whatever the workspace had switched off.
+     */
+    it('offers only the ways to pay the workspace has switched on', async () => {
+      paymentMethods.acceptedMethods.mockResolvedValue(['Card']);
+      expect((await service.view(SLUG)).paymentMethods).toEqual(['Card']);
+      expect(paymentMethods.acceptedMethods).toHaveBeenCalledWith(ORG);
     });
 
     it('is not available for an event that was never published', async () => {

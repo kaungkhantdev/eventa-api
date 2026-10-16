@@ -19,6 +19,8 @@ const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'mypay-e2e', name: 'MyPay E2E' };
 const ANAN = 'anan@mypay.test';
 const MALEE = 'malee@mypay.test';
+const TAX_ID = '0105561234567';
+const ADDRESS = '88 Bangna, Bangkok';
 const BAHT = 100;
 /** ฿1,000 ×2 + 5% fee. */
 const ORDER_TOTAL = 2_100 * BAHT;
@@ -38,6 +40,7 @@ interface Summary {
 interface Txn {
   paymentId: string;
   reference: string;
+  invoiceNumber: string | null;
   eventName: string;
   method: string;
   status: string;
@@ -123,6 +126,46 @@ describe('Payment history (e2e — US-DISC-10)', () => {
     expect(rows.some((r) => r.status === 'refunded')).toBe(true);
   });
 
+  /**
+   * US-DISC-10: the row shows the "invoice number". It only ever carried the
+   * order reference, so the invoice the organizer issued never reached the
+   * buyer — on the row or on the receipt.
+   */
+  it('shows the number of the invoice the organizer issued, on the row and the receipt', async () => {
+    const invoiceNumber = 'INV-2026-0042';
+    await pool.query(
+      `INSERT INTO invoices (organization_id, number, order_id, event_id, buyer_name,
+                             buyer_email, issued_at, due_at, subtotal_satang,
+                             vat_amount_satang, amount_satang, status, paid_via, paid_on)
+       SELECT o.organization_id, $2, o.id, o.event_id, o.buyer_name, o.buyer_email,
+              current_date, current_date + 14, o.total_satang - o.vat_amount_satang,
+              o.vat_amount_satang, o.total_satang, 'paid', 'Card', current_date
+         FROM payments p JOIN orders o ON o.id = p.order_id WHERE p.id = $1`,
+      [paidPaymentId, invoiceNumber],
+    );
+    try {
+      const rows = ((await get('/me/payments', anan)).body as { data: Txn[] })
+        .data;
+      const paid = rows.find((r) => r.paymentId === paidPaymentId);
+      expect(paid?.invoiceNumber).toBe(invoiceNumber);
+      expect(paid?.reference).toMatch(/^ORD-/);
+      // An order nobody invoiced has no invoice number to show.
+      const other = rows.find((r) => r.paymentId !== paidPaymentId);
+      expect(other?.invoiceNumber).toBeNull();
+
+      const svg = (
+        (await get(`/me/payments/${paidPaymentId}/receipt.svg`, anan))
+          .body as Buffer
+      ).toString();
+      expect(svg).toContain('Invoice no.');
+      expect(svg).toContain(invoiceNumber);
+    } finally {
+      await pool.query(`DELETE FROM invoices WHERE number = $1`, [
+        invoiceNumber,
+      ]);
+    }
+  });
+
   it('never lists a pending or failed attempt as a transaction', async () => {
     const rows = ((await get('/me/payments', anan)).body as { data: Txn[] })
       .data;
@@ -146,7 +189,43 @@ describe('Payment history (e2e — US-DISC-10)', () => {
     expect(svg).toContain('VAT 7%');
     expect(svg).toContain('฿2,100'); // total
     expect(svg).toContain('MyPay Summit');
-    expect(svg).toContain('0105561234567'); // the workspace tax id
+    expect(svg).toContain(TAX_ID); // the workspace tax id
+  });
+
+  /*
+   * US-SET-07: "Given a document was already issued, when I later change the
+   * organization details, then that past document is unchanged." The portal
+   * receipt used to join the live organizations row, so the edit rewrote it.
+   * The edit is written straight to the row here; the invoices suite drives
+   * the same change through PATCH /organization. The new name is this suite's
+   * own: `uq_organizations_name` is platform-wide and suites run in parallel,
+   * so sharing the invoices suite's new name could collide mid-test.
+   */
+  it('keeps the seller identity it was paid under after the workspace changes its details', async () => {
+    const setIdentity = (name: string, address: string, taxId: string) =>
+      pool.query(
+        `UPDATE organizations SET name = $2, address = $3, tax_id = $4
+         WHERE slug = $1`,
+        [ORG.slug, name, address, taxId],
+      );
+    await setIdentity(
+      'MyPay Renamed Trading',
+      '1 Silom Road, Bangkok 10500',
+      '0105569999999',
+    );
+    try {
+      const res = await get(`/me/payments/${paidPaymentId}/receipt.svg`, anan);
+      expect(res.status).toBe(200);
+      const svg = (res.body as Buffer).toString();
+      expect(svg).toContain(ORG.name);
+      expect(svg).toContain(ADDRESS);
+      expect(svg).toContain(TAX_ID);
+      expect(svg).not.toContain('MyPay Renamed Trading');
+      expect(svg).not.toContain('1 Silom Road');
+      expect(svg).not.toContain('0105569999999');
+    } finally {
+      await setIdentity(ORG.name, ADDRESS, TAX_ID);
+    }
   });
 
   it('marks a refunded transaction’s receipt REFUNDED', async () => {
@@ -275,8 +354,8 @@ interface Seeded {
 async function seed(pool: Pool): Promise<Seeded> {
   const org = await pool.query<{ id: string }>(
     `INSERT INTO organizations (name, slug, vat_rate, service_fee_rate, tax_id, address)
-     VALUES ($1,$2,0.0700,0.0500,'0105561234567','88 Bangna, Bangkok') RETURNING id`,
-    [ORG.name, ORG.slug],
+     VALUES ($1,$2,0.0700,0.0500,$3,$4) RETURNING id`,
+    [ORG.name, ORG.slug, TAX_ID, ADDRESS],
   );
   const orgId = Number(org.rows[0].id);
   // Money is taken only through the workspace's own connected account.

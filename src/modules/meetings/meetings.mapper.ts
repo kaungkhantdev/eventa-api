@@ -36,8 +36,7 @@ export function toMeetingEntry(
     guestEmail: row.guestEmail,
     eventId: row.eventId,
     eventName,
-    /** Where it happens: the link for video, the venue or "Phone call" otherwise. */
-    place: row.mode === 'Video' ? row.link : (row.location ?? PHONE_LOCATION),
+    place: placeOf(row),
     link: row.link,
     notes: row.notes,
     syncStatus: row.syncStatus,
@@ -52,6 +51,17 @@ export function toMeetingEntry(
     cancellationReason: row.cancellationReason,
     version: row.version,
   };
+}
+
+/**
+ * Where it happens, by mode (US-MTG-03): the link for video, "Phone call" for
+ * phone, and the event's venue in person — null when there is no venue, which
+ * is not the same as being on the phone.
+ */
+function placeOf(row: MeetingRow): string | null {
+  if (row.mode === 'Video') return row.link;
+  if (row.mode === 'Phone') return PHONE_LOCATION;
+  return row.location;
 }
 
 function timeLabel(row: MeetingRow, bucket: string): string {

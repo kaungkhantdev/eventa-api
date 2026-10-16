@@ -6,8 +6,21 @@ describe('Payout presentation (US-FIN-03, US-FIN-04)', () => {
       expect(maskAccount('1234567890')).toBe('•••• 7890');
     });
 
-    it('leaves an already-masked descriptor alone', () => {
+    it('keeps an already-masked descriptor as it was', () => {
       expect(maskAccount('•••• 7890')).toBe('•••• 7890');
+      expect(maskAccount('••••4321')).toBe('•••• 4321');
+    });
+
+    // A leading mask is not proof the rest is safe. The column is free text
+    // with no constraint, so a descriptor that only STARTS masked can still
+    // hold the whole number — US-RPT-07 and US-FIN-03 both allow the last
+    // four digits and nothing more.
+    it('never prints more than four digits, even after a leading mask', () => {
+      expect(maskAccount('•••• 1234567890')).toBe('•••• 7890');
+    });
+
+    it('drops anything else a descriptor carries, such as a bank name', () => {
+      expect(maskAccount('•••• 6042 · Bangkok Bank')).toBe('•••• 6042');
     });
 
     it('says so plainly when no account is on file', () => {

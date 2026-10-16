@@ -5,6 +5,7 @@ import type { EventsReportView } from './events-report.service';
 import type { IncomeReportView } from './income-report.service';
 import type { RegistrationsReportView } from './registrations-report.service';
 import type { TransactionsReportView } from './transactions-report.service';
+import type { PayoutsReportView } from './payouts-report.service';
 import {
   attendanceBody,
   discountsBody,
@@ -13,6 +14,8 @@ import {
   registrationsBody,
   transactionsBody,
   transactionsTable,
+  payoutsBody,
+  payoutsTable,
 } from './report-tables';
 
 /**
@@ -399,5 +402,97 @@ describe('a transaction’s type', () => {
     const { columns, rows } = transactionsTable(view);
     const type = columns.findIndex((column) => column.header === 'Type');
     expect(displayCell(columns[type].kind, rows[0][type])).toBe('Refund');
+  });
+});
+
+/* ── payouts (US-RPT-07) ───────────────────────────────────────────────── */
+
+describe('the payouts report as a table (US-RPT-07)', () => {
+  const PAYOUT = {
+    reference: 'PO-2043',
+    at: START,
+    bankAccount: '•••• 6042',
+    events: [
+      { eventId: 'e-1', eventName: 'Tech Summit 2026' },
+      { eventId: 'e-2', eventName: 'Charity Gala' },
+    ],
+    amountSatang: 34_200_000,
+    status: 'in_transit' as const,
+  };
+  const payoutsView = (
+    over: Partial<PayoutsReportView> = {},
+  ): PayoutsReportView => ({
+    period: PERIOD,
+    rows: [PAYOUT],
+    matchedPayouts: 1,
+    totals: {
+      payouts: 1,
+      paidOutSatang: 0,
+      inTransitSatang: 34_200_000,
+      pendingSatang: 0,
+      averageSatang: 34_200_000,
+    },
+    ...over,
+  });
+
+  it('carries each payout’s reference, date, masked bank, events, amount and status', () => {
+    const table = payoutsTable(payoutsView());
+    expect(table.columns.map((column) => column.header)).toEqual([
+      'Reference',
+      'Date',
+      'Bank',
+      'Events covered',
+      'Amount (THB)',
+      'Status',
+    ]);
+    expect(table.rows[0]).toEqual([
+      'PO-2043',
+      START,
+      '•••• 6042',
+      'Tech Summit 2026, Charity Gala',
+      34_200_000,
+      'In transit',
+    ]);
+  });
+
+  // No single token reads "In transit", so a file gets the story's own words
+  // rather than a capitalised `in_transit`.
+  it('writes each status in the story’s own words', () => {
+    const labels = (['paid', 'in_transit', 'pending'] as const).map(
+      (status) =>
+        payoutsTable(payoutsView({ rows: [{ ...PAYOUT, status }] })).rows[0][5],
+    );
+    expect(labels).toEqual(['Paid', 'In transit', 'Pending']);
+  });
+
+  it('leaves the events absent, not blank text, for a payout that covers none', () => {
+    const table = payoutsTable(
+      payoutsView({ rows: [{ ...PAYOUT, events: [] }] }),
+    );
+    expect(table.rows[0][3]).toBeNull();
+  });
+
+  it('reads the four tiles in the kit’s order, with no average when nothing matched', () => {
+    const body = payoutsBody(
+      payoutsView({
+        rows: [],
+        matchedPayouts: 0,
+        totals: {
+          payouts: 0,
+          paidOutSatang: 0,
+          inTransitSatang: 0,
+          pendingSatang: 0,
+          averageSatang: null,
+        },
+      }),
+    );
+    expect(body.title).toBe('Payouts');
+    expect(body.matched).toBe(0);
+    expect(body.summary).toEqual([
+      { label: 'Paid out', kind: 'money', value: 0 },
+      { label: 'Pending', kind: 'money', value: 0 },
+      { label: 'In transit', kind: 'money', value: 0 },
+      { label: 'Average payout', kind: 'money', value: null },
+    ]);
   });
 });

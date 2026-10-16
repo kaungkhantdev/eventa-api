@@ -26,6 +26,7 @@ describe('MessageTemplatesService (US-MSG-01/02)', () => {
     repo = {
       list: jest.fn().mockResolvedValue([]),
       setActive: jest.fn().mockResolvedValue(undefined),
+      setWording: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<MessageTemplatesRepository>;
     service = new MessageTemplatesService(repo);
   });
@@ -277,15 +278,59 @@ describe('MessageTemplatesService (US-MSG-01/02)', () => {
       },
     );
 
-    it.each(SENDING_SLUGS)(
-      'gives %s no merge fields until a handler fills them',
+    it('gives session-change no merge fields until a handler fills them', () => {
+      // A field listed here that the worker does not substitute reaches an
+      // attendee as literal braces. eventa-worker's session-change handler
+      // renders Eventa's own copy and fills nothing, so it offers nothing.
+      expect(definitionOf('session-change').tags).toEqual([]);
+    });
+
+    /*
+     * The other half of that rule (US-MSG-02): a field the worker DOES fill
+     * must be offered, or the editor shows no chip for it and `setWording`
+     * refuses it on save. eventa-worker's RegistrationRejectedHandler and its
+     * invitation wording both fill `first_name` and `event_name`.
+     */
+    it.each(['rejection-notice', 'event-invitation'])(
+      'offers %s the first name and event name its handler fills',
       (slug) => {
-        // A field listed here that the worker does not substitute reaches an
-        // attendee as literal braces — and `setWording` is refused for a
-        // planned message anyway, so there is nothing to fill it with yet.
-        expect(definitionOf(slug).tags).toEqual([]);
+        expect(definitionOf(slug).tags).toEqual([
+          '{{first_name}}',
+          '{{event_name}}',
+        ]);
       },
     );
+
+    it.each(['rejection-notice', 'event-invitation'])(
+      'saves wording for %s that uses the first name and event name',
+      async (slug) => {
+        const wording = {
+          en: {
+            subject: '{{first_name}}, about {{event_name}}',
+            body: 'Hi {{first_name}}, news on {{event_name}}.',
+          },
+          th: { subject: '', body: '' },
+        };
+        await expect(
+          service.setWording(auth, slug, wording),
+        ).resolves.toBeDefined();
+        expect(repo.setWording).toHaveBeenCalledWith(
+          auth.organizationId,
+          expect.objectContaining({ slug }),
+          wording,
+        );
+      },
+    );
+
+    it('still refuses the reason on the rejection notice, which nothing fills', async () => {
+      await expect(
+        service.setWording(auth, 'rejection-notice', {
+          en: { subject: 'Not this time', body: 'Because {{reason}}.' },
+          th: { subject: '', body: '' },
+        }),
+      ).rejects.toThrow('This message cannot fill {{reason}}');
+      expect(repo.setWording).not.toHaveBeenCalled();
+    });
 
     it.each(SENDING_SLUGS)('sends %s by email only', (slug) => {
       // A channel badge is a promise that something sends on it. Nothing texts

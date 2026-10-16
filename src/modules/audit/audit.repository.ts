@@ -83,16 +83,20 @@ export class AuditRepository {
     return items;
   }
 
-  /** Record the export itself — an export is an audited action. */
+  /**
+   * Record the export itself — an export is an audited action. `meta` carries
+   * what it covered, where the export has a scope worth naming.
+   */
   async recordExport(
     organizationId: number,
     actorUserId: string,
     title: string,
+    meta: string | null = null,
   ): Promise<void> {
     await withTenant(this.db, organizationId, async (tx) => {
       await tx
         .insert(auditEvents)
-        .values({ organizationId, type: 'xport', title, actorUserId });
+        .values({ organizationId, type: 'xport', title, meta, actorUserId });
     });
   }
 

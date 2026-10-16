@@ -13,6 +13,7 @@ function txn(o: Partial<TransactionRow> = {}): TransactionRow {
     paymentId: 'p-1',
     orderId: 'o-1',
     reference: 'ORD-7K2M9QX4',
+    invoiceNumber: null,
     eventName: 'Bangkok Tech Week',
     method: 'Card',
     status: 'paid',
@@ -99,6 +100,29 @@ describe('AttendeePaymentsService (US-DISC-10)', () => {
       expect(page.meta.total).toBe(1);
     });
 
+    /**
+     * US-DISC-10: "Given a transaction row, when I view it, then I see the
+     * event, invoice number, …". The row only ever carried the order
+     * reference, so the number of the invoice the organizer issued for that
+     * order never reached the buyer.
+     */
+    it('carries the number of the invoice issued for the order', async () => {
+      repo.transactionsByEmail.mockResolvedValue({
+        items: [txn({ invoiceNumber: 'INV-2026-0001' })],
+        total: 1,
+      });
+      const page = await service.history(USER_ID, {});
+      expect(page.items[0]).toMatchObject({
+        invoiceNumber: 'INV-2026-0001',
+        reference: 'ORD-7K2M9QX4',
+      });
+    });
+
+    it('carries no invoice number for an order nobody invoiced', async () => {
+      const page = await service.history(USER_ID, {});
+      expect(page.items[0].invoiceNumber).toBeNull();
+    });
+
     it('marks a refunded row so the client can strike it through', async () => {
       repo.transactionsByEmail.mockResolvedValue({
         items: [txn({ status: 'refunded' })],
@@ -121,12 +145,28 @@ describe('AttendeePaymentsService (US-DISC-10)', () => {
     it('renders the 7% breakdown in Baht, all parts consistent', async () => {
       const svg = await service.receiptSvg(USER_ID, 'p-1');
       expect(svg).toContain('<svg');
-      expect(svg).toContain('ORD-7K2M9QX4');
       expect(svg).toContain('฿2,100'); // total
       expect(svg).toContain('฿137.38'); // VAT within
       expect(svg).toContain('฿1,962.62'); // ex-VAT
       expect(svg).toContain('VAT 7%');
       expect(svg).toContain('0105561234567'); // organizer tax id
+    });
+
+    it('prints the issued invoice’s number as the invoice number', async () => {
+      repo.receiptByIdForEmail.mockResolvedValue(
+        receipt({ invoiceNumber: 'INV-2026-0001' }),
+      );
+      const svg = await service.receiptSvg(USER_ID, 'p-1');
+      expect(svg).toContain('Invoice no.');
+      expect(svg).toContain('INV-2026-0001');
+    });
+
+    // An order reference is not an invoice number, so it is not called one.
+    it('labels the order reference as such when no invoice was issued', async () => {
+      const svg = await service.receiptSvg(USER_ID, 'p-1');
+      expect(svg).not.toContain('Invoice no.');
+      expect(svg).toContain('Order ref.');
+      expect(svg).toContain('ORD-7K2M9QX4');
     });
 
     it('escapes the organizer name — a receipt is not markup', async () => {

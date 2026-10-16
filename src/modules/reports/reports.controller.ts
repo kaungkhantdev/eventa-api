@@ -30,10 +30,12 @@ import {
   type ExportFormat,
   type TabularDocument,
 } from '../../common/export/tabular';
+import { AuditService } from '../audit/audit.service';
 import type { AuthContext } from '../auth/auth.types';
 import { AttendanceReportDto } from './dto/attendance-report.dto';
 import { DiscountsReportDto } from './dto/discounts-report.dto';
 import { TransactionsReportDto } from './dto/transactions-report.dto';
+import { PayoutsReportDto } from './dto/payouts-report.dto';
 import { EventsReportDto } from './dto/events-report.dto';
 import { EventsReportQueryDto } from './dto/events-report.query.dto';
 import { IncomeReportDto } from './dto/income-report.dto';
@@ -43,11 +45,13 @@ import { RegistrationsReportDto } from './dto/registrations-report.dto';
 import { AttendanceReportService } from './attendance-report.service';
 import { DiscountsReportService } from './discounts-report.service';
 import { TransactionsReportService } from './transactions-report.service';
+import { PayoutsReportService } from './payouts-report.service';
 import { EventsReportService } from './events-report.service';
 import { IncomeReportService } from './income-report.service';
 import { OverviewReportService } from './overview-report.service';
 import { RegistrationsReportService } from './registrations-report.service';
 import { ExportFormatPipe } from './export-format.pipe';
+import { exportAuditEntry } from './report-export-audit';
 import {
   ReportExportService,
   type ExportableReport,
@@ -56,6 +60,7 @@ import {
   toAttendanceReport,
   toDiscountsReport,
   toTransactionsReport,
+  toPayoutsReport,
   toEventsReport,
   toIncomeReport,
   toOverviewReport,
@@ -76,7 +81,8 @@ const PRODUCES = Object.values(EXPORT_MIME);
  *
  * Each report is gated by the data it exposes rather than by being a "report":
  * registrations and attendance are staff-visible (`regView`), everything with
- * money on it is finance-only (`finView`) — US-RPT-12.
+ * money on it is finance-only (`finView`) — US-RPT-12, which names income,
+ * transactions, payouts, discounts and event performance as finance reports.
  */
 @ApiTags('reports')
 @ApiBearerAuth()
@@ -92,10 +98,12 @@ export class ReportsController {
     private readonly events: EventsReportService,
     private readonly discounts: DiscountsReportService,
     private readonly transactions: TransactionsReportService,
+    private readonly payouts: PayoutsReportService,
     private readonly registrations: RegistrationsReportService,
     private readonly income: IncomeReportService,
     private readonly attendance: AttendanceReportService,
     private readonly exports: ReportExportService,
+    private readonly audit: AuditService,
   ) {}
 
   /**
@@ -116,12 +124,12 @@ export class ReportsController {
   }
 
   /**
-   * Gated on `regView` although each row carries revenue: the money is withheld
-   * per row inside the service, so an organizer without finance access still
-   * gets the ranking (US-RPT-12).
+   * A finance report (US-RPT-12 names event performance among them), so
+   * `finView` on top of the `regView` its registration counts need. A Staff
+   * member with registration access only is refused it.
    */
   @Get('events')
-  @RequirePermissions(Permission.regView)
+  @RequirePermissions(Permission.regView, Permission.finView)
   @ResponseMessage('Event performance retrieved.')
   @ApiData(EventsReportDto)
   async eventsReport(
@@ -143,6 +151,21 @@ export class ReportsController {
     return toTransactionsReport(
       await this.transactions.load(auth.organizationId, query),
     );
+  }
+
+  /**
+   * Money on every row, and a bank account on every row: finance-only
+   * (US-RPT-12 names payouts as a finance report).
+   */
+  @Get('payouts')
+  @RequirePermissions(Permission.finView)
+  @ResponseMessage('Payouts report retrieved.')
+  @ApiData(PayoutsReportDto)
+  async payoutsReport(
+    @CurrentAuth() auth: AuthContext,
+    @Query() query: ReportFilterQueryDto,
+  ): Promise<PayoutsReportDto> {
+    return toPayoutsReport(await this.payouts.load(auth.organizationId, query));
   }
 
   /** Money on every row, so finance-only throughout (US-RPT-12). */
@@ -222,7 +245,7 @@ export class ReportsController {
     @Query() query: ReportFilterQueryDto,
   ): Promise<StreamableFile> {
     const doc = await this.exports.registrationsFile(auth, query);
-    return this.download('registrations', format, doc);
+    return this.download(auth, 'registrations', format, doc);
   }
 
   @Get('attendance.:format')
@@ -236,11 +259,11 @@ export class ReportsController {
     @Query() query: ReportFilterQueryDto,
   ): Promise<StreamableFile> {
     const doc = await this.exports.attendanceFile(auth, query);
-    return this.download('attendance', format, doc);
+    return this.download(auth, 'attendance', format, doc);
   }
 
   @Get('events.:format')
-  @RequirePermissions(Permission.regView)
+  @RequirePermissions(Permission.regView, Permission.finView)
   @SkipResponseEnvelope()
   @ApiParam({ name: 'format', enum: EXPORT_FORMATS })
   @ApiProduces(...PRODUCES)
@@ -250,7 +273,7 @@ export class ReportsController {
     @Query() query: EventsReportQueryDto,
   ): Promise<StreamableFile> {
     const doc = await this.exports.eventsFile(auth, query);
-    return this.download('events', format, doc);
+    return this.download(auth, 'events', format, doc);
   }
 
   @Get('income.:format')
@@ -264,7 +287,7 @@ export class ReportsController {
     @Query() query: ReportFilterQueryDto,
   ): Promise<StreamableFile> {
     const doc = await this.exports.incomeFile(auth, query);
-    return this.download('income', format, doc);
+    return this.download(auth, 'income', format, doc);
   }
 
   @Get('discounts.:format')
@@ -278,11 +301,16 @@ export class ReportsController {
     @Query() query: ReportFilterQueryDto,
   ): Promise<StreamableFile> {
     const doc = await this.exports.discountsFile(auth, query);
-    return this.download('discounts', format, doc);
+    return this.download(auth, 'discounts', format, doc);
   }
 
+  /**
+   * Every ledger row names its payer, so taking the file away is exporting
+   * attendee data: `regExport` on top of `finView` (US-RPT-12). Reading the
+   * same rows on screen needs `finView` alone.
+   */
   @Get('transactions.:format')
-  @RequirePermissions(Permission.finView)
+  @RequirePermissions(Permission.finView, Permission.regExport)
   @SkipResponseEnvelope()
   @ApiParam({ name: 'format', enum: EXPORT_FORMATS })
   @ApiProduces(...PRODUCES)
@@ -292,7 +320,21 @@ export class ReportsController {
     @Query() query: ReportFilterQueryDto,
   ): Promise<StreamableFile> {
     const doc = await this.exports.transactionsFile(auth, query);
-    return this.download('transactions', format, doc);
+    return this.download(auth, 'transactions', format, doc);
+  }
+
+  @Get('payouts.:format')
+  @RequirePermissions(Permission.finView)
+  @SkipResponseEnvelope()
+  @ApiParam({ name: 'format', enum: EXPORT_FORMATS })
+  @ApiProduces(...PRODUCES)
+  async payoutsExport(
+    @CurrentAuth() auth: AuthContext,
+    @Param('format', ExportFormatPipe) format: ExportFormat,
+    @Query() query: ReportFilterQueryDto,
+  ): Promise<StreamableFile> {
+    const doc = await this.exports.payoutsFile(auth, query);
+    return this.download(auth, 'payouts', format, doc);
   }
 
   /**
@@ -303,8 +345,13 @@ export class ReportsController {
    * No `@Header` decorators — those would label an ERROR response as a
    * spreadsheet too. `AllExceptionsFilter` already forces `application/json`
    * on a refusal, and the headers set here only reach a file that exists.
+   *
+   * Every export is recorded once its file has been produced — who, what and
+   * for which scope (US-RPT-12 AC3). One funnel for all seven reports, so no
+   * export route can be added that leaves no trace.
    */
   private async download(
+    auth: AuthContext,
     report: ExportableReport,
     format: ExportFormat,
     doc: TabularDocument,
@@ -314,6 +361,7 @@ export class ReportsController {
       format,
       doc,
     );
+    await this.audit.recordExport(auth, exportAuditEntry(format, doc));
     return new StreamableFile(body, {
       type,
       disposition: `attachment; filename="${filename}"`,

@@ -29,6 +29,7 @@ interface Card {
   ticketCount: number;
   attended: boolean;
   eventSlug: string;
+  ticketIds: string[];
 }
 interface MyEvents {
   upcoming: Card[];
@@ -175,6 +176,30 @@ describe('My tickets (e2e — US-DISC-07, US-DISC-09)', () => {
       expect(pass.reference).toBe(ids.myReference);
       expect(pass.admissionNumber).toMatch(/^[12] of 2$/);
       expect(pass.valid).toBe(true);
+    });
+
+    // The card is where a ticket is opened from. Without the ids the portal
+    // had nothing to fetch a pass with, and drew the event's URL as the QR.
+    it('lists each registration’s tickets, each opening to its own QR', async () => {
+      const me = ((await get('/me/tickets', anan)).body as Success<MyEvents>)
+        .data;
+      const ticketIds = me.upcoming[0].ticketIds;
+      expect([...ticketIds].sort()).toEqual([...ids.myTicketIds].sort());
+      expect([...me.past[0].ticketIds].sort()).toEqual(
+        [ids.pastCheckedInTicket, ids.pastRefundedTicket].sort(),
+      );
+      const passes = await Promise.all(
+        ticketIds.map(
+          async (id) =>
+            ((await get(`/me/tickets/${id}`, anan)).body as Success<Pass>).data,
+        ),
+      );
+      // One distinct token per ticket, listed in admission order.
+      expect(new Set(passes.map((p) => p.qrToken)).size).toBe(2);
+      expect(passes.map((p) => p.admissionNumber)).toEqual([
+        '1 of 2',
+        '2 of 2',
+      ]);
     });
 
     it('refuses a ticket that belongs to someone else', async () => {

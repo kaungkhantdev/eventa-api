@@ -1,5 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { BookingClaimOrderPort } from '../auth-booking-signup/ports/booking-claim-order.port';
 import { DiscountsModule } from '../discounts/discounts.module';
+import { PaymentSettingsModule } from '../payment-settings/payment-settings.module';
 import { PlatformModule } from '../platform/platform.module';
 import { EventsModule } from '../events/events.module';
 import { RegistrationModule } from '../registration/registration.module';
@@ -9,6 +11,7 @@ import { InvoiceOrderPort } from '../invoices/ports/invoice-order.port';
 import { OrderPaymentPort } from '../payments/ports/order-payment.port';
 import { RegistrationApprovalPort } from '../registrations/ports/registration-approval.port';
 import { RegistrationEntryPort } from '../registrations/ports/registration-entry.port';
+import { BookingClaimOrderAdapter } from './booking-claim-order.adapter';
 import {
   CheckoutController,
   GuestOrderController,
@@ -31,7 +34,7 @@ import { WaitlistOffersAdapter } from './waitlist-offers.adapter';
  * the buyer sees and loads the context every action starts from;
  * `CheckoutService` prices a selection and reserves it.
  *
- * It consumes four things and owns none of them. Three are consumer-owned ports,
+ * It consumes five things and owns none of them. Four are consumer-owned ports,
  * bound by the module that owns the data:
  *   · `CheckoutEventPort` (Events) — what is being sold, and which workspace owns
  *     it. Resolving the event IS the authorization check on this anonymous
@@ -39,8 +42,14 @@ import { WaitlistOffersAdapter } from './waitlist-offers.adapter';
  *   · `TicketCatalogPort` (Ticketing) — the price, read at the moment of use, with
  *     a live-derived status so a tier that just sold out cannot be bought.
  *   · `SeatMapPort` (Registration) — which seats can be picked right now.
- * The fourth is a plain service dependency: `SeatHoldService` for the row-locked
+ *   · `CheckoutPaymentMethodsPort` (PaymentSettings) — which ways to pay the
+ *     workspace has switched on (US-SET-09). PaymentSettings reaches Ticketing,
+ *     which reaches back here, so that edge is a `forwardRef` too.
+ * The fifth is a plain service dependency: `SeatHoldService` for the row-locked
  * reservation, and `DiscountRedemptionService` for what a code is worth.
+ * Discounts also binds `RedemptionLedgerPort`, through which an order records
+ * its code's use inside its own transaction (US-TKT-11) without Checkout
+ * writing either promotions table.
  *
  * Ticketing and Checkout reference each other (`forwardRef`): Checkout reads
  * the tiers through Ticketing's catalog, and Ticketing asks Checkout to give a
@@ -49,6 +58,10 @@ import { WaitlistOffersAdapter } from './waitlist-offers.adapter';
  * of which Ticketing may read. The adapter serves each person through
  * `RegistrationApprovalAdapter`, the organizer's own offer, so that one
  * instance backs both `RegistrationApprovalPort` (`useExisting`) and it.
+ *
+ * It also binds `BookingClaimOrderPort` for AuthBookingSignup (US-DISC-15):
+ * which booking a create-your-account link names — its buyer, event and the
+ * language its confirmation spoke — read from the orders Checkout owns.
  */
 @Module({
   imports: [
@@ -57,6 +70,7 @@ import { WaitlistOffersAdapter } from './waitlist-offers.adapter';
     RegistrationModule,
     DiscountsModule,
     PlatformModule,
+    forwardRef(() => PaymentSettingsModule),
   ],
   controllers: [CheckoutController, GuestOrderController],
   providers: [
@@ -75,6 +89,7 @@ import { WaitlistOffersAdapter } from './waitlist-offers.adapter';
     },
     { provide: RegistrationEntryPort, useClass: RegistrationEntryAdapter },
     { provide: WaitlistOffersPort, useClass: WaitlistOffersAdapter },
+    { provide: BookingClaimOrderPort, useClass: BookingClaimOrderAdapter },
   ],
   exports: [
     CheckoutViewService,
@@ -85,6 +100,7 @@ import { WaitlistOffersAdapter } from './waitlist-offers.adapter';
     RegistrationApprovalPort,
     RegistrationEntryPort,
     WaitlistOffersPort,
+    BookingClaimOrderPort,
   ],
 })
 export class CheckoutModule {}

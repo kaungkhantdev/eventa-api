@@ -63,16 +63,28 @@ export class SpeakersRepository {
     });
   }
 
-  /** The event's live speakers, ordered by name (card order). */
+  /**
+   * The event's live speakers in the order they were added, which is the order
+   * the public page shows (US-PAGE-04). A duplicate inserts its copies in this
+   * order, so the copy keeps the organizer's arrangement (US-EVT-13).
+   */
   async listByEvent(
     organizationId: number,
     eventId: string,
   ): Promise<SpeakerRow[]> {
-    const { items } = await this.page(organizationId, eventId, {
-      page: 1,
-      limit: Number.MAX_SAFE_INTEGER,
-    });
-    return items;
+    return withTenant(this.db, organizationId, (tx) =>
+      tx
+        .select()
+        .from(speakers)
+        .where(
+          and(
+            eq(speakers.organizationId, organizationId),
+            eq(speakers.eventId, eventId),
+            isNull(speakers.deletedAt),
+          ),
+        )
+        .orderBy(asc(speakers.createdAt), asc(speakers.id)),
+    );
   }
 
   /**

@@ -502,6 +502,45 @@ describe('Discount codes (e2e — US-TKT-07…12)', () => {
       expect(rows[0].status).toBe('expired');
     });
 
+    it('files a code under the tab its dates have since moved it to', async () => {
+      const jwt = await token(ADMIN, ORG.slug);
+      const startsLater = await create(jwt, {
+        code: 'GOESLIVE',
+        type: 'percent',
+        value: 5,
+        validFrom: '2030-01-01T00:00:00Z',
+      });
+      const endsLater = await create(jwt, {
+        code: 'WINDOWSHUT',
+        type: 'percent',
+        value: 5,
+        validUntil: '2030-01-01T00:00:00Z',
+      });
+      // both windows move while nobody is looking at any list
+      await pool.query(
+        `UPDATE discount_codes SET valid_from = now() - interval '1 day' WHERE id = $1`,
+        [(startsLater.body as Success<Discount>).data.id],
+      );
+      await pool.query(
+        `UPDATE discount_codes SET valid_until = now() - interval '1 day' WHERE id = $1`,
+        [(endsLater.body as Success<Discount>).data.id],
+      );
+
+      const codesUnder = async (status: string) =>
+        (
+          (
+            await request(server)
+              .get(`/api/v1/discounts?status=${status}&limit=100`)
+              .set('Authorization', `Bearer ${jwt}`)
+          ).body as Success<{ code: string; status: string }[]>
+        ).data.map((c) => c.code);
+
+      expect(await codesUnder('active')).toContain('GOESLIVE');
+      expect(await codesUnder('scheduled')).not.toContain('GOESLIVE');
+      expect(await codesUnder('expired')).toContain('WINDOWSHUT');
+      expect(await codesUnder('active')).not.toContain('WINDOWSHUT');
+    });
+
     it('never lists another tenant’s codes', async () => {
       const other = await token(ADMIN2, ORG2.slug);
       const res = await request(server)
@@ -512,6 +551,160 @@ describe('Discount codes (e2e — US-TKT-07…12)', () => {
       );
       expect(codes).not.toContain('PROMO25');
       expect(codes).toContain('FOREIGN50');
+    });
+  });
+
+  describe('US-TKT-08…12: a redemption at checkout counts against the code', () => {
+    let salesEventId: string;
+    let tierId: string;
+    let keySeq = 0;
+
+    beforeAll(async () => {
+      salesEventId = await insertOnSaleEvent(pool, orgId);
+      tierId = await insertPaidTier(pool, orgId, salesEventId, 1_000 * BAHT);
+    });
+
+    const createCode = async (body: Record<string, unknown>) =>
+      (
+        (await create(await token(ADMIN, ORG.slug), {
+          type: 'percent',
+          value: 10,
+          ...body,
+        })) as { body: Success<Discount> }
+      ).body.data;
+
+    /** Hold one ticket and confirm it with the code — the real money path. */
+    const buyWith = async (code: string, email: string) => {
+      const held = await request(server)
+        .post('/api/v1/public/checkout/hold')
+        .send({ eventId: salesEventId, ticketTypeId: tierId, quantity: 1 });
+      expect(held.status).toBe(201);
+      keySeq += 1;
+      return request(server)
+        .post('/api/v1/public/checkout/confirm')
+        .send({
+          eventId: salesEventId,
+          ticketTypeId: tierId,
+          quantity: 1,
+          holdIds: (held.body as Success<{ holdIds: number[] }>).data.holdIds,
+          discountCode: code,
+          buyer: { name: 'Buyer', email },
+          idempotencyKey: `disc-e2e-redeem-key-${keySeq}`,
+        });
+    };
+
+    const stored = async (id: string) =>
+      (
+        await pool.query<{
+          used: number;
+          status: string;
+          deleted_at: Date | null;
+        }>(
+          `SELECT used, status, deleted_at FROM discount_codes WHERE id = $1`,
+          [id],
+        )
+      ).rows[0];
+
+    const listed = async (code: string) =>
+      (
+        (
+          await request(server)
+            .get(`/api/v1/discounts?search=${code}`)
+            .set('Authorization', `Bearer ${await token(ADMIN, ORG.slug)}`)
+        ).body as Success<
+          { code: string; used: number; redemptionLimit: number }[]
+        >
+      ).data.find((r) => r.code === code);
+
+    it('shows each completed redemption in the code’s used count', async () => {
+      const code = await createCode({ code: 'COUNTED', redemptionLimit: 50 });
+      expect((await buyWith('COUNTED', 'one@x.test')).status).toBe(201);
+      expect((await buyWith('COUNTED', 'two@x.test')).status).toBe(201);
+
+      expect((await stored(code.id)).used).toBe(2);
+      expect(await listed('COUNTED')).toMatchObject({
+        used: 2,
+        redemptionLimit: 50,
+      });
+    });
+
+    it('expires the code with its final redemption, and refuses the next buyer', async () => {
+      const code = await createCode({ code: 'LASTONE', redemptionLimit: 1 });
+      expect((await buyWith('LASTONE', 'first@x.test')).status).toBe(201);
+      // straight from the row — nobody has listed the codes in between
+      expect(await stored(code.id)).toMatchObject({
+        used: 1,
+        status: 'expired',
+      });
+
+      const late = await quote({
+        code: 'LASTONE',
+        eventId: salesEventId,
+        subtotalSatang: 1_000 * BAHT,
+        buyerEmail: 'second@x.test',
+      });
+      expect(late.status).toBe(422);
+      expect((late.body as { message: string }).message).toMatch(
+        /reached its redemption limit/i,
+      );
+      expect((await buyWith('LASTONE', 'second@x.test')).status).toBe(422);
+      expect((await stored(code.id)).used).toBe(1);
+    });
+
+    it('never lets two buyers past a limit of one, even confirming at once', async () => {
+      const code = await createCode({ code: 'ONLYONE', redemptionLimit: 1 });
+      const results = await Promise.all([
+        buyWith('ONLYONE', 'racer-a@x.test'),
+        buyWith('ONLYONE', 'racer-b@x.test'),
+      ]);
+      expect(results.map((r) => r.status).sort()).toEqual([201, 422]);
+      const loser = results.find((r) => r.status === 422);
+      expect((loser?.body as { message: string }).message).toMatch(
+        /reached its redemption limit/i,
+      );
+      expect((await stored(code.id)).used).toBe(1);
+      const { rows } = await pool.query(
+        `SELECT 1 FROM orders WHERE discount_code_id = $1`,
+        [code.id],
+      );
+      expect(rows).toHaveLength(1); // the loser's order rolled back whole
+    });
+
+    it('refuses to lower the limit below what was redeemed, and freezes the value', async () => {
+      const code = await createCode({ code: 'TUNEDLIVE', redemptionLimit: 10 });
+      await buyWith('TUNEDLIVE', 'one@x.test');
+      await buyWith('TUNEDLIVE', 'two@x.test');
+      const patch = async (body: Record<string, unknown>) =>
+        request(server)
+          .patch(`/api/v1/discounts/${code.id}`)
+          .set('Authorization', `Bearer ${await token(ADMIN, ORG.slug)}`)
+          .send(body);
+
+      const lowered = await patch({ redemptionLimit: 1 });
+      expect(lowered.status).toBe(422);
+      expect((lowered.body as { message: string }).message).toMatch(/\b2\b/);
+      expect((await patch({ value: 50 })).status).toBe(409);
+    });
+
+    it('retires a code that was redeemed at checkout, and it stops working', async () => {
+      const code = await createCode({ code: 'RETIREME' });
+      expect((await buyWith('RETIREME', 'one@x.test')).status).toBe(201);
+
+      const res = await request(server)
+        .delete(`/api/v1/discounts/${code.id}`)
+        .set('Authorization', `Bearer ${await token(ADMIN, ORG.slug)}`);
+      expect(res.status).toBe(200);
+      expect((res.body as Success<{ outcome: string }>).data.outcome).toBe(
+        'retired',
+      );
+      expect((await stored(code.id)).deleted_at).not.toBeNull();
+
+      const after = await quote({
+        code: 'RETIREME',
+        eventId: salesEventId,
+        subtotalSatang: 1_000 * BAHT,
+      });
+      expect(after.status).toBe(422);
     });
   });
 
@@ -549,6 +742,36 @@ async function seedRedemption(
      VALUES ($1, $2, $3, $4, 10000)`,
     [orgId, discountCodeId, order.rows[0].id, buyerEmail],
   );
+}
+
+/** A published event on sale a month out — checkout refuses one already begun. */
+async function insertOnSaleEvent(pool: Pool, orgId: number): Promise<string> {
+  const res = await pool.query<{ id: string }>(
+    `INSERT INTO events (organization_id, slug, name, type, bucket, status, visibility,
+                         start_at, timezone, organizer_name, venue_name, city,
+                         seating_mode, published_at)
+     VALUES ($1,'disc-e2e-sales','Discount Sales','Conference','active','upcoming','public',
+             now() + interval '30 days','Asia/Bangkok','Acme Events','QSNCC','Bangkok',
+             'ga', now())
+     RETURNING id`,
+    [orgId],
+  );
+  return res.rows[0].id;
+}
+
+async function insertPaidTier(
+  pool: Pool,
+  orgId: number,
+  eventId: string,
+  priceSatang: number,
+): Promise<string> {
+  const res = await pool.query<{ id: string }>(
+    `INSERT INTO ticket_types (organization_id, event_id, name, price_satang, is_free,
+                               status, total, sold, min_per_order, max_per_order)
+     VALUES ($1,$2,'General',$3,false,'onsale',100,0,1,8) RETURNING id`,
+    [orgId, eventId, priceSatang],
+  );
+  return res.rows[0].id;
 }
 
 async function seedOrg(

@@ -51,6 +51,15 @@ export const payments = pgTable(
     statementDescriptor: varchar({ length: 22 }),
     feeAmountSatang: bigint({ mode: 'number' }),
     idempotencyKey: text().notNull(),
+    /**
+     * The seller's legal identity on the receipt, copied from `organizations`
+     * when the payment settles (US-SET-07), so a later edit to the workspace
+     * does not rewrite a receipt already issued. NULL while pending, and on a
+     * row that was never stamped.
+     */
+    sellerName: text(),
+    sellerAddress: text(),
+    sellerTaxId: text(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

@@ -154,7 +154,8 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     // place was refused — the same debt as the news that an event is off.
     expected: true,
     defaultActive: true,
-    tags: [],
+    // What eventa-worker's `RegistrationRejectedHandler` fills.
+    tags: ['{{first_name}}', '{{event_name}}'],
   },
   {
     slug: 'cancellation-notice',
@@ -197,7 +198,8 @@ export const MESSAGE_TEMPLATE_CATALOG: readonly MessageTemplateDefinition[] = [
     // needs no warning — an organizer who stops inviting simply stops.
     expected: false,
     defaultActive: true,
-    tags: [],
+    // What eventa-worker's `personalisedWording` fills for an invitation.
+    tags: ['{{first_name}}', '{{event_name}}'],
   },
   {
     slug: 'event-reminder',

@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # eslint directly, NOT `pnpm lint`: that script carries `--fix`, which in
+      # CI rewrites the checkout and exits 0, so every fixable problem would
+      # pass silently.
+      - name: Lint
+        run: npx eslint "{src,apps,libs,test}/**/*.ts"
+
+      # Neither jest config type-checks (`isolatedModules` puts ts-jest in
+      # transpile-only mode) and tsconfig.build.json excludes the specs, so a
+      # spec can be green while it no longer compiles. This is what catches it.
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+  # Its own job because it needs a database, and because it is the only thing
+  # here that proves the app can actually BOOT: the e2e suite resolves the real
+  # DI graph, and a green `tsc` does not. A wiring mistake passes every check
+  # in the job above.
+  e2e:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: eventa
+          POSTGRES_PASSWORD: eventa
+          POSTGRES_DB: eventa
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U eventa"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      # Needed, not precautionary: the sign-in throttle counts in Redis, and
+      # test/login-lockout.e2e-spec.ts asserts that a lockout happens. Without
+      # Redis the throttle fails OPEN — by design — and that suite fails.
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # No env block: test/setup-env.ts defaults DATABASE_URL, JWT_SECRET and
+      # the bucket name with `??=`, and drizzle.config.ts falls back to the
+      # same connection string. The services above are set up to match it.
+      - name: Apply migrations
+        run: pnpm migrate
+
+      - name: E2E tests
+        run: pnpm test:e2e

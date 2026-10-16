@@ -1,3 +1,4 @@
+import { DrizzleQueryError } from 'drizzle-orm';
 import { Clock } from '../../common/time/clock';
 import { DomainException } from '../../common/errors/domain.exception';
 import { OutboxPort } from '../platform/outbox.port';
@@ -552,6 +553,37 @@ describe('EventsService delete/cancel', () => {
       expect((err as DomainException).getStatus()).toBe(409);
       expect((err as DomainException).message).toMatch(/cancel/i);
       expect(repo.hardDelete).not.toHaveBeenCalled();
+    });
+
+    // A draft can hold history its live tiers no longer count: sales refunded
+    // back into stock, a retired tier, a pending or rejected order. The
+    // database refuses to orphan it, and that refusal is the same answer.
+    it('blocks deleting a draft whose payment history the database still holds (409)', async () => {
+      build(eventRow({ status: 'draft' }));
+      repo.hardDelete.mockRejectedValue(
+        new DrizzleQueryError(
+          'delete from "events" where "id" = $1',
+          ['e1'],
+          Object.assign(new Error('violates foreign key constraint'), {
+            code: '23503',
+            constraint: 'orders_event_id_events_id_fk',
+          }),
+        ),
+      );
+      const err = await service
+        .deleteEvent(auth, 'e1', {})
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(409);
+      expect((err as DomainException).message).toBe(
+        "This event has registrations and can't be deleted. Cancel it instead to refund and notify attendees.",
+      );
+    });
+
+    it('lets any other failure of the delete through unchanged', async () => {
+      build(eventRow({ status: 'draft' }));
+      const outage = new Error('connection terminated');
+      repo.hardDelete.mockRejectedValue(outage);
+      await expect(service.deleteEvent(auth, 'e1', {})).rejects.toBe(outage);
     });
 
     it('throws 404 when the event is not in the org', async () => {

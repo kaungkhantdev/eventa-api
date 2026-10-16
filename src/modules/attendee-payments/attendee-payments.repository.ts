@@ -1,7 +1,14 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
-import { events, orders, organizations, payments } from '../../db/schema';
+import {
+  events,
+  invoices,
+  orders,
+  organizations,
+  payments,
+} from '../../db/schema';
+import { stampedSeller } from '../../db/seller-identity';
 import type {
   ReceiptRow,
   TransactionRow,
@@ -14,6 +21,19 @@ const SETTLED: readonly TransactionStatus[] = ['paid', 'refunded'];
 /** An export is one person's purchases — bounded, but capped for sanity. */
 const MAX_EXPORT = 1000;
 const DEFAULT_VAT_RATE = 0.07;
+
+/**
+ * The number of the invoice issued for the payment's order (US-DISC-10). At
+ * most one is live (`uq_invoices_live_order`), and it wins; with none live — a
+ * refunded sale's was voided — the last one issued still names the invoice
+ * that sale was billed on. Null when the organizer never issued one.
+ */
+const invoiceNumber = sql<string | null>`(
+  SELECT ${invoices.number} FROM ${invoices}
+  WHERE ${invoices.orderId} = ${orders.id}
+  ORDER BY ${invoices.status} = 'void', ${invoices.id} DESC
+  LIMIT 1
+)`;
 
 /**
  * The attendee's payment-history read model (US-DISC-10), in the mould of
@@ -69,16 +89,21 @@ export class AttendeePaymentsRepository {
     return rows.map(normalise);
   }
 
-  /** One receipt — or null when it does not exist OR is not this email's. */
+  /**
+   * One receipt — or null when it does not exist OR is not this email's. The
+   * seller is the identity stamped when the payment settled (US-SET-07).
+   */
   async receiptByIdForEmail(
     paymentId: string,
     email: string,
   ): Promise<ReceiptRow | null> {
+    const seller = stampedSeller(payments);
     const [row] = await this.db
       .select({
         paymentId: payments.id,
         orderId: orders.id,
         reference: orders.reference,
+        invoiceNumber,
         eventName: events.name,
         method: payments.method,
         status: payments.status,
@@ -87,9 +112,9 @@ export class AttendeePaymentsRepository {
         paidAt: payments.paidAt,
         buyerName: orders.buyerName,
         buyerEmail: orders.buyerEmail,
-        organizerName: organizations.name,
-        organizerAddress: organizations.address,
-        organizerTaxId: organizations.taxId,
+        organizerName: seller.sellerName,
+        organizerAddress: seller.sellerAddress,
+        organizerTaxId: seller.sellerTaxId,
         vatRate: organizations.vatRate,
       })
       .from(payments)
@@ -116,6 +141,7 @@ export class AttendeePaymentsRepository {
         paymentId: payments.id,
         orderId: orders.id,
         reference: orders.reference,
+        invoiceNumber,
         eventName: events.name,
         method: payments.method,
         status: payments.status,

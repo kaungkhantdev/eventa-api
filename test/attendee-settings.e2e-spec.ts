@@ -82,6 +82,10 @@ describe('Attendee settings (e2e — US-DISC-12)', () => {
       .patch(`/api/v1${path}`)
       .set('Authorization', `Bearer ${token}`)
       .send(body);
+  const me = (jwt: string) =>
+    request(server)
+      .get('/api/v1/auth/me')
+      .set('Authorization', `Bearer ${jwt}`);
   const post = (path: string, body: object, jwt = token) =>
     request(server)
       .post(`/api/v1${path}`)
@@ -202,7 +206,34 @@ describe('Attendee settings (e2e — US-DISC-12)', () => {
       const other = await signIn(NEW_PASSWORD); // a second device
       const res = await post('/me/sessions/revoke-others', {});
       expect(res.status).toBe(200);
-      void other; // its refresh session is revoked server-side
+      // US-ACC-09: the other device loses access the next time it is used —
+      // its unexpired access token included — while this one carries on.
+      expect((await me(other)).status).toBe(401);
+      expect((await me(token)).status).toBe(200);
+    });
+  });
+
+  describe('signing out one other device (US-ACC-09)', () => {
+    it('cuts it off the next time it is used, and drops it from my list', async () => {
+      const other = await signIn(NEW_PASSWORD); // a second device
+      const listed = await request(server)
+        .get('/api/v1/me/sessions')
+        .set('Authorization', `Bearer ${other}`);
+      const otherId = (
+        listed.body as Success<{ id: string; isCurrent: boolean }[]>
+      ).data.find((s) => s.isCurrent)?.id as string;
+      expect((await me(other)).status).toBe(200);
+
+      const res = await request(server)
+        .delete(`/api/v1/me/sessions/${otherId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+
+      expect((await me(other)).status).toBe(401);
+      const mine = await get('/me/sessions');
+      expect(
+        (mine.body as Success<{ id: string }[]>).data.map((s) => s.id),
+      ).not.toContain(otherId);
     });
   });
 });

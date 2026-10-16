@@ -1,7 +1,23 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, desc, eq, gte, ilike, isNull, lt, sql } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  gte,
+  ilike,
+  inArray,
+  isNull,
+  lt,
+  sql,
+} from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
-import { events, orderItems, orders, ticketTypes } from '../../db/schema';
+import {
+  events,
+  orderItems,
+  orders,
+  type orderStatusEnum,
+  ticketTypes,
+} from '../../db/schema';
 import { withTenant } from '../../db/tenant';
 import {
   RegistrationReportPort,
@@ -11,6 +27,9 @@ import {
   type RegistrationWindow,
   type TicketShare,
 } from '../reports/ports/registration-report.port';
+
+/** An `order_status` label — derived from the schema enum, not re-typed. */
+type OrderStatus = (typeof orderStatusEnum.enumValues)[number];
 
 /**
  * RegistrationStats' implementation of the Reports-owned split (US-RPT-08), so
@@ -95,9 +114,9 @@ export class RegistrationReportAdapter extends RegistrationReportPort {
   /**
    * The split by ticket type (US-RPT-03).
    *
-   * Sums SEATS rather than counting order lines, so the donut's centre is the
-   * same registrations figure the tile above it shows. Confirmed orders only,
-   * for the same reason every other report counts them.
+   * Sums SEATS rather than counting order lines, over the same four states
+   * as `total`, so the donut's centre is the same registrations figure the
+   * tile above it shows (US-RPT-03).
    */
   async ticketMix(
     organizationId: number,
@@ -114,7 +133,7 @@ export class RegistrationReportAdapter extends RegistrationReportPort {
         .where(
           and(
             this.matching(organizationId, window),
-            eq(orders.status, 'confirmed'),
+            inArray(orders.status, REGISTERED),
           ),
         )
         .groupBy(ticketTypes.name)
@@ -135,9 +154,21 @@ export class RegistrationReportAdapter extends RegistrationReportPort {
   }
 }
 
-/** Seats booked in one order state, as an integer rather than a bigint string. */
-function seatsIn(status: string) {
-  return sql<number>`coalesce(sum(case when ${orders.status} = ${status} then ${orders.seats} else 0 end), 0)::int`;
+/**
+ * The states a registration is counted in: the four columns US-RPT-08 lists,
+ * which must add up exactly to the total. A rejected or lapsed (`expired`)
+ * order has no column, so it is no part of the total either.
+ */
+const REGISTERED: OrderStatus[] = [
+  'confirmed',
+  'pending',
+  'waitlisted',
+  'cancelled',
+];
+
+/** Seats booked in some order states, as an integer rather than a bigint string. */
+function seatsIn(...statuses: OrderStatus[]) {
+  return sql<number>`coalesce(sum(case when ${inArray(orders.status, statuses)} then ${orders.seats} else 0 end), 0)::int`;
 }
 
 /** Declared once so the rows, the page totals and the overview all count alike. */
@@ -147,7 +178,7 @@ const SEAT_COLUMNS = {
   waitlisted: seatsIn('waitlisted'),
   cancelled: seatsIn('cancelled'),
   rejected: seatsIn('rejected'),
-  total: sql<number>`coalesce(sum(${orders.seats}), 0)::int`,
+  total: seatsIn(...REGISTERED),
 };
 
 /** A summary row, or zeroes when the filter matched nothing at all. */

@@ -11,6 +11,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 import { createdAt, deletedAt, idPk, updatedAt, version } from './_columns';
@@ -107,11 +108,12 @@ export const users = pgTable(
     version: version(),
   },
   (t) => [
-    unique('uq_users_org_email_persona').on(
-      t.organizationId,
-      t.email,
-      t.persona,
-    ),
+    // Live rows only. Removing a member (US-SET-11) and deleting an account
+    // (US-DISC-14) soft-delete the row and keep its email for the record, and
+    // that address must still be free to be invited or to sign up again.
+    uniqueIndex('uq_users_org_email_persona')
+      .on(t.organizationId, t.email, t.persona)
+      .where(sql`${t.deletedAt} IS NULL`),
     index('ix_users_org').on(t.organizationId),
     index('ix_users_email').on(t.email),
   ],

@@ -10,8 +10,10 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { ApiBearerAuth, ApiForbiddenResponse, ApiTags } from '@nestjs/swagger';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 import { ApiErrorDto } from '../../common/errors/error-envelope';
@@ -26,6 +28,7 @@ import {
 } from '../../common/decorators/require-permissions.decorator';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { AccessService } from './access.service';
+import { actorOf } from './actor';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { InviteResponseDto } from './dto/invite-response.dto';
 import { ListMembersQueryDto } from './dto/list-members.query.dto';
@@ -91,8 +94,14 @@ export class MembersController {
     @CurrentAuth() auth: AuthContext,
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateMemberDto,
+    @Req() req: Request,
   ): Promise<MemberResponseDto> {
-    return this.access.changeMemberRole(auth.organizationId, id, dto.roleId);
+    return this.access.changeMemberRole(
+      auth.organizationId,
+      id,
+      dto.roleId,
+      actorOf(auth, req),
+    );
   }
 
   @Post(':id/suspend')

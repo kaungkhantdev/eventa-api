@@ -4,6 +4,7 @@ process.env.JWT_SECRET ??= 'test-secret-at-least-16-characters-long';
 
 import type { Server } from 'node:http';
 import type { INestApplication } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { hash } from '@node-rs/argon2';
 import { Pool } from 'pg';
@@ -11,6 +12,8 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { generateTotp } from '../src/common/crypto/totp';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { AuthRepository } from '../src/modules/auth/auth.repository';
+import { JwtStrategy } from '../src/modules/auth/jwt.strategy';
 import { OutboxPort } from '../src/modules/platform/outbox.port';
 import { listenOnLoopback } from './support/loopback';
 
@@ -161,6 +164,45 @@ describe('Delete my account (e2e — US-DISC-14)', () => {
     // The credentials no longer buy a session.
     const gone = await login(ANAN);
     expect(gone.status).toBe(401);
+
+    // NFR-PDPA-03: access is revoked immediately — the token this device
+    // already holds no longer reads or writes the account, though it has not
+    // expired yet.
+    const write = await request(server)
+      .patch('/api/v1/me/profile')
+      .set('Authorization', `Bearer ${accessToken as string}`)
+      .send({ name: 'Still Here' });
+    expect(write.status).toBe(401);
+    const read = await request(server)
+      .get('/api/v1/auth/me')
+      .set('Authorization', `Bearer ${accessToken as string}`);
+    expect(read.status).toBe(401);
+  });
+
+  /*
+   * US-DISC-15: "Given I have no account, when I am on the attendee sign-in
+   * page, then I can create one from there." A deleted account is no account.
+   * The deleted row keeps its email, and `uq_users_org_email_persona` used to
+   * cover deleted rows as well, so this sign-up hit a unique violation and
+   * answered 500.
+   */
+  it('a deleted attendee can sign up again with the same email', async () => {
+    const res = await request(server).post('/api/v1/auth/register').send({
+      name: 'Anan Again',
+      email: ANAN,
+      password: 'a fresh start 2',
+      persona: 'attendee',
+      acceptTerms: true,
+    });
+    expect(res.status).toBe(202);
+
+    const rows = await pool.query<{ deleted_at: Date | null }>(
+      `SELECT deleted_at FROM users WHERE email = $1 AND persona = 'attendee'
+       ORDER BY created_at`,
+      [ANAN],
+    );
+    // The deleted account is kept for the record; a new live one sits beside it.
+    expect(rows.rows.map((r) => r.deleted_at === null)).toEqual([false, true]);
   });
 
   it('with 2FA enrolled, deletion demands the code and honours it', async () => {
@@ -237,6 +279,13 @@ describe('Delete my account (e2e — US-DISC-14)', () => {
 
     afterAll(async () => {
       await faultApp.close();
+      // Passport keeps one strategy per name for the whole process, and
+      // compiling faultApp re-registered 'jwt' with ITS JwtStrategy — whose
+      // session check reads through the pool close() just ended, so every
+      // later request on the main app would answer 500. A strategy registers
+      // itself when it is constructed: building one over the main app's
+      // providers hands the name back.
+      new JwtStrategy(app.get(ConfigService), app.get(AuthRepository));
     });
 
     it('rolls back the soft delete AND the sign-out — one transaction or nothing', async () => {

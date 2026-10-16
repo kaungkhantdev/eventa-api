@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Clock } from '../../common/time/clock';
 import type { Env } from '../../config/env.validation';
@@ -6,9 +6,11 @@ import { AccessModule } from '../access/access.module';
 import { OrganizationModule } from '../organization/organization.module';
 import { OrganizationService } from '../organization/organization.service';
 import { TicketingModule } from '../ticketing/ticketing.module';
+import { CheckoutPaymentMethodsPort } from '../checkout/ports/checkout-payment-methods.port';
 import { GatewayCredentialsPort } from '../payments/ports/gateway-credentials.port';
 import { MerchantAccountPort } from '../payments/ports/merchant-account.port';
 import { PayoutAccountPort } from '../payouts/ports/payout-account.port';
+import { CheckoutPaymentMethodsAdapter } from './checkout-payment-methods.adapter';
 import { GatewayCredentialsAdapter } from './gateway-credentials.adapter';
 import { MerchantAccountAdapter } from './merchant-account.adapter';
 import { SecretCipher } from '../../common/crypto/secret-cipher';
@@ -35,10 +37,21 @@ import { StripeAccountAdapter } from './providers/stripe-account.adapter';
  * It also binds the two ports OTHER modules use to read this row: whose account
  * a charge is made on (`MerchantAccountPort`), and whether the workspace can be
  * paid out (`PayoutAccountPort`). Both are consumer-owned, so this module
- * supplies the answer without either caller touching `payment_settings`.
+ * supplies the answer without either caller touching `payment_settings`. And
+ * Checkout's `CheckoutPaymentMethodsPort`: which ways to pay checkout offers,
+ * so a method switched off no longer appears there (US-SET-09).
+ *
+ * That last one puts this module in Checkout's import graph, and Checkout sits
+ * in the Ticketing ↔ Checkout cycle this module reaches through TicketSalesPort
+ * — so the edge to Ticketing is a `forwardRef`, or whichever file loads first
+ * would find the other's class still undefined.
  */
 @Module({
-  imports: [AccessModule, OrganizationModule, TicketingModule],
+  imports: [
+    AccessModule,
+    OrganizationModule,
+    forwardRef(() => TicketingModule),
+  ],
   controllers: [PaymentSettingsController],
   providers: [
     {
@@ -105,6 +118,10 @@ import { StripeAccountAdapter } from './providers/stripe-account.adapter';
     { provide: MerchantAccountPort, useClass: MerchantAccountAdapter },
     { provide: GatewayCredentialsPort, useClass: GatewayCredentialsAdapter },
     { provide: PaymentSetupPort, useClass: PaymentSetupAdapter },
+    {
+      provide: CheckoutPaymentMethodsPort,
+      useClass: CheckoutPaymentMethodsAdapter,
+    },
   ],
   exports: [
     PaymentSettingsService,
@@ -139,6 +156,7 @@ import { StripeAccountAdapter } from './providers/stripe-account.adapter';
     MerchantAccountPort,
     GatewayCredentialsPort,
     PaymentSetupPort,
+    CheckoutPaymentMethodsPort,
   ],
 })
 export class PaymentSettingsModule {}

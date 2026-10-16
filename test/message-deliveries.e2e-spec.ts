@@ -26,10 +26,18 @@ const ORG = { slug: 'del-e2e', name: 'Deliveries E2E' };
 const ORG2 = { slug: 'del-e2e-2', name: 'Deliveries E2E 2' };
 const ADMIN = 'admin@del-e2e.test';
 const OUTSIDER = 'nobody@del-e2e.test';
+const STAFF = 'staff@del-e2e.test';
+const READER = 'reader@del-e2e.test';
 const ADMIN2 = 'admin@del-e2e-2.test';
+
+/** What an Organizer holds that the log asks for (US-MSG-06/07). */
+const LOG_GRANTS = ['regView', 'regManage', 'regExport'];
 
 const PERM_GROUP: Record<string, string> = {
   regView: 'Registrations',
+  regCheckin: 'Registrations',
+  regManage: 'Registrations',
+  regExport: 'Registrations',
   evCreate: 'Events',
 };
 
@@ -57,6 +65,8 @@ describe('Delivery log (e2e — US-MSG-06)', () => {
   let summitId: string;
   let adminJwt: string;
   let outsiderJwt: string;
+  let staffJwt: string;
+  let readerJwt: string;
   let otherJwt: string;
   let seq = 0;
 
@@ -64,11 +74,19 @@ describe('Delivery log (e2e — US-MSG-06)', () => {
     pool = new Pool({ connectionString: process.env.DATABASE_URL });
     await cleanup(pool);
     orgId = await seedOrg(pool, ORG, [
-      { email: ADMIN, roleName: 'Admin', grants: ['regView'] },
+      { email: ADMIN, roleName: 'Admin', grants: LOG_GRANTS },
       { email: OUTSIDER, roleName: 'Marketing', grants: ['evCreate'] },
+      // The default Staff grants: attendee VIEW access, and nothing more.
+      {
+        email: STAFF,
+        roleName: 'Door staff',
+        grants: ['regView', 'regCheckin'],
+      },
+      // Everything the log needs except the export permission.
+      { email: READER, roleName: 'Reader', grants: ['regView', 'regManage'] },
     ]);
     otherOrgId = await seedOrg(pool, ORG2, [
-      { email: ADMIN2, roleName: 'Admin', grants: ['regView'] },
+      { email: ADMIN2, roleName: 'Admin', grants: LOG_GRANTS },
     ]);
     summitId = await seedEvent(pool, orgId, 'del-summit', 'Tech Summit 2026');
 
@@ -83,6 +101,8 @@ describe('Delivery log (e2e — US-MSG-06)', () => {
 
     adminJwt = await token(ADMIN, ORG.slug);
     outsiderJwt = await token(OUTSIDER, ORG.slug);
+    staffJwt = await token(STAFF, ORG.slug);
+    readerJwt = await token(READER, ORG.slug);
     otherJwt = await token(ADMIN2, ORG2.slug);
   }, 30000);
 
@@ -196,6 +216,22 @@ describe('Delivery log (e2e — US-MSG-06)', () => {
     it('refuses a member without the attendee-data permission', async () => {
       await list(outsiderJwt).expect(403);
     });
+
+    it('refuses Staff, though Staff can view registrations (US-MSG-03)', async () => {
+      await list(staffJwt).expect(403);
+      await request(server)
+        .get('/api/v1/message-deliveries/kinds')
+        .set('Authorization', `Bearer ${staffJwt}`)
+        .expect(403);
+    });
+
+    it('lets a member without the export permission read it', async () => {
+      await seedDelivery({ email: 'ours@x.test' });
+      const res = await list(readerJwt).expect(200);
+      expect(rows(res.body).map((r) => r.recipientEmail)).toEqual([
+        'ours@x.test',
+      ]);
+    });
   });
 
   describe('narrowing it', () => {
@@ -260,6 +296,26 @@ describe('Delivery log (e2e — US-MSG-06)', () => {
         .get(`/api/v1/message-deliveries/export.csv${query}`)
         .set('Authorization', `Bearer ${jwt}`);
 
+    afterEach(async () => {
+      await pool.query(
+        `DELETE FROM audit_events WHERE organization_id = $1 AND type = 'xport'`,
+        [orgId],
+      );
+    });
+
+    const exportsRecorded = async (): Promise<
+      { title: string; actor: string }[]
+    > => {
+      const res = await pool.query<{ title: string; actor: string }>(
+        `SELECT a.title, u.email AS actor
+           FROM audit_events a JOIN users u ON u.id = a.actor_user_id
+          WHERE a.organization_id = $1 AND a.type = 'xport'
+          ORDER BY a.id`,
+        [orgId],
+      );
+      return res.rows;
+    };
+
     it('downloads a BOM-first file, outside the JSON envelope', async () => {
       await seedDelivery({ email: 'anong@x.test' });
 
@@ -295,8 +351,38 @@ describe('Delivery log (e2e — US-MSG-06)', () => {
       expect(res.text).toContain('two@x.test');
     });
 
+    it('says there is nothing to export rather than handing back an empty file', async () => {
+      await seedDelivery({ email: 'ok@x.test', status: 'sent' });
+
+      const res = await csv(adminJwt, '?status=failed').expect(409);
+      expect(JSON.stringify(res.body)).toMatch(/nothing to export/i);
+      expect(await exportsRecorded()).toEqual([]);
+    });
+
+    it('records the export for audit, naming who exported it', async () => {
+      await seedDelivery({ email: 'one@x.test' });
+      await seedDelivery({ email: 'two@x.test' });
+
+      await csv(adminJwt).expect(200);
+
+      expect(await exportsRecorded()).toEqual([
+        { title: 'Exported 2 delivery log rows', actor: ADMIN },
+      ]);
+    });
+
     it('refuses a member without the attendee-data permission', async () => {
       await csv(outsiderJwt).expect(403);
+    });
+
+    it('refuses Staff the file', async () => {
+      await seedDelivery({ email: 'anong@x.test' });
+      await csv(staffJwt).expect(403);
+    });
+
+    it('refuses the file to a member who may read the log but not export', async () => {
+      // The file is attendee contact data in bulk: it needs `regExport`.
+      await seedDelivery({ email: 'anong@x.test' });
+      await csv(readerJwt).expect(403);
     });
   });
 

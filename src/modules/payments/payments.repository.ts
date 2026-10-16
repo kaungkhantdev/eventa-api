@@ -276,12 +276,29 @@ export class PaymentsRepository {
   /**
    * Flip a payment to paid INSIDE the settlement transaction the caller opened,
    * so the ledger line and the tickets it paid for commit together or not at all.
+   *
+   * Settling is when its receipt is issued, so the workspace's legal identity
+   * is stamped on it here (US-SET-07): a later edit to the workspace must not
+   * rewrite a receipt already issued.
    */
   async markPaidIn(tx: Tx, paymentId: string, paidAt: Date): Promise<void> {
     await tx
       .update(payments)
-      .set({ status: 'paid', paidAt, updatedAt: paidAt })
-      .where(eq(payments.id, paymentId));
+      .set({
+        status: 'paid',
+        paidAt,
+        updatedAt: paidAt,
+        sellerName: sql`${organizations.name}`,
+        sellerAddress: sql`${organizations.address}`,
+        sellerTaxId: sql`${organizations.taxId}`,
+      })
+      .from(organizations)
+      .where(
+        and(
+          eq(payments.id, paymentId),
+          eq(organizations.id, payments.organizationId),
+        ),
+      );
   }
 
   async markFailed(paymentId: string): Promise<void> {

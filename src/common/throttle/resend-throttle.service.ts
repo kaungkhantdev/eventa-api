@@ -24,15 +24,24 @@ export type ResendKind = 'link' | 'code';
 const FAIL_CLOSED: Record<ResendKind, boolean> = { link: false, code: true };
 
 /**
- * Whether a kind spends from a per-window budget as well as the cool-off.
+ * A TOTAL on top of the cool-off: at most `max` sends per `windowSeconds`.
  *
- * Only `code` does. The cool-off bounds the RATE; a budget bounds the TOTAL,
- * and the two are different quantities — one code a minute for ever is ~1,440
- * codes a day. For a `link` the total is not worth bounding: an email costs
- * nothing, resets no guess budget, and refusing somebody their own confirmation
- * email for the rest of the day is a worse failure than another email.
+ * The cool-off bounds the RATE; a budget bounds the TOTAL, and the two are
+ * different quantities — one send a minute for ever is ~1,440 a day.
+ *
+ * A `code` always spends from one (the configured `VERIFY_CODE_*`). A `link`
+ * spends from one only when its caller brings it. For somebody asking for
+ * their OWN confirmation email the total is not worth bounding: an email costs
+ * nothing, resets no guess budget, and refusing it for the rest of the day is a
+ * worse failure than another email. But a link that somebody OTHER than the
+ * address's owner can make Eventa send — the booking claim link (US-DISC-15)
+ * is asked for with an order id the booker holds — is a way to fill a
+ * stranger's inbox, and that caller brings a total of its own.
  */
-const BUDGETED: Record<ResendKind, boolean> = { link: false, code: true };
+export interface SendBudget {
+  max: number;
+  windowSeconds: number;
+}
 
 const WAIT_MESSAGE: Record<ResendKind, string> = {
   link: 'A confirmation link was just sent. Give it a minute before asking for another.',
@@ -43,7 +52,7 @@ const SECONDS_PER_MINUTE = 60;
 const MINUTES_PER_HOUR = 60;
 
 /**
- * What a member out of budget is told: the wait, and the thing to check.
+ * What somebody out of budget is told: the wait, and the thing to check.
  *
  * Both halves earn their place. Without the wait, "too many" reads as a dead
  * end and somebody who has simply not received a text keeps hammering the form
@@ -54,12 +63,19 @@ const MINUTES_PER_HOUR = 60;
  * Rounded UP, as `lockedMessage` is: refusing somebody at the moment they were
  * told to return is worse than letting them in slightly early.
  */
-function budgetMessage(secondsLeft: number): string {
+const BUDGET_MESSAGE: Record<ResendKind, (wait: string) => string> = {
+  code: (wait) =>
+    `That is as many codes as we can text one account for now. ${wait} If the texts are not arriving, another code will not help — check that the number is right and can receive SMS.`,
+  link: (wait) =>
+    `That is as many links as we can email one address for now. ${wait} If the emails are not arriving, another link will not help — check the spam folder, and that the address is right.`,
+};
+
+function budgetMessage(kind: ResendKind, secondsLeft: number): string {
   const wait =
     secondsLeft > 0 && Number.isFinite(secondsLeft)
       ? `You can ask for another in ${humanWait(secondsLeft)}.`
       : 'Please try again later.';
-  return `That is as many codes as we can text one account for now. ${wait} If the texts are not arriving, another code will not help — check that the number is right and can receive SMS.`;
+  return BUDGET_MESSAGE[kind](wait);
 }
 
 /** Minutes while it reads as minutes, hours once it does not. */
@@ -76,10 +92,11 @@ function plural(count: number, unit: string): string {
 /**
  * How many confirmations one identity may be sent, and how often.
  *
- * Shared by sign-up's confirmation email (US-ACC-01) and the phone
- * confirmation code (US-DISC-11 AC3) — which is why it lives in `common/`
- * rather than inside `auth-signup`, where it was born. Both are the same
- * problem: an endpoint that makes Eventa deliver a message on demand.
+ * Shared by sign-up's confirmation email (US-ACC-01), the phone
+ * confirmation code (US-DISC-11 AC3) and a booking's claim link (US-DISC-15)
+ * — which is why it lives in `common/` rather than inside `auth-signup`, where
+ * it was born. All are the same problem: an endpoint that makes Eventa
+ * deliver a message on demand.
  *
  * The page counts down too, but a countdown in a browser is a courtesy rather
  * than a limit — a reload steps straight past it, and `curl` never sees it at
@@ -129,8 +146,8 @@ function plural(count: number, unit: string): string {
 export class ResendThrottleService {
   private readonly logger = new Logger(ResendThrottleService.name);
   private readonly cooldownSeconds: number;
-  private readonly maxPerWindow: number;
-  private readonly windowSeconds: number;
+  /** The total each kind spends from when its caller brings none. */
+  private readonly defaultBudget: Record<ResendKind, SendBudget | null>;
 
   constructor(
     @Inject(REDIS) private readonly redis: Redis,
@@ -139,12 +156,15 @@ export class ResendThrottleService {
     this.cooldownSeconds = config.get('VERIFY_RESEND_COOLDOWN_SECONDS', {
       infer: true,
     });
-    this.maxPerWindow = config.get('VERIFY_CODE_MAX_PER_WINDOW', {
-      infer: true,
-    });
-    this.windowSeconds = config.get('VERIFY_CODE_WINDOW_SECONDS', {
-      infer: true,
-    });
+    this.defaultBudget = {
+      code: {
+        max: config.get('VERIFY_CODE_MAX_PER_WINDOW', { infer: true }),
+        windowSeconds: config.get('VERIFY_CODE_WINDOW_SECONDS', {
+          infer: true,
+        }),
+      },
+      link: null,
+    };
   }
 
   /**
@@ -167,11 +187,18 @@ export class ResendThrottleService {
    * budget is spent only by the caller that won it. Spending the budget first
    * would let somebody hammering the endpoint drain a member's whole daily
    * allowance with requests that were going to be refused anyway.
+   *
+   * `budget` overrides the kind's own total (see `SendBudget`): a `link` has
+   * none unless one is passed here.
    */
-  async claim(identity: string, kind: ResendKind = 'link'): Promise<void> {
+  async claim(
+    identity: string,
+    kind: ResendKind = 'link',
+    budget: SendBudget | null = this.defaultBudget[kind],
+  ): Promise<void> {
     const won = await this.claimWindow(identity, kind);
     if (!won) throw DomainException.tooManyRequests(WAIT_MESSAGE[kind]);
-    if (BUDGETED[kind]) await this.spendFromBudget(identity, kind);
+    if (budget) await this.spendFromBudget(identity, kind, budget);
   }
 
   /**
@@ -259,23 +286,24 @@ export class ResendThrottleService {
   private async spendFromBudget(
     identity: string,
     kind: ResendKind,
+    budget: SendBudget,
   ): Promise<void> {
     const key = this.budgetKey(identity);
     let spent = 0;
-    let secondsLeft = this.windowSeconds;
+    let secondsLeft = budget.windowSeconds;
     try {
       spent = await this.redis.incr(key);
       if (spent === 1) {
-        await this.redis.expire(key, this.windowSeconds);
-      } else if (spent > this.maxPerWindow) {
-        secondsLeft = await this.remainingWindow(key);
+        await this.redis.expire(key, budget.windowSeconds);
+      } else if (spent > budget.max) {
+        secondsLeft = await this.remainingWindow(key, budget.windowSeconds);
       }
     } catch (err) {
       this.unavailable(err, kind);
       return;
     }
-    if (spent > this.maxPerWindow) {
-      throw DomainException.tooManyRequests(budgetMessage(secondsLeft));
+    if (spent > budget.max) {
+      throw DomainException.tooManyRequests(budgetMessage(kind, secondsLeft));
     }
   }
 
@@ -290,12 +318,15 @@ export class ResendThrottleService {
    * window and is unreachable while a real TTL is standing. `-2` is no key at
    * all, which the next request will allow anyway.
    */
-  private async remainingWindow(key: string): Promise<number> {
+  private async remainingWindow(
+    key: string,
+    windowSeconds: number,
+  ): Promise<number> {
     const left = await this.redis.ttl(key);
     if (left >= 0) return left;
     if (left === -2) return 0;
-    await this.redis.expire(key, this.windowSeconds);
-    return this.windowSeconds;
+    await this.redis.expire(key, windowSeconds);
+    return windowSeconds;
   }
 
   /**

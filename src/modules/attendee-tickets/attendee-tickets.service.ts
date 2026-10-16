@@ -112,6 +112,7 @@ export class AttendeeTicketsService {
       coverImage: row.coverImage,
       ticketTypeName: row.ticketTypeName,
       ticketCount: row.ticketCount,
+      ticketIds: row.ticketIds,
       countdown: now ? countdown(now, row.startAt) : null,
       attended: row.attended,
     };

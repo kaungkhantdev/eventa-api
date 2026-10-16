@@ -2,9 +2,10 @@ import type { OutboxEventInput } from '../../platform/outbox.port';
 
 /**
  * Routing key for a confirmed account deletion (consumed by eventa-worker).
- * The worker sends the confirmation email, then anonymizes the personal data
- * — financial/tax rows are retained disassociated for the legal retention
- * period (PDPA), which also frees the email for future sign-ups.
+ * The worker sends the confirmation email. It does NOT anonymize the personal
+ * data: that PDPA scrub is unbuilt on both sides, so the soft-deleted row
+ * still holds the email. The address is free for a new sign-up anyway,
+ * because `uq_users_org_email_persona` only covers live rows.
  */
 export const IDENTITY_ACCOUNT_DELETION_REQUESTED =
   'identity.account_deletion_requested';

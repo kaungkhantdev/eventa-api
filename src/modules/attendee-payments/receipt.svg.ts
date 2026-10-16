@@ -35,7 +35,7 @@ export function renderReceiptSvg(row: ReceiptRow): string {
   ${line(135, row.organizerAddress)}
   ${line(160, row.organizerTaxId ? `Tax ID ${row.organizerTaxId}` : null)}
   ${refundBanner}
-  ${field(250, 'Invoice no.', row.reference)}
+  ${documentNumber(row)}
   ${field(285, 'Date', when)}
   ${field(320, 'Billed to', `${row.buyerName} · ${row.buyerEmail}`)}
   ${field(355, 'Event', row.eventName)}
@@ -47,6 +47,16 @@ export function renderReceiptSvg(row: ReceiptRow): string {
   ${amount(580, 'Total paid', row.amountSatang, true)}
   <text x="${WIDTH / 2}" y="680" text-anchor="middle" font-size="13" fill="#777777">Prices are VAT-inclusive; all amounts settle in Thai Baht.</text>
 </svg>`;
+}
+
+/**
+ * The issued tax invoice's number when there is one (US-DISC-10). An order
+ * reference is not an invoice number, so without one it is labelled as what
+ * it is.
+ */
+function documentNumber(row: ReceiptRow): string {
+  if (row.invoiceNumber) return field(250, 'Invoice no.', row.invoiceNumber);
+  return field(250, 'Order ref.', row.reference);
 }
 
 function line(y: number, value: string | null): string {

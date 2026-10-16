@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { PeriodChangeDto, ReportPeriodDto } from './report-common.dto';
 
-/** Seats by order state. The five sum to `total` (US-RPT-08). */
+/** Seats by order state. The first four sum to `total` (US-RPT-08). */
 export class RegistrationSplitDto {
   @ApiProperty() confirmed!: number;
   @ApiProperty() pending!: number;
@@ -12,11 +12,13 @@ export class RegistrationSplitDto {
 
   @ApiProperty({
     description:
-      'Turned down by an organizer — distinct from cancelled, and never re-approved.',
+      'Turned down by an organizer — distinct from cancelled, never re-approved, and not part of `total`.',
   })
   rejected!: number;
 
-  @ApiProperty({ description: 'The sum of the five states above.' })
+  @ApiProperty({
+    description: 'confirmed + pending + waitlisted + cancelled.',
+  })
   total!: number;
 }
 

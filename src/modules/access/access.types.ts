@@ -67,3 +67,12 @@ export interface InviteMemberInput {
   email: string;
   roleId: number;
 }
+
+/**
+ * Who is making a change and from where — the audit trail's "who" and "from
+ * where" (NFR-SUP-02).
+ */
+export interface Actor {
+  userId: string;
+  ip: string | null;
+}

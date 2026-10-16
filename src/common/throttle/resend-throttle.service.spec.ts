@@ -349,7 +349,7 @@ describe('ResendThrottleService', () => {
      * refusing somebody their own confirmation email for the rest of the day is
      * a worse failure than another email.
      */
-    it('does not budget a link', async () => {
+    it('does not budget a link unless the caller asks for one', async () => {
       const { redis, advance } = fakeRedis();
       const throttle = new ResendThrottleService(redis, config());
 
@@ -357,6 +357,94 @@ describe('ResendThrottleService', () => {
         await expect(throttle.claim('u-3', 'link')).resolves.toBeUndefined();
         advance(COOLDOWN);
       }
+    });
+  });
+
+  /**
+   * A link whose request anybody can make — not the address's owner asking
+   * for their own confirmation — is a different trade. The booking claim link
+   * (US-DISC-15) is asked for with an order id the BOOKER holds, so with the
+   * cool-off alone a stranger could have Eventa mail somebody ~1,440 times a
+   * day. Such a caller brings its own total.
+   */
+  describe('a budget the caller brings', () => {
+    const DAY = 24 * 60 * 60;
+    const budget = { max: 2, windowSeconds: DAY };
+
+    const send = async (
+      throttle: ResendThrottleService,
+      advance: (s: number) => void,
+      sends: number,
+    ): Promise<void> => {
+      for (let i = 0; i < sends; i++) {
+        await throttle.claim('booking-claim:a@example.com', 'link', budget);
+        advance(COOLDOWN);
+      }
+    };
+
+    it('caps a link at that many per window, and not one more', async () => {
+      const { redis, advance } = fakeRedis();
+      const throttle = new ResendThrottleService(redis, config());
+
+      await send(throttle, advance, budget.max);
+
+      await expect(
+        throttle.claim('booking-claim:a@example.com', 'link', budget),
+      ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+    });
+
+    it('uses its own window, not the code budget’s', async () => {
+      const { redis, advance } = fakeRedis();
+      const throttle = new ResendThrottleService(redis, config());
+
+      await send(throttle, advance, budget.max);
+      advance(WINDOW);
+
+      // The code window (two hours) has passed; the day has not.
+      await expect(
+        throttle.claim('booking-claim:a@example.com', 'link', budget),
+      ).rejects.toBeInstanceOf(DomainException);
+      advance(DAY);
+      await expect(
+        throttle.claim('booking-claim:a@example.com', 'link', budget),
+      ).resolves.toBeUndefined();
+    });
+
+    it('speaks of emails, the wait and what to check — not of texts', async () => {
+      const { redis, advance } = fakeRedis();
+      const throttle = new ResendThrottleService(redis, config());
+
+      await send(throttle, advance, budget.max);
+      const message = await messageOf(
+        throttle.claim('booking-claim:a@example.com', 'link', budget),
+      );
+
+      expect(message).toContain('as many links');
+      expect(message).toContain('24 hours');
+      expect(message).toMatch(/spam/i);
+      expect(message).not.toMatch(/SMS|text|code/);
+    });
+
+    it('re-anchors a lost expiry with the budget’s own window', async () => {
+      const { redis } = fakeRedis();
+      const throttle = new ResendThrottleService(redis, config());
+      const key = 'verify:budget:booking-claim:a@example.com';
+      for (let i = 0; i <= budget.max; i++) await redis.incr(key);
+
+      await expect(
+        throttle.claim('booking-claim:a@example.com', 'link', budget),
+      ).rejects.toBeInstanceOf(DomainException);
+
+      expect(await redis.ttl(key)).toBe(DAY);
+    });
+
+    // An email is still the cheaper mistake during an outage.
+    it('still fails open when the throttle is unreachable', async () => {
+      const throttle = new ResendThrottleService(unreachable(), config());
+
+      await expect(
+        throttle.claim('booking-claim:a@example.com', 'link', budget),
+      ).resolves.toBeUndefined();
     });
   });
 });

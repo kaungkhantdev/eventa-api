@@ -1,4 +1,9 @@
-import { type ExecutionContext, HttpStatus, Injectable } from '@nestjs/common';
+import {
+  type ExecutionContext,
+  HttpException,
+  HttpStatus,
+  Injectable,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
 import { RequestContextService } from '../context/request-context';
@@ -32,6 +37,11 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   }
 
   handleRequest<TUser = AuthContext>(err: unknown, user: TUser | false): TUser {
+    // Checking a token reads its session (JwtStrategy). A read that fails — the
+    // database is unreachable — has not judged the token: a 401 would tell the
+    // client its session is over and the client would end it, so it surfaces
+    // as the server error it is. A refused token arrives as an HttpException.
+    if (err instanceof Error && !(err instanceof HttpException)) throw err;
     if (err || !user) {
       throw new DomainException(
         ErrorCode.UNAUTHORIZED,

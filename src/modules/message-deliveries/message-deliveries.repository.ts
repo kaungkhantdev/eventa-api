@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, count, desc, eq, ilike, or, sql, type SQL } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
-import { events, messageDeliveries } from '../../db/schema';
+import { auditEvents, events, messageDeliveries } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
 
 export type DeliveryStatus = 'sent' | 'failed';
@@ -38,7 +38,8 @@ export interface DeliveryPage {
 /**
  * The delivery log (US-MSG-06). Read-only here: eventa-worker writes these rows
  * as it sends, because that is the only moment anything knows what the
- * transport did with a message.
+ * transport did with a message. The one write is the audit entry for an export
+ * of it (US-MSG-07).
  */
 @Injectable()
 export class MessageDeliveriesRepository {
@@ -97,6 +98,24 @@ export class MessageDeliveriesRepository {
         failed: Number(totals.failed),
         rows: rows.map((row) => ({ ...row, id: String(row.id) })),
       };
+    });
+  }
+
+  /**
+   * Record an export of the log (US-MSG-07) in the audit trail, as an `xport`
+   * entry like the audit log's own export. Inside `withTenant` because the
+   * `audit_events` RLS policy refuses the insert when `app.current_org` is
+   * unset.
+   */
+  async recordExport(
+    organizationId: number,
+    actorUserId: string,
+    title: string,
+  ): Promise<void> {
+    await withTenant(this.db, organizationId, async (tx) => {
+      await tx
+        .insert(auditEvents)
+        .values({ organizationId, type: 'xport', title, actorUserId });
     });
   }
 

@@ -28,11 +28,14 @@ const ORG = { slug: 'rpt-e2e', name: 'Reports E2E' };
 const ORG2 = { slug: 'rpt-e2e-2', name: 'Reports E2E 2' };
 const ADMIN = 'admin@rpt-e2e.test';
 const STAFF = 'staff@rpt-e2e.test';
+/** Finance access, but no permission to export attendee data. */
+const BOOKKEEPER = 'bookkeeper@rpt-e2e.test';
 const OUTSIDER = 'nobody@rpt-e2e.test';
 const ADMIN2 = 'admin@rpt-e2e-2.test';
 
 const PERM_GROUP: Record<string, string> = {
   regView: 'Registrations',
+  regExport: 'Registrations',
   finView: 'Finance',
   evCreate: 'Events',
 };
@@ -133,6 +136,7 @@ describe('Reports (e2e — US-RPT)', () => {
   let otherEventId: string;
   let adminJwt: string;
   let staffJwt: string;
+  let bookkeeperJwt: string;
   let outsiderJwt: string;
   let otherJwt: string;
   let seq = 0;
@@ -143,8 +147,17 @@ describe('Reports (e2e — US-RPT)', () => {
     pool = new Pool({ connectionString: process.env.DATABASE_URL });
     await cleanup(pool);
     orgId = await seedOrg(pool, ORG, [
-      { email: ADMIN, roleName: 'Admin', grants: ['regView', 'finView'] },
+      {
+        email: ADMIN,
+        roleName: 'Admin',
+        grants: ['regView', 'finView', 'regExport'],
+      },
       { email: STAFF, roleName: 'Staff', grants: ['regView'] },
+      {
+        email: BOOKKEEPER,
+        roleName: 'Bookkeeper',
+        grants: ['regView', 'finView'],
+      },
       // US-RPT-12: an admin-console user with no registration access at all.
       { email: OUTSIDER, roleName: 'Marketing', grants: ['evCreate'] },
     ]);
@@ -171,11 +184,18 @@ describe('Reports (e2e — US-RPT)', () => {
 
     adminJwt = await token(ADMIN, ORG.slug);
     staffJwt = await token(STAFF, ORG.slug);
+    bookkeeperJwt = await token(BOOKKEEPER, ORG.slug);
     outsiderJwt = await token(OUTSIDER, ORG.slug);
     otherJwt = await token(ADMIN2, ORG2.slug);
   }, 30000);
 
   afterEach(async () => {
+    // Payouts first: an item holds its payment ON DELETE RESTRICT.
+    for (const table of ['payout_items', 'payouts']) {
+      await pool.query(`DELETE FROM ${table} WHERE organization_id = ANY($1)`, [
+        [orgId, otherOrgId],
+      ]);
+    }
     for (const table of ['refunds', 'payments', 'tickets', 'order_items']) {
       await pool.query(`DELETE FROM ${table} WHERE organization_id = ANY($1)`, [
         [orgId, otherOrgId],
@@ -225,24 +245,43 @@ describe('Reports (e2e — US-RPT)', () => {
     seats?: number;
     /** SQL for `registered_at`; defaults to now. */
     at?: string;
+    /** Book the seats on a ticket type of this name, for the ticket mix. */
+    tier?: string;
   }): Promise<void> {
     seq += 1;
-    await pool.query(
+    const org = o.org ?? orgId;
+    const event = o.event ?? summitId;
+    const seats = o.seats ?? 1;
+    const order = await pool.query<{ id: string }>(
       `INSERT INTO orders (organization_id, reference, event_id, buyer_name, buyer_email,
                            status, payment_status, seats, subtotal_satang,
                            vat_amount_satang, total_satang, registered_at)
-       VALUES ($1,$2,$3,'Anan Suksawat','anan@rpt.test',$4,'pending',$5,0,0,0, ${o.at ?? 'now()'})`,
-      [
-        o.org ?? orgId,
-        `ORD-RPT-${seq}`,
-        o.event ?? summitId,
-        o.status ?? 'confirmed',
-        o.seats ?? 1,
-      ],
+       VALUES ($1,$2,$3,'Anan Suksawat','anan@rpt.test',$4,'pending',$5,0,0,0, ${o.at ?? 'now()'})
+       RETURNING id`,
+      [org, `ORD-RPT-${seq}`, event, o.status ?? 'confirmed', seats],
+    );
+    if (!o.tier) return;
+    const tier = await pool.query<{ id: string }>(
+      `INSERT INTO ticket_types (organization_id, event_id, name, price_satang,
+                                 status, total, sold, min_per_order, max_per_order)
+       VALUES ($1,$2,$3,0,'onsale',100,0,1,8) RETURNING id`,
+      [org, event, `Tier ${o.tier} ${seq}`],
+    );
+    await pool.query(
+      `INSERT INTO order_items (organization_id, order_id, ticket_type_id, quantity,
+                                unit_price_satang, line_subtotal_satang)
+       VALUES ($1,$2,$3,$4,0,0)`,
+      [org, order.rows[0].id, tier.rows[0].id, seats],
     );
   }
 
-  /** A settled payment against a fresh order, with optional refund and fee. */
+  /**
+   * A settled payment against a fresh order, with optional refund and fee.
+   *
+   * A refund that succeeded flips its payment to `refunded`, as
+   * `markRefundedIn` does in production — a refunded payment left `paid` is a
+   * state nothing but a fixture ever produced.
+   */
   async function seedPayment(o: {
     org?: number;
     event?: string;
@@ -250,6 +289,8 @@ describe('Reports (e2e — US-RPT)', () => {
     vatSatang?: number;
     feeSatang?: number;
     refundSatang?: number;
+    /** `succeeded` unless a case needs a refund that never moved the money. */
+    refundStatus?: 'succeeded' | 'pending' | 'failed';
     /** Seats on the order the payment settled — the average price's divisor. */
     seats?: number;
     /** Who paid, for the ledger's search and its person column. */
@@ -257,7 +298,7 @@ describe('Reports (e2e — US-RPT)', () => {
     /** `paid` unless a case needs a failure or a charge still in flight. */
     status?: 'paid' | 'pending' | 'failed';
     at?: string;
-  }): Promise<void> {
+  }): Promise<string> {
     seq += 1;
     const org = o.org ?? orgId;
     const event = o.event ?? summitId;
@@ -298,14 +339,29 @@ describe('Reports (e2e — US-RPT)', () => {
       ],
     );
     if (o.refundSatang) {
+      const refundStatus = o.refundStatus ?? 'succeeded';
       await pool.query(
         `INSERT INTO refunds (organization_id, payment_id, order_id, amount_satang, status,
                               issued_by, idempotency_key)
-         VALUES ($1,$2,$3,$4,'succeeded',
+         VALUES ($1,$2,$3,$4,$6::refund_status,
                  (SELECT id FROM users WHERE organization_id = $1 LIMIT 1), $5)`,
-        [org, payment.rows[0].id, orderId, o.refundSatang, `ref-rpt-${seq}`],
+        [
+          org,
+          payment.rows[0].id,
+          orderId,
+          o.refundSatang,
+          `ref-rpt-${seq}`,
+          refundStatus,
+        ],
       );
+      if (refundStatus === 'succeeded') {
+        await pool.query(
+          `UPDATE payments SET status = 'refunded' WHERE id = $1`,
+          [payment.rows[0].id],
+        );
+      }
     }
+    return payment.rows[0].id;
   }
 
   /** An event starting at an offset from now, for the started/not-started rule. */
@@ -457,17 +513,26 @@ describe('Reports (e2e — US-RPT)', () => {
       expect(report(res).rows[0].confirmed).toBe(4);
     });
 
-    it('makes the parts sum to the whole', async () => {
+    it('makes the four columns on screen sum to the whole, row and tiles', async () => {
+      // US-RPT-08 AC1: confirmed, pending, waitlist and cancelled add up
+      // exactly to the event's total. A rejected or lapsed (`expired`) order
+      // has no column, so counting its seats in the total printed a figure
+      // the row could never add up to.
       await seedOrder({ status: 'confirmed', seats: 3 });
+      await seedOrder({ status: 'pending', seats: 2 });
+      await seedOrder({ status: 'waitlisted' });
       await seedOrder({ status: 'cancelled', seats: 2 });
-      await seedOrder({ status: 'rejected' });
+      await seedOrder({ status: 'rejected', seats: 4 });
+      await seedOrder({ status: 'expired', seats: 5 });
 
-      const { total, confirmed, pending, waitlisted, cancelled, rejected } =
-        report(await get(adminJwt).expect(200)).totals;
-      expect(confirmed + pending + waitlisted + cancelled + rejected).toBe(
-        total,
-      );
-      expect(total).toBe(6);
+      const r = report(await get(adminJwt).expect(200));
+      expect(r.rows).toHaveLength(1);
+      for (const split of [r.rows[0], r.totals]) {
+        expect(
+          split.confirmed + split.pending + split.waitlisted + split.cancelled,
+        ).toBe(split.total);
+      }
+      expect(r.totals.total).toBe(8);
     });
 
     it('carries the event it belongs to', async () => {
@@ -611,33 +676,36 @@ describe('Reports (e2e — US-RPT)', () => {
       expect(t.vatSatang).toBe(7_000);
       expect(t.refundsSatang).toBe(10_000);
       expect(t.feesSatang).toBe(3_000);
-      // net is gross less VAT and refunds — fees are NOT in it.
-      expect(t.netSatang).toBe(90_000);
-      // settled is what reaches the bank.
+      // US-RPT-05: net is gross less refunds less fees — VAT is NOT taken off.
+      expect(t.netSatang).toBe(94_000);
+      // settled takes the VAT off as well.
       expect(t.settledSatang).toBe(87_000);
     });
 
-    it('agrees with the dashboard about the same money', async () => {
-      // The whole point of sharing the arithmetic: the overview's revenue and
-      // this report's net are the same number for the same scope (US-RPT-01).
+    it('makes every row’s Net its Gross less Refunds less Fees', async () => {
+      // US-RPT-05 AC1 — the three columns beside Net on screen, and nothing
+      // else, are what Net is made of.
       await seedPayment({
-        amountSatang: 50_000,
+        event: summitId,
+        amountSatang: 107_000,
+        vatSatang: 7_000,
+        refundSatang: 10_000,
+        feeSatang: 3_000,
+      });
+      await seedPayment({
+        event: galaId,
+        amountSatang: 53_500,
         vatSatang: 3_500,
-        feeSatang: 1_500,
+        feeSatang: 1_200,
       });
 
-      const net = income(await getIncome(adminJwt).expect(200)).totals
-        .netSatang;
-      const dash = await request(server)
-        .get('/api/v1/dashboard?range=year')
-        .set('Authorization', `Bearer ${adminJwt}`)
-        .expect(200);
-      const revenue = (
-        dash.body as Success<{
-          kpis: { revenueSatang: { value: number | null } | null };
-        }>
-      ).data.kpis.revenueSatang;
-      expect(revenue?.value).toBe(net);
+      const report = income(await getIncome(adminJwt).expect(200));
+      expect(report.rows).toHaveLength(2);
+      for (const row of [...report.rows, report.totals]) {
+        expect(row.netSatang).toBe(
+          row.grossSatang - row.refundsSatang - row.feesSatang,
+        );
+      }
     });
 
     it('does not double-count a payment refunded twice', async () => {
@@ -657,6 +725,36 @@ describe('Reports (e2e — US-RPT)', () => {
       expect(t.grossSatang).toBe(20_000);
       expect(t.refundsSatang).toBe(10_000);
       expect(t.netSatang).toBe(10_000);
+    });
+
+    it('keeps a payment whose refund has settled in gross and in refunds', async () => {
+      // A settled refund flips its payment to `refunded`. Scanning `paid` alone
+      // dropped it from both sums, so a completed refund vanished from the
+      // report instead of showing as money that went back (US-RPT-05).
+      await seedPayment({ amountSatang: 50_000, refundSatang: 50_000 });
+
+      const t = income(await getIncome(adminJwt).expect(200)).totals;
+      expect(t.grossSatang).toBe(50_000);
+      expect(t.refundsSatang).toBe(50_000);
+    });
+
+    it('counts only refunds that moved the money', async () => {
+      // A failed or still-pending refund returned nothing to the buyer.
+      await seedPayment({
+        amountSatang: 20_000,
+        refundSatang: 5_000,
+        refundStatus: 'failed',
+      });
+      await seedPayment({
+        amountSatang: 30_000,
+        refundSatang: 7_000,
+        refundStatus: 'pending',
+      });
+
+      const t = income(await getIncome(adminJwt).expect(200)).totals;
+      expect(t.grossSatang).toBe(50_000);
+      expect(t.refundsSatang).toBe(0);
+      expect(t.netSatang).toBe(50_000);
     });
 
     it('reports a free event as zeros rather than leaving it out', async () => {
@@ -709,6 +807,342 @@ describe('Reports (e2e — US-RPT)', () => {
       expect(
         income(await getIncome(adminJwt).expect(200)).totals.grossSatang,
       ).toBe(1_000);
+    });
+  });
+
+  describe('payouts (US-RPT-07)', () => {
+    interface PayoutsReport {
+      rows: {
+        reference: string;
+        at: string;
+        bankAccount: string;
+        events: { eventId: string; eventName: string }[];
+        amountSatang: number;
+        status: string;
+      }[];
+      matchedPayouts: number;
+      totals: {
+        payouts: number;
+        paidOutSatang: number;
+        inTransitSatang: number;
+        pendingSatang: number;
+        averageSatang: number | null;
+      };
+    }
+
+    const DAY_MS = 86_400_000;
+
+    const getPayouts = (jwt: string, query = '') =>
+      request(server)
+        .get(`/api/v1/reports/payouts${query}`)
+        .set('Authorization', `Bearer ${jwt}`);
+
+    const payouts = (res: { body: unknown }) =>
+      (res.body as Success<PayoutsReport>).data;
+
+    const referencesOf = async (query: string) =>
+      payouts(await getPayouts(adminJwt, query).expect(200)).rows.map(
+        (row) => row.reference,
+      );
+
+    /**
+     * A payout settling one payment per event it covers. `payout_items` is the
+     * only place "covers" is written down, so a payout seeded without events
+     * covers none. A paid one landed yesterday; the rest are still in flight.
+     */
+    async function seedPayout(o: {
+      reference: string;
+      status: 'scheduled' | 'processing' | 'paid' | 'failed';
+      amountSatang: number;
+      events?: string[];
+      org?: number;
+      bank?: string;
+      /** SQL for `requested_at`; defaults to two days ago. */
+      requestedAt?: string;
+    }): Promise<void> {
+      const org = o.org ?? orgId;
+      const landed = o.status === 'paid' ? new Date(Date.now() - DAY_MS) : null;
+      const payout = await pool.query<{ id: string }>(
+        `INSERT INTO payouts (organization_id, reference, amount_satang, bank_account,
+                              status, requested_at, completed_at)
+         VALUES ($1, $2, $3, $4, $5::payout_status,
+                 ${o.requestedAt ?? "now() - interval '2 days'"}, $6)
+         RETURNING id`,
+        [
+          org,
+          o.reference,
+          o.amountSatang,
+          o.bank ?? '•••• 6042',
+          o.status,
+          landed,
+        ],
+      );
+      for (const event of o.events ?? []) {
+        const paymentId = await seedPayment({
+          org,
+          event,
+          amountSatang: 10_000,
+        });
+        await pool.query(
+          `INSERT INTO payout_items (organization_id, payout_id, payment_id,
+                                     gross_satang, refund_satang, fee_satang, net_satang)
+           VALUES ($1, $2, $3, 10000, 0, 0, 10000)`,
+          [org, Number(payout.rows[0].id), paymentId],
+        );
+      }
+    }
+
+    it('shows each payout’s reference, date, masked bank, events, amount and status (TC-RPT-14)', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-1',
+        status: 'paid',
+        amountSatang: 8_500_000,
+        events: [summitId],
+        bank: '1234566789',
+      });
+
+      const res = await getPayouts(adminJwt).expect(200);
+      const [row] = payouts(res).rows;
+      expect(row).toMatchObject({
+        reference: 'PO-RPT-1',
+        bankAccount: '•••• 6789',
+        events: [{ eventId: summitId, eventName: 'Tech Summit 2026' }],
+        amountSatang: 8_500_000,
+        status: 'paid',
+      });
+      expect(Number.isNaN(Date.parse(row.at))).toBe(false);
+      // US-RPT-07: the last four digits, and the full number nowhere at all.
+      expect(JSON.stringify(res.body)).not.toContain('1234566789');
+    });
+
+    it('splits the tiles by status and averages every payout shown (TC-RPT-14)', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-PAID',
+        status: 'paid',
+        amountSatang: 300_000,
+      });
+      await seedPayout({
+        reference: 'PO-RPT-SENT',
+        status: 'processing',
+        amountSatang: 200_000,
+      });
+      await seedPayout({
+        reference: 'PO-RPT-SCHED',
+        status: 'scheduled',
+        amountSatang: 100_000,
+      });
+
+      const report = payouts(await getPayouts(adminJwt).expect(200));
+      expect(report.totals).toEqual({
+        payouts: 3,
+        paidOutSatang: 300_000,
+        inTransitSatang: 200_000,
+        pendingSatang: 100_000,
+        averageSatang: 200_000,
+      });
+      expect(
+        report.rows.map((row) => [row.reference, row.status]).sort(),
+      ).toEqual([
+        ['PO-RPT-PAID', 'paid'],
+        ['PO-RPT-SCHED', 'pending'],
+        ['PO-RPT-SENT', 'in_transit'],
+      ]);
+    });
+
+    // The story has three statuses and no word for a failed transfer; that one
+    // is Finance Payouts' to show, with its retry (US-FIN-04).
+    it('leaves a failed payout out of the rows and the tiles alike', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-OK',
+        status: 'paid',
+        amountSatang: 300_000,
+      });
+      await seedPayout({
+        reference: 'PO-RPT-FAILED',
+        status: 'failed',
+        amountSatang: 999_900,
+      });
+
+      const report = payouts(await getPayouts(adminJwt).expect(200));
+      expect(report.rows.map((row) => row.reference)).toEqual(['PO-RPT-OK']);
+      expect(report.totals).toMatchObject({
+        payouts: 1,
+        averageSatang: 300_000,
+      });
+    });
+
+    it('finds a payout covering several events under each of them, once (TC-RPT-15)', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-MULTI',
+        status: 'paid',
+        amountSatang: 500_000,
+        events: [summitId, galaId],
+      });
+
+      for (const event of [summitId, galaId]) {
+        const report = payouts(
+          await getPayouts(adminJwt, `?eventId=${event}`).expect(200),
+        );
+        expect(report.rows.map((row) => row.reference)).toEqual([
+          'PO-RPT-MULTI',
+        ]);
+        // Still every event it covers, not only the one filtered on.
+        expect(report.rows[0].events.map((e) => e.eventName)).toEqual([
+          'Charity Gala',
+          'Tech Summit 2026',
+        ]);
+        // Counted once, at its whole amount — not once per event.
+        expect(report.totals).toMatchObject({
+          payouts: 1,
+          paidOutSatang: 500_000,
+        });
+      }
+    });
+
+    it('leaves out a payout covering other events, and one covering none', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-SUMMIT',
+        status: 'paid',
+        amountSatang: 100_000,
+        events: [summitId],
+      });
+      await seedPayout({
+        reference: 'PO-RPT-BARE',
+        status: 'paid',
+        amountSatang: 100_000,
+      });
+
+      const all = payouts(await getPayouts(adminJwt).expect(200));
+      expect(
+        all.rows.find((row) => row.reference === 'PO-RPT-BARE')?.events,
+      ).toEqual([]);
+      expect(await referencesOf(`?eventId=${galaId}`)).toEqual([]);
+    });
+
+    it('answers a filter that matches nothing with zeroed tiles and no average (TC-RPT-15)', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-1',
+        status: 'paid',
+        amountSatang: 100_000,
+      });
+
+      const report = payouts(
+        await getPayouts(adminJwt, '?q=no-such-payout').expect(200),
+      );
+      expect(report.rows).toEqual([]);
+      expect(report.matchedPayouts).toBe(0);
+      expect(report.totals).toEqual({
+        payouts: 0,
+        paidOutSatang: 0,
+        inTransitSatang: 0,
+        pendingSatang: 0,
+        averageSatang: null,
+      });
+    });
+
+    it('searches the reference and the events covered, never the bank account', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-JUL',
+        status: 'paid',
+        amountSatang: 100_000,
+        events: [galaId],
+        bank: '1234566789',
+      });
+      await seedPayout({
+        reference: 'PO-RPT-AUG',
+        status: 'paid',
+        amountSatang: 100_000,
+        events: [summitId],
+      });
+
+      expect(await referencesOf('?q=JUL')).toEqual(['PO-RPT-JUL']);
+      expect(await referencesOf('?q=gala')).toEqual(['PO-RPT-JUL']);
+      // A search must not confirm digits the row is not allowed to show.
+      expect(await referencesOf('?q=66789')).toEqual([]);
+    });
+
+    it('keeps to the window, by when the payout landed or was requested', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-RECENT',
+        status: 'scheduled',
+        amountSatang: 100_000,
+      });
+      await seedPayout({
+        reference: 'PO-RPT-OLD',
+        status: 'scheduled',
+        amountSatang: 100_000,
+        requestedAt: "now() - interval '40 days'",
+      });
+
+      expect(await referencesOf('?range=30d')).toEqual(['PO-RPT-RECENT']);
+      expect(
+        payouts(await getPayouts(adminJwt).expect(200)).matchedPayouts,
+      ).toBe(2);
+    });
+
+    it('pages the rows but sums the whole filter', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-A',
+        status: 'paid',
+        amountSatang: 100_000,
+      });
+      await seedPayout({
+        reference: 'PO-RPT-B',
+        status: 'paid',
+        amountSatang: 300_000,
+      });
+
+      const report = payouts(
+        await getPayouts(adminJwt, '?page=1&limit=1').expect(200),
+      );
+      expect(report.rows).toHaveLength(1);
+      expect(report.matchedPayouts).toBe(2);
+      expect(report.totals).toMatchObject({
+        payouts: 2,
+        paidOutSatang: 400_000,
+        averageSatang: 200_000,
+      });
+    });
+
+    it('is a finance report: staff and outsiders are refused (US-RPT-12)', async () => {
+      await getPayouts(staffJwt).expect(403);
+      await getPayouts(outsiderJwt).expect(403);
+      await getPayouts(adminJwt).expect(200);
+    });
+
+    it('never shows another workspace’s payouts', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-THEIRS',
+        status: 'paid',
+        amountSatang: 100_000,
+        org: otherOrgId,
+        events: [otherEventId],
+      });
+
+      const report = payouts(await getPayouts(adminJwt).expect(200));
+      expect(report.rows.map((row) => row.reference)).not.toContain(
+        'PO-RPT-THEIRS',
+      );
+      expect(report.totals.payouts).toBe(0);
+    });
+
+    it('exports the same rows, with the bank still masked (US-RPT-11)', async () => {
+      await seedPayout({
+        reference: 'PO-RPT-CSV',
+        status: 'processing',
+        amountSatang: 8_500_000,
+        events: [summitId],
+        bank: '1234566789',
+      });
+
+      const res = await request(server)
+        .get('/api/v1/reports/payouts.csv')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .expect(200);
+      expect(res.text).toContain('PO-RPT-CSV');
+      expect(res.text).toContain('•••• 6789');
+      expect(res.text).toContain('In transit');
+      expect(res.text).not.toContain('1234566789');
     });
   });
 
@@ -886,15 +1320,23 @@ describe('Reports (e2e — US-RPT)', () => {
         .netSatang;
       const view = overview(await getOverview(adminJwt).expect(200));
       expect(view.kpis.revenueSatang?.value).toBe(net);
-      expect(view.kpis.revenueSatang?.value).toBe(90_000);
+      // US-RPT-05 AC2: gross − refunds − fees, for the overview's tile too.
+      expect(view.kpis.revenueSatang?.value).toBe(94_000);
     });
 
-    it('counts registrations as confirmed seats', async () => {
-      await seedOrder({ status: 'confirmed', seats: 4 });
-      await seedOrder({ status: 'cancelled', seats: 3 });
+    it('counts registrations as the registrations report’s total', async () => {
+      // US-RPT-08 AC2 / US-RPT-12 AC5: the overview's registrations figure
+      // equals the registrations report's total for the same scope, and
+      // US-RPT-03 AC1 puts the same figure in the donut's centre.
+      await seedOrder({ status: 'confirmed', seats: 4, tier: 'GA' });
+      await seedOrder({ status: 'cancelled', seats: 3, tier: 'VIP' });
 
       const view = overview(await getOverview(adminJwt).expect(200));
-      expect(view.kpis.registrations.value).toBe(4);
+      const split = report(await get(adminJwt).expect(200)).totals;
+      const donut = view.ticketMix.reduce((sum, s) => sum + s.seats, 0);
+      expect(view.kpis.registrations.value).toBe(7);
+      expect(split.total).toBe(7);
+      expect(donut).toBe(7);
     });
 
     it('prices the average ticket over the seats that were paid for', async () => {
@@ -910,6 +1352,16 @@ describe('Reports (e2e — US-RPT)', () => {
       await seedPayment({ amountSatang: 100_000, refundSatang: 4_000 });
       const view = overview(await getOverview(adminJwt).expect(200));
       expect(view.kpis.refundRate?.value).toBe(4);
+    });
+
+    it('rates a completed full refund, not just a partial one', async () => {
+      // US-RPT-01: the refund rate must reflect a refund that settled. One of
+      // two equal payments refunded in full is half the money going back.
+      await seedPayment({ amountSatang: 100_000, refundSatang: 100_000 });
+      await seedPayment({ amountSatang: 100_000 });
+
+      const view = overview(await getOverview(adminJwt).expect(200));
+      expect(view.kpis.refundRate?.value).toBe(50);
     });
 
     it('compares against the period immediately before this one', async () => {
@@ -974,7 +1426,7 @@ describe('Reports (e2e — US-RPT)', () => {
         ).revenue;
         const summed = trend!.points.reduce((a, p) => a + p.netSatang, 0);
         expect(summed).toBe(trend?.totalSatang);
-        expect(trend?.totalSatang).toBe(91_000);
+        expect(trend?.totalSatang).toBe(95_000);
       });
 
       it('gives a zero total and a neutral change for a window with no revenue', async () => {
@@ -1234,7 +1686,8 @@ describe('Reports (e2e — US-RPT)', () => {
         const row = performance(
           await getEvents(adminJwt, `${spanningWindow()}&q=Earner`).expect(200),
         ).rows[0];
-        expect(row.revenueSatang).toBe(90_000);
+        // The income report's net for this event: gross less refunds.
+        expect(row.revenueSatang).toBe(97_000);
       });
 
       it('reports ฿0 for an event that has taken nothing', async () => {
@@ -1770,10 +2223,99 @@ describe('Reports (e2e — US-RPT)', () => {
           await download(staffJwt, 'income.csv').expect(403);
           await download(staffJwt, 'transactions.csv').expect(403);
           await download(staffJwt, 'discounts.csv').expect(403);
+          await download(staffJwt, 'payouts.csv').expect(403);
+          await download(staffJwt, 'events.csv').expect(403);
           // The staff-visible ones still answer.
           await download(staffJwt, 'registrations.csv').expect(200);
           await download(staffJwt, 'attendance.csv').expect(200);
-          await download(staffJwt, 'events.csv').expect(200);
+        });
+
+        /** The export entries written so far for this workspace. */
+        const exportsAudited = async () =>
+          (
+            await pool.query<{
+              actor_user_id: string;
+              title: string;
+              meta: string | null;
+            }>(
+              `SELECT actor_user_id, title, meta FROM audit_events
+               WHERE organization_id = $1 AND type = 'xport' ORDER BY id`,
+              [orgId],
+            )
+          ).rows;
+
+        it('records who exported which report, and for which scope', async () => {
+          // US-RPT-12 AC3 / NFR-SUP-02: an export is an audited act.
+          await seedOrder({ event: galaId, seats: 2 });
+          const before = (await exportsAudited()).length;
+
+          await download(
+            adminJwt,
+            'registrations.csv',
+            `?eventId=${galaId}&q=gala`,
+          ).expect(200);
+
+          const written = (await exportsAudited()).slice(before);
+          const admin = await pool.query<{ id: string }>(
+            `SELECT id FROM users WHERE email = $1`,
+            [ADMIN],
+          );
+          expect(written).toHaveLength(1);
+          expect(written[0].actor_user_id).toBe(admin.rows[0].id);
+          expect(written[0].title).toBe(
+            'Exported the Registrations report (CSV, 1 row)',
+          );
+          expect(written[0].meta).toContain('Event: Charity Gala');
+          expect(written[0].meta).toContain('Search: gala');
+          expect(written[0].meta).toContain('Period: ');
+        });
+
+        it('records every report and format, not just one', async () => {
+          const before = (await exportsAudited()).length;
+          await file(adminJwt, 'income.xlsx').expect(200);
+          await file(adminJwt, 'events.pdf').expect(200);
+
+          const titles = (await exportsAudited())
+            .slice(before)
+            .map((row) => row.title);
+          expect(titles).toEqual([
+            'Exported the Income report (XLSX, 0 rows)',
+            expect.stringMatching(
+              /^Exported the Event performance report \(PDF, /,
+            ),
+          ]);
+        });
+
+        it('records nothing for an export that was refused', async () => {
+          const before = (await exportsAudited()).length;
+          await download(staffJwt, 'income.csv').expect(403);
+          expect(await exportsAudited()).toHaveLength(before);
+        });
+
+        it('refuses the ledger’s file to a reader who may not export attendee data', async () => {
+          // US-RPT-12 AC2: every ledger row names its payer, so its export
+          // needs "Export attendee data" (regExport) on top of finance access.
+          await seedPayment({ amountSatang: 10_000, payer: 'Ploy Srisai' });
+
+          const refused = await download(
+            bookkeeperJwt,
+            'transactions.csv',
+          ).expect(403);
+          expect(refused.headers['content-type']).toContain('application/json');
+          // Told in words, not handed the key: the console shows this
+          // message as it arrives, beside the Export menu.
+          expect((refused.body as { message: string }).message).toBe(
+            "You don't have permission to export attendee data.",
+          );
+          await download(bookkeeperJwt, 'transactions.xlsx').expect(403);
+          await download(bookkeeperJwt, 'transactions.pdf').expect(403);
+          // Reading the ledger on screen is still theirs.
+          await request(server)
+            .get('/api/v1/reports/transactions')
+            .set('Authorization', `Bearer ${bookkeeperJwt}`)
+            .expect(200);
+          // A role that holds it still gets the file.
+          await download(adminJwt, 'transactions.csv').expect(200);
         });
 
         it('refuses a backwards window, like the report it mirrors', async () => {
@@ -1863,26 +2405,6 @@ describe('Reports (e2e — US-RPT)', () => {
           );
         });
 
-        it('leaves revenue the reader may not see as an EMPTY cell', async () => {
-          // Never 0, which would say the event earned nothing (US-RPT-12).
-          const one = await seedEventAt(
-            'rpt-xl-mask',
-            'Masked View',
-            '-2 days',
-          );
-          await seedPayment({ event: one, amountSatang: 50_000 });
-          const { wb } = await workbook(staffJwt, 'events.xlsx');
-
-          const sheet = wb.getWorksheet('Event performance');
-          let checked = false;
-          sheet?.eachRow((row, number) => {
-            if (number === 1 || row.getCell(1).value !== 'Masked View') return;
-            expect(row.getCell(7).value).toBeNull();
-            checked = true;
-          });
-          expect(checked).toBe(true);
-        });
-
         it('keeps a Thai event name intact through the workbook', async () => {
           // TC-RPT-22: Thai reads correctly, with no mojibake.
           const thai = 'มหกรรมเทคโนโลยีกรุงเทพ';
@@ -1920,8 +2442,9 @@ describe('Reports (e2e — US-RPT)', () => {
           await file(staffJwt, 'income.xlsx').expect(403);
           await file(staffJwt, 'transactions.pdf').expect(403);
           await file(staffJwt, 'discounts.xlsx').expect(403);
+          await file(staffJwt, 'payouts.xlsx').expect(403);
+          await file(staffJwt, 'events.xlsx').expect(403);
           await file(staffJwt, 'attendance.pdf').expect(200);
-          await file(staffJwt, 'events.xlsx').expect(200);
         });
 
         it('refuses in JSON, never as a corrupt spreadsheet', async () => {
@@ -1956,18 +2479,17 @@ describe('Reports (e2e — US-RPT)', () => {
     });
 
     describe('who may read it (US-RPT-12)', () => {
-      it('gives staff the ranking with the money withheld, not a 403', async () => {
-        const one = await seedEventAt('rpt-ep-staff', 'Staff View', '-2 days');
-        await seedOrder({ event: one, seats: 2 });
-        await seedPayment({ event: one, amountSatang: 50_000 });
-
-        const row = performance(
-          await getEvents(staffJwt, `${spanningWindow()}&q=Staff`).expect(200),
-        ).rows[0];
-        // Three seats, not two: `seedPayment` brings its own confirmed order.
-        expect(row.registrations).toBe(3);
-        // Null, never 0 — "you may not see this" is not "it earned nothing".
-        expect(row.revenueSatang).toBeNull();
+      it('is a finance report: registration access is not enough', async () => {
+        // US-RPT-12 AC1 names event performance among the finance reports a
+        // Staff member with registration access only is not shown.
+        await getEvents(staffJwt, spanningWindow()).expect(403);
+        await request(server)
+          .get('/api/v1/reports/events.csv')
+          .set('Authorization', `Bearer ${staffJwt}`)
+          .expect(403);
+        await getEvents(adminJwt, spanningWindow()).expect(200);
+        // The overview stays theirs: its money is withheld inside it.
+        await getOverview(staffJwt).expect(200);
       });
 
       it('refuses an admin user without registration access', async () => {
@@ -2087,6 +2609,8 @@ async function cleanup(pool: Pool): Promise<void> {
     'outbox_events',
     'discount_redemptions',
     'discount_codes',
+    'payout_items',
+    'payouts',
     'refunds',
     'payments',
     'check_ins',

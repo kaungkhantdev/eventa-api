@@ -20,6 +20,13 @@ const ADMIN = 'admin@inv-e2e.test';
 const ORGANIZER = 'organizer@inv-e2e.test';
 const ADMIN2 = 'admin@inv-e2e-2.test';
 const TAX_ID = '0105561234567';
+const ADDRESS = '99 Sukhumvit Road, Bangkok 10110';
+/** What the Admin later changes the workspace's legal identity to (US-SET-07). */
+const RENAMED = {
+  name: 'Siam Renamed Trading',
+  address: '1 Silom Road, Bangkok 10500',
+  taxId: '0105569999999',
+};
 const BAHT = 100;
 /** The story's worked example: ฿48,000 VAT-inclusive. */
 const TOTAL = 48_000 * BAHT;
@@ -70,7 +77,11 @@ describe('Tax invoices (e2e — US-FIN-06/07/08/10)', () => {
     pool = new Pool({ connectionString: process.env.DATABASE_URL });
     await cleanup(pool);
     orgId = await seedOrg(pool, ORG, [
-      { email: ADMIN, roleName: 'Admin', grants: ['finView', 'finManage'] },
+      {
+        email: ADMIN,
+        roleName: 'Admin',
+        grants: ['finView', 'finManage', 'setSettings'],
+      },
       { email: ORGANIZER, roleName: 'Organizer', grants: ['finView'] },
     ]);
     otherOrgId = await seedOrg(pool, ORG2, [
@@ -332,6 +343,23 @@ describe('Tax invoices (e2e — US-FIN-06/07/08/10)', () => {
   });
 
   describe('the printable tax invoice (US-FIN-08)', () => {
+    const svgOf = async (id: number): Promise<string> => {
+      const res = await request(server)
+        .get(`/api/v1/invoices/${id}/invoice.svg`)
+        .set('Authorization', `Bearer ${adminJwt}`);
+      expect(res.status).toBe(200);
+      return (res.body as Buffer).toString();
+    };
+    /** The Admin's edit in Settings → Organization (US-SET-07). */
+    const setIdentity = (identity: Record<string, string | null>) =>
+      request(server)
+        .patch('/api/v1/organization')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send(identity)
+        .expect(200);
+    const restoreIdentity = () =>
+      setIdentity({ name: ORG.name, address: ADDRESS, taxId: TAX_ID });
+
     it('carries the legal identity, the VAT split and the event line', async () => {
       const inv = (
         (await issue(adminJwt, await seedOrder())).body as Success<Invoice>
@@ -349,6 +377,52 @@ describe('Tax invoices (e2e — US-FIN-06/07/08/10)', () => {
       expect(svg).toContain('VAT 7%');
       expect(svg).toContain('฿48,000');
       expect(svg).toContain('Inv Summit');
+    });
+
+    /*
+     * US-SET-07: "Given a document was already issued, when I later change
+     * the organization details, then that past document is unchanged and only
+     * future documents use the new details." The printed invoice used to join
+     * the live organizations row, so one edit rewrote every invoice ever
+     * issued.
+     */
+    it('keeps the seller identity it was issued with; only later invoices take the new one', async () => {
+      const issued = (
+        (await issue(adminJwt, await seedOrder())).body as Success<Invoice>
+      ).data;
+      await setIdentity(RENAMED);
+      try {
+        const past = await svgOf(issued.id);
+        expect(past).toContain(ORG.name);
+        expect(past).toContain(ADDRESS);
+        expect(past).toContain(TAX_ID);
+        expect(past).not.toContain(RENAMED.name);
+        expect(past).not.toContain(RENAMED.address);
+        expect(past).not.toContain(RENAMED.taxId);
+
+        const later = (
+          (await issue(adminJwt, await seedOrder())).body as Success<Invoice>
+        ).data;
+        const future = await svgOf(later.id);
+        expect(future).toContain(RENAMED.name);
+        expect(future).toContain(RENAMED.address);
+        expect(future).toContain(RENAMED.taxId);
+      } finally {
+        await restoreIdentity();
+      }
+    });
+
+    it('a detail that was blank on issue stays blank once the workspace fills it in', async () => {
+      await setIdentity({ address: null });
+      try {
+        const issued = (
+          (await issue(adminJwt, await seedOrder())).body as Success<Invoice>
+        ).data;
+        await setIdentity({ address: RENAMED.address });
+        expect(await svgOf(issued.id)).not.toContain(RENAMED.address);
+      } finally {
+        await restoreIdentity();
+      }
     });
 
     it('stamps a voided invoice VOID', async () => {
@@ -474,6 +548,7 @@ function daysBetween(from: string, to: string): number {
 const PERM_GROUP: Record<string, string> = {
   finView: 'Finance',
   finManage: 'Finance',
+  setSettings: 'Settings',
 };
 
 async function seedOrg(
@@ -483,8 +558,8 @@ async function seedOrg(
 ): Promise<number> {
   const res = await pool.query<{ id: string }>(
     `INSERT INTO organizations (name, slug, vat_rate, address, tax_id)
-     VALUES ($1, $2, 0.0700, '99 Sukhumvit Road, Bangkok 10110', $3) RETURNING id`,
-    [org.name, org.slug, TAX_ID],
+     VALUES ($1, $2, 0.0700, $3, $4) RETURNING id`,
+    [org.name, org.slug, ADDRESS, TAX_ID],
   );
   const orgId = Number(res.rows[0].id);
   const passwordHash = await hash(PASSWORD);

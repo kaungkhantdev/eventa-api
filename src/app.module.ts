@@ -38,6 +38,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { AuthSessionsModule } from './modules/auth-sessions/auth-sessions.module';
 import { AuthTwoFactorModule } from './modules/auth-two-factor/auth-two-factor.module';
 import { AuthSignupModule } from './modules/auth-signup/auth-signup.module';
+import { AuthBookingSignupModule } from './modules/auth-booking-signup/auth-booking-signup.module';
 import { AuthSocialModule } from './modules/auth-social/auth-social.module';
 import { UsersModule } from './modules/users/users.module';
 import { CheckoutModule } from './modules/checkout/checkout.module';
@@ -83,6 +84,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     AuthModule,
     UsersModule,
     AuthSignupModule,
+    AuthBookingSignupModule,
     AuthSocialModule,
     AuthPasswordModule,
     AuthSessionsModule,

@@ -377,4 +377,18 @@ describe('SessionsService', () => {
       expect((err as DomainException).getStatus()).toBe(404);
     });
   });
+
+  describe('cloneForEvent (US-EVT-13)', () => {
+    it("copies the session's description onto the duplicate", async () => {
+      repo.listByEvent.mockResolvedValue([
+        sessionRow({ description: 'Welcome and the year ahead.' }),
+      ]);
+      await service.cloneForEvent(actor, 'src1', 'new1', new Map());
+      expect(repo.createWithSpeakers.mock.calls[0][0]).toMatchObject({
+        description: 'Welcome and the year ahead.',
+        eventId: 'new1',
+        title: 'Opening',
+      });
+    });
+  });
 });

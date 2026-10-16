@@ -30,6 +30,7 @@ function registration(o: Partial<MyRegistrationRow> = {}): MyRegistrationRow {
     coverImage: null,
     ticketTypeName: 'General',
     ticketCount: 2,
+    ticketIds: ['t-a', 't-b'],
     attended: false,
     ...o,
   };
@@ -153,6 +154,13 @@ describe('AttendeeTicketsService (US-DISC-07, US-DISC-09)', () => {
       ]);
       const res = await service.myEvents(USER_ID);
       expect(res.upcoming.map((r) => r.orderId)).toEqual(['sooner', 'later']);
+    });
+
+    // US-DISC-07: the card is where a ticket is opened from, and a ticket is
+    // opened by its own id — the order alone cannot say which QR to show.
+    it('hands each card its own ticket ids, so each ticket can be opened', async () => {
+      const res = await service.myEvents(USER_ID);
+      expect(res.upcoming[0].ticketIds).toEqual(['t-a', 't-b']);
     });
 
     it('returns empty sections for an attendee with no registrations', async () => {

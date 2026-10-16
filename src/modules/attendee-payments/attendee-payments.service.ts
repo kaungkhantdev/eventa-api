@@ -90,6 +90,7 @@ function toDto(row: TransactionRow): TransactionDto {
   return {
     paymentId: row.paymentId,
     reference: row.reference,
+    invoiceNumber: row.invoiceNumber,
     eventName: row.eventName,
     method: row.method,
     status: row.status,

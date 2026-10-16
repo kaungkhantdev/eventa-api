@@ -117,7 +117,8 @@ export class PayoutSettingsLinkDto {
 
   @ApiProperty({
     nullable: true,
-    description: 'One-time provider URL; null until an account is connected.',
+    description:
+      "The provider's own dashboard URL for payout settings; null until an account is connected.",
   })
   url!: string | null;
 }

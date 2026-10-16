@@ -8,8 +8,10 @@ import {
   eventsCsv,
   incomeCsv,
   transactionsCsv,
+  payoutsCsv,
 } from './reports-csv';
 import type { TransactionsReportView } from './transactions-report.service';
+import type { PayoutsReportView } from './payouts-report.service';
 
 /**
  * A report as a file (US-RPT-11).
@@ -251,5 +253,41 @@ describe('wording a spreadsheet reads', () => {
     } as unknown as TransactionsReportView;
 
     expect(transactionsCsv(view).rows[0][2]).toBe('refund');
+  });
+});
+
+describe('the payouts report as a file (US-RPT-07)', () => {
+  const view = {
+    period: PERIOD,
+    rows: [
+      {
+        reference: 'PO-2043',
+        // 03:00 on the 15th in Bangkok, still the 14th in UTC.
+        at: new Date('2026-07-14T20:00:00.000Z'),
+        bankAccount: '•••• 6042',
+        events: [{ eventId: 'e-1', eventName: 'งานสัมมนาเทคโนโลยี' }],
+        amountSatang: 34_200_050,
+        status: 'pending',
+      },
+    ],
+    matchedPayouts: 1,
+    totals: {
+      payouts: 1,
+      paidOutSatang: 0,
+      inTransitSatang: 0,
+      pendingSatang: 34_200_050,
+      averageSatang: 34_200_050,
+    },
+  } as unknown as PayoutsReportView;
+
+  it('writes baht with satang, the Bangkok day, Thai event names and the status in words', () => {
+    expect(payoutsCsv(view).rows[0]).toEqual([
+      'PO-2043',
+      '2026-07-15',
+      '•••• 6042',
+      'งานสัมมนาเทคโนโลยี',
+      '342000.50',
+      'Pending',
+    ]);
   });
 });

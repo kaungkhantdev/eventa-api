@@ -12,10 +12,11 @@
 /**
  * One event's registrations, split by the state each is in.
  *
- * `rejected` is carried even though US-RPT-08 lists only four states: it is a
- * real order status, deliberately distinct from `cancelled` (the buyer's own
- * withdrawal), and dropping it would print a total larger than its parts. The
- * story's requirement is that the parts sum to the whole, which they do.
+ * `total` is the four states US-RPT-08 lists — confirmed, pending, waitlisted
+ * and cancelled — because the story requires exactly those four to add up to
+ * it. `rejected` is carried beside it, OUTSIDE the total: a real order status,
+ * deliberately distinct from `cancelled`, but not a registration the organizer
+ * holds or held. A lapsed (`expired`) order is in neither.
  */
 export interface RegistrationSplit {
   eventId: string;
@@ -27,7 +28,10 @@ export interface RegistrationSplit {
   waitlisted: number;
   cancelled: number;
   rejected: number;
-  /** The sum of the five above. Computed by the owner, not by the caller. */
+  /**
+   * confirmed + pending + waitlisted + cancelled. Computed by the owner, not by
+   * the caller.
+   */
   total: number;
 }
 
@@ -71,7 +75,7 @@ export interface RegistrationSplitPage {
 /**
  * One ticket type's share of the sign-ups (US-RPT-03).
  *
- * SEATS, not order lines — the same definition `confirmed` uses, so the donut's
+ * SEATS, not order lines, in the same four states as `total`, so the donut's
  * centre can show the overview's own registrations figure rather than a second
  * number that nearly matches it.
  */

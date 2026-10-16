@@ -5,6 +5,17 @@ import { AccessService } from './access.service';
 import { PermissionsService } from './permissions.service';
 
 const orgId = 1;
+/** Who acts, and from where — what the audit trail records (NFR-SUP-02). */
+const actor = { userId: 'u1', ip: '203.0.113.9' };
+const staffRole = {
+  id: 3,
+  name: 'Staff',
+  description: '',
+  permissions: [] as string[],
+  neverOfferedPermissions: [],
+  memberCount: 1,
+  isSystem: true,
+};
 
 describe('AccessService', () => {
   let repo: jest.Mocked<AccessRepository>;
@@ -22,6 +33,15 @@ describe('AccessService', () => {
       listMembers: jest.fn(),
       memberExists: jest.fn(),
       updateMemberRole: jest.fn().mockResolvedValue(undefined),
+      getRole: jest.fn().mockResolvedValue({
+        id: 7,
+        name: 'Organizer',
+        permissions: [],
+      }),
+      // The member being moved is not an Admin, so no last-Admin rule applies.
+      isActiveAdmin: jest.fn().mockResolvedValue(false),
+      isActiveAdminUser: jest.fn().mockResolvedValue(false),
+      countActiveAdmins: jest.fn().mockResolvedValue(1),
       getMember: jest.fn(),
       findMemberByEmail: jest.fn(),
       createInvitedMember: jest.fn(),
@@ -63,7 +83,7 @@ describe('AccessService', () => {
       repo.memberExists.mockResolvedValue(false);
 
       const err = await service
-        .changeMemberRole(orgId, 999, 7)
+        .changeMemberRole(orgId, 999, 7, actor)
         .catch((e: unknown) => e);
 
       expect(err).toBeInstanceOf(DomainException);
@@ -76,7 +96,7 @@ describe('AccessService', () => {
       repo.roleExists.mockResolvedValue(false);
 
       const err = await service
-        .changeMemberRole(orgId, 10, 999)
+        .changeMemberRole(orgId, 10, 999, actor)
         .catch((e: unknown) => e);
 
       expect((err as DomainException).getStatus()).toBe(404);
@@ -86,12 +106,61 @@ describe('AccessService', () => {
     it('updates the member role and returns the updated member', async () => {
       repo.memberExists.mockResolvedValue(true);
       repo.roleExists.mockResolvedValue(true);
+      repo.getMember
+        .mockResolvedValueOnce({ ...member, roleId: 3, role: 'Staff' })
+        .mockResolvedValueOnce(member);
+
+      const result = await service.changeMemberRole(orgId, 10, 7, actor);
+
+      expect(repo.updateMemberRole).toHaveBeenCalledWith(
+        orgId,
+        10,
+        7,
+        expect.anything(),
+      );
+      expect(result).toMatchObject({ id: 10, roleId: 7, role: 'Organizer' });
+    });
+
+    /*
+     * US-SET-05: "Given a teammate's role was changed, when I open the audit
+     * log, then I see an entry showing who changed it, from which role to
+     * which, and when." US-SET-12 asks the same of a role change: "recorded
+     * with before/after and who made it". NFR-SUP-02 adds from where.
+     */
+    it('records who moved the member, from which role to which, and from where', async () => {
+      repo.memberExists.mockResolvedValue(true);
+      repo.roleExists.mockResolvedValue(true);
+      repo.getMember
+        .mockResolvedValueOnce({ ...member, roleId: 3, role: 'Staff' })
+        .mockResolvedValueOnce(member);
+      repo.getRole.mockImplementation((_org, roleId) =>
+        Promise.resolve(
+          roleId === 3
+            ? { ...staffRole, permissions: ['regView'] }
+            : { ...staffRole, id: 7, name: 'Organizer', permissions: [] },
+        ),
+      );
+
+      await service.changeMemberRole(orgId, 10, 7, actor);
+
+      expect(repo.updateMemberRole).toHaveBeenCalledWith(orgId, 10, 7, {
+        type: 'perm',
+        title: "Changed Sam's role from Staff to Organizer",
+        meta: null,
+        actorUserId: 'u1',
+        ipAddress: '203.0.113.9',
+      });
+    });
+
+    it('changes and records nothing when the member already holds the role', async () => {
+      repo.memberExists.mockResolvedValue(true);
+      repo.roleExists.mockResolvedValue(true);
       repo.getMember.mockResolvedValue(member);
 
-      const result = await service.changeMemberRole(orgId, 10, 7);
+      const result = await service.changeMemberRole(orgId, 10, 7, actor);
 
-      expect(repo.updateMemberRole).toHaveBeenCalledWith(orgId, 10, 7);
-      expect(result).toMatchObject({ id: 10, roleId: 7, role: 'Organizer' });
+      expect(repo.updateMemberRole).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ id: 10, roleId: 7 });
     });
   });
 

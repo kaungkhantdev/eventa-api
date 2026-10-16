@@ -1,8 +1,9 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsIn, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
-import type { PaymentMethodChoice } from '../ports/payment-provider.port';
-
-const METHODS: readonly PaymentMethodChoice[] = ['Card', 'PromptPay'];
+import {
+  PAYMENT_METHOD_CHOICES,
+  type PaymentMethodChoice,
+} from '../ports/payment-provider.port';
 const MIN_IDEMPOTENCY_KEY = 8;
 const MAX_IDEMPOTENCY_KEY = 128;
 
@@ -17,8 +18,8 @@ export class PayOrderDto {
   @IsUUID()
   orderId!: string;
 
-  @ApiProperty({ enum: METHODS })
-  @IsIn(METHODS)
+  @ApiProperty({ enum: PAYMENT_METHOD_CHOICES })
+  @IsIn(PAYMENT_METHOD_CHOICES)
   method!: PaymentMethodChoice;
 
   @ApiProperty({

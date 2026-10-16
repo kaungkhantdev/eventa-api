@@ -15,7 +15,6 @@ import { DomainException } from '../../common/errors/domain.exception';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import {
   attendees,
-  discountRedemptions,
   events,
   orderItems,
   orders,
@@ -37,6 +36,7 @@ import {
   statusAfterRefund,
 } from './approval-rules';
 import type { OrderTotals } from './checkout-pricing';
+import { RedemptionLedgerPort } from './ports/redemption-ledger.port';
 
 /** Fallbacks if a workspace row somehow has none — the Thai statutory rate. */
 const DEFAULT_VAT_RATE = 0.07;
@@ -50,6 +50,23 @@ export interface OrgRates {
 
 export type OrderRow = typeof orders.$inferSelect;
 export type TicketRow = typeof tickets.$inferSelect;
+
+/**
+ * An order as far as creating its buyer's account needs it (US-DISC-15),
+ * with both languages the booking's confirmation could have been written in.
+ */
+export interface ClaimableBookingRow {
+  orderId: string;
+  buyerName: string;
+  buyerEmail: string;
+  eventName: string;
+  /** Where the order stands: only a confirmed one has tickets to keep. */
+  status: OrderRow['status'];
+  /** The event's own language, when it was given one. */
+  eventLocale: (typeof organizations.$inferSelect)['locale'] | null;
+  /** The workspace's language — what an event without its own falls back to. */
+  organizationLocale: (typeof organizations.$inferSelect)['locale'];
+}
 
 /** Everything the money-path transaction needs, resolved before it opens. */
 export interface PlaceOrderInput {
@@ -354,6 +371,7 @@ export class CheckoutRepository {
   constructor(
     @Inject(DRIZZLE) private readonly db: Database,
     private readonly outbox: OutboxPort,
+    private readonly redemptions: RedemptionLedgerPort,
   ) {}
 
   /**
@@ -592,6 +610,35 @@ export class CheckoutRepository {
       eventName: row.eventName,
       lines,
     };
+  }
+
+  /**
+   * The booking an emailed claim link names, reached by the order's uuid
+   * alone (US-DISC-15).
+   *
+   * No tenant, like `findGuestOrder`: the person asking has no workspace yet,
+   * and the order's uuid is what establishes one. Never by reference — the
+   * uuid is the unguessable half.
+   */
+  async findClaimableBooking(
+    orderId: string,
+  ): Promise<ClaimableBookingRow | null> {
+    const [row] = await this.db
+      .select({
+        orderId: orders.id,
+        buyerName: orders.buyerName,
+        buyerEmail: orders.buyerEmail,
+        eventName: events.name,
+        status: orders.status,
+        eventLocale: events.locale,
+        organizationLocale: organizations.locale,
+      })
+      .from(orders)
+      .innerJoin(events, eq(events.id, orders.eventId))
+      .innerJoin(organizations, eq(organizations.id, orders.organizationId))
+      .where(eq(orders.id, orderId))
+      .limit(1);
+    return row ?? null;
   }
 
   /**
@@ -1730,23 +1777,20 @@ export class CheckoutRepository {
       );
   }
 
-  /** The row set that `discount_codes.used` counts (US-TKT-11). */
+  /** The code's use, counted by Discounts inside this transaction (US-TKT-11). */
   private async recordRedemption(
     tx: Tx,
     input: PlaceOrderInput,
     orderId: string,
   ): Promise<void> {
     if (!input.discountCodeId || input.totals.discountSatang === 0) return;
-    await tx
-      .insert(discountRedemptions)
-      .values({
-        organizationId: input.organizationId,
-        discountCodeId: input.discountCodeId,
-        orderId,
-        buyerEmail: input.buyer.email,
-        amountSatang: input.totals.discountSatang,
-      })
-      .onConflictDoNothing();
+    await this.redemptions.redeemIn(tx, {
+      organizationId: input.organizationId,
+      discountCodeId: input.discountCodeId,
+      orderId,
+      buyerEmail: input.buyer.email,
+      amountSatang: input.totals.discountSatang,
+    });
   }
 
   /**

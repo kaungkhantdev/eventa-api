@@ -184,6 +184,21 @@ export class DiscountsRepository {
     });
   }
 
+  /** Every code the workspace has not deleted — the set whose status can drift. */
+  async liveCodes(organizationId: number): Promise<DiscountRow[]> {
+    return withTenant(this.db, organizationId, async (tx) =>
+      tx
+        .select()
+        .from(discountCodes)
+        .where(
+          and(
+            eq(discountCodes.organizationId, organizationId),
+            isNull(discountCodes.deletedAt),
+          ),
+        ),
+    );
+  }
+
   /** A filtered page of the workspace's codes, newest first, plus the total. */
   async search(
     organizationId: number,

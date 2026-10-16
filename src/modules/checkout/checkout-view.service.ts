@@ -12,6 +12,7 @@ import type {
 } from './checkout.types';
 import type { CheckoutTierDto, CheckoutViewDto } from './dto/checkout-view.dto';
 import { CheckoutEventPort } from './ports/checkout-event.port';
+import { CheckoutPaymentMethodsPort } from './ports/checkout-payment-methods.port';
 import { SeatMapPort } from './ports/seat-map.port';
 import { TicketCatalogPort } from './ports/ticket-catalog.port';
 import { canJoinWaitlist } from './waitlist-rules';
@@ -48,6 +49,7 @@ export class CheckoutViewService {
     private readonly events: CheckoutEventPort,
     private readonly catalog: TicketCatalogPort,
     private readonly seatMap: SeatMapPort,
+    private readonly paymentMethods: CheckoutPaymentMethodsPort,
     private readonly policy: CheckoutPolicy,
     private readonly clock: Clock,
   ) {}
@@ -66,6 +68,10 @@ export class CheckoutViewService {
       maxPerBooking: MAX_SEATS_PER_BOOKING,
       // "no fees are added, and the payment step is skipped" for a free event.
       paymentRequired: tiers.some((t) => this.canSelect(t) && !this.isFree(t)),
+      // Only what the workspace switched on (US-SET-09).
+      paymentMethods: [
+        ...(await this.paymentMethods.acceptedMethods(event.organizationId)),
+      ],
     };
   }
 

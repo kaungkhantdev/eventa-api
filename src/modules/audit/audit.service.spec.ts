@@ -79,6 +79,20 @@ describe('AuditService (US-SET-05)', () => {
     );
   });
 
+  it('records a report export: who took it, what, and for which scope', async () => {
+    // US-RPT-12 AC3 / NFR-SUP-02. `when` is the row's own occurred_at.
+    await service.recordExport(auth, {
+      title: 'Exported the Registrations report (CSV, 2 rows)',
+      scope: 'Period: 1 Jul 2026 – 7 Jul 2026 · Event: All events',
+    });
+    expect(repo.recordExport).toHaveBeenCalledWith(
+      1,
+      'u1',
+      'Exported the Registrations report (CSV, 2 rows)',
+      'Period: 1 Jul 2026 – 7 Jul 2026 · Event: All events',
+    );
+  });
+
   it('escapes a title containing a comma so columns stay aligned', async () => {
     repo.all.mockResolvedValue([record({ title: 'Removed Ann, the Admin' })]);
     const res = await service.export(auth, {});
