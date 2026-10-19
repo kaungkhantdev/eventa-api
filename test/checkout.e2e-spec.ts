@@ -285,9 +285,9 @@ describe('Checkout (e2e — US-DISC-04)', () => {
     });
 
     /*
-     * US-DISC-04: "I can pick up to 8 available seats from a seat map". The
-     * console never gives a seat a tier (US-EVT-05), and refusing such seats
-     * left every reserved event unbookable under every tier.
+     * US-DISC-04: "I can pick up to 8 available seats from a seat map". A map
+     * laid out before rows had ticket types (US-EVT-05) has no typed seat, and
+     * refusing such seats left every such event unbookable under every tier.
      */
     describe('a seat map laid out without tiers', () => {
       it('prices a seat under whichever tier the buyer chose', async () => {
