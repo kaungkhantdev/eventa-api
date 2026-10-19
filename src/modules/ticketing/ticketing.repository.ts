@@ -16,6 +16,7 @@ import { organizations, ticketStatusEnum, ticketTypes } from '../../db/schema';
 import { type Tx, withTenant } from '../../db/tenant';
 import type {
   NewTicketValues,
+  RemovalGuard,
   SearchTicketsOptions,
   TicketRow,
   TicketStatusCounts,
@@ -216,8 +217,13 @@ export class TicketingRepository {
     });
   }
 
-  async softDelete(organizationId: number, ticketId: string): Promise<boolean> {
+  async softDelete(
+    organizationId: number,
+    ticketId: string,
+    guard: RemovalGuard,
+  ): Promise<boolean> {
     return withTenant(this.db, organizationId, async (tx) => {
+      await this.lockForRemoval(tx, organizationId, ticketId, guard);
       const rows = await tx
         .update(ticketTypes)
         .set({ deletedAt: new Date() })
@@ -237,8 +243,13 @@ export class TicketingRepository {
    * Erase a tier outright — only ever called for one that never sold (US-TKT-05),
    * so no order, issued ticket or seat assignment can reference it.
    */
-  async hardDelete(organizationId: number, ticketId: string): Promise<boolean> {
+  async hardDelete(
+    organizationId: number,
+    ticketId: string,
+    guard: RemovalGuard,
+  ): Promise<boolean> {
     return withTenant(this.db, organizationId, async (tx) => {
+      await this.lockForRemoval(tx, organizationId, ticketId, guard);
       const rows = await tx
         .delete(ticketTypes)
         .where(
@@ -251,6 +262,33 @@ export class TicketingRepository {
         .returning({ id: ticketTypes.id });
       return rows.length > 0;
     });
+  }
+
+  /**
+   * Lock the tier `FOR UPDATE`, then let `guard` judge its removal in the same
+   * transaction. A seat map's save locks the event's tiers before it gives a
+   * row a type (US-EVT-05), so the two take turns: the guard sees any row a
+   * save gave this tier, and a save that comes second no longer finds it.
+   * Judged before the lock, a save could slip in between, and the seats'
+   * foreign key (`ON DELETE SET NULL`) would quietly clear that row's type.
+   */
+  private async lockForRemoval(
+    tx: Tx,
+    organizationId: number,
+    ticketId: string,
+    guard: RemovalGuard,
+  ): Promise<void> {
+    await tx
+      .select({ id: ticketTypes.id })
+      .from(ticketTypes)
+      .where(
+        and(
+          eq(ticketTypes.id, ticketId),
+          eq(ticketTypes.organizationId, organizationId),
+        ),
+      )
+      .for('update');
+    await guard(tx);
   }
 
   /**

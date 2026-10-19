@@ -627,6 +627,55 @@ describe('Ticket types (e2e — US-EVT-06)', () => {
         );
     });
 
+    it('refuses a delete that a seat map save beat to the type (409), never leaving its row untyped', async () => {
+      const gold = await add(gala, { name: 'Gold', priceSatang: 300000 });
+      const layout = (first: string) =>
+        request(server)
+          .put(`/api/v1/events/${gala}/seating/reserved`)
+          .set('Authorization', `Bearer ${jwt}`)
+          .send({
+            name: 'Hall',
+            rows: 4,
+            seatsPerRow: 3,
+            rowTicketTypes: [first, normal, normal, normal],
+          });
+      const remove = () =>
+        request(server)
+          .delete(`/api/v1/events/${gala}/tickets/${gold.id}`)
+          .set('Authorization', `Bearer ${jwt}`);
+      // Another transaction holds Gold the way a hold's foreign key does, so
+      // the delete — Gold has no rows when it looks — waits before removing.
+      const other = await pool.connect();
+      try {
+        await other.query('BEGIN');
+        await other.query(
+          'SELECT id FROM ticket_types WHERE id = $1 FOR KEY SHARE',
+          [gold.id],
+        );
+        const deleting = remove().then((r) => r);
+        await waitForLockWait(pool, 'ticket_types');
+        await layout(gold.id).expect(200);
+        await other.query('COMMIT');
+        const res = await deleting;
+        expect(res.status).toBe(409);
+        expect((res.body as { message: string }).message).toBe(
+          'Gold still has seat rows. Give them to another ticket type first.',
+        );
+      } finally {
+        other.release();
+      }
+      const { rows } = await pool.query<{ untyped: string }>(
+        `SELECT count(*)::text AS untyped FROM seats se
+           JOIN seat_maps m ON m.id = se.seat_map_id
+          WHERE m.event_id = $1 AND se.ticket_type_id IS NULL`,
+        [gala],
+      );
+      expect(rows[0].untyped).toBe('0');
+      // Row 1 back to VIP; Gold, rowless again, can go.
+      await layout(vip).expect(200);
+      await remove().expect(200);
+    });
+
     it('marks them in the cross-event inventory, and nothing else', async () => {
       const res = await request(server)
         .get(`/api/v1/tickets?limit=100`)
@@ -747,6 +796,25 @@ async function seedOrg(
       [orgId, user.rows[0].id, roleId, p.roleName],
     );
   }
+}
+
+/**
+ * Until a statement on `table` is waiting for a row lock — how a test knows a
+ * request it started has reached the lock another transaction holds.
+ */
+async function waitForLockWait(pool: Pool, table: string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const { rows } = await pool.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'
+          AND query ILIKE '%' || $1 || '%'`,
+      [table],
+    );
+    if (Number(rows[0].n) > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`nothing came to wait for a lock on ${table}`);
 }
 
 async function cleanup(pool: Pool): Promise<void> {

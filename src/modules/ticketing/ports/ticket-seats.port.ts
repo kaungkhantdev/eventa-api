@@ -1,3 +1,5 @@
+import type { Tx } from '../../../db/tenant';
+
 /**
  * Ticketing asks Registration how many seats of an event's reserved map each
  * ticket type's rows hold (US-EVT-05) — on a reserved event whose rows have
@@ -19,4 +21,14 @@ export abstract class TicketSeatsPort {
     organizationId: number,
     eventIds: string[],
   ): Promise<Set<string>>;
+
+  /**
+   * The seats whose row sells `ticketTypeId`, read inside the caller's
+   * transaction — the type's removal, under its lock (US-TKT-05).
+   */
+  abstract seatsOfTicketTypeIn(
+    tx: Tx,
+    organizationId: number,
+    ticketTypeId: string,
+  ): Promise<number>;
 }

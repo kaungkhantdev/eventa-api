@@ -1,9 +1,16 @@
 import type { ticketTypes } from '../../db/schema';
+import type { Tx } from '../../db/tenant';
 
 export type TicketRow = typeof ticketTypes.$inferSelect;
 export type NewTicketValues = typeof ticketTypes.$inferInsert;
 export type TicketStatus = TicketRow['status'];
 export type AdmissionType = TicketRow['admissionType'];
+
+/**
+ * Judges a tier's removal inside the removal's own transaction, once the tier
+ * is locked; throws to refuse it (US-TKT-05).
+ */
+export type RemovalGuard = (tx: Tx) => Promise<void>;
 
 /**
  * Note there is no `status` here: availability is derived from the sales window

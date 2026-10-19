@@ -323,6 +323,30 @@ export class SeatHoldRepository {
     });
   }
 
+  /**
+   * Seats on a live seat map whose row sells `ticketTypeId`, inside the
+   * caller's transaction — a ticket type's removal, which has locked the type
+   * so a seat map's save cannot give it a row meanwhile (US-TKT-05).
+   */
+  async seatsOfTicketTypeIn(
+    tx: Tx,
+    organizationId: number,
+    ticketTypeId: string,
+  ): Promise<number> {
+    const [row] = await tx
+      .select({ seats: sql<number>`count(*)::int` })
+      .from(seats)
+      .innerJoin(seatMaps, eq(seats.seatMapId, seatMaps.id))
+      .where(
+        and(
+          eq(seats.organizationId, organizationId),
+          eq(seats.ticketTypeId, ticketTypeId),
+          isNull(seatMaps.deletedAt),
+        ),
+      );
+    return row?.seats ?? 0;
+  }
+
   /** Of `eventIds`, the events whose live seat map has a seat with a ticket type. */
   async eventsWithTypedSeats(
     organizationId: number,

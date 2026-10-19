@@ -10,6 +10,7 @@ import { TicketingPolicy } from './ticketing.policy';
 import { TicketingRepository } from './ticketing.repository';
 import { TicketingService } from './ticketing.service';
 import type { TicketRow } from './ticketing.types';
+import type { Tx } from '../../db/tenant';
 
 const actor = { organizationId: 1, userId: 'u1' };
 const eventId = 'e1';
@@ -86,6 +87,7 @@ describe('TicketingService', () => {
     seats = {
       seatsByTicketType: jest.fn().mockResolvedValue(new Map()),
       eventsWithTypedSeats: jest.fn().mockResolvedValue(new Set()),
+      seatsOfTicketTypeIn: jest.fn().mockResolvedValue(0),
     };
     waitlist = {
       offerNewPlaces: jest.fn().mockResolvedValue(OFFERS_FINISHED(0)),
@@ -410,7 +412,11 @@ describe('TicketingService', () => {
       repo.countActive.mockResolvedValue(3);
       const res = await service.deleteTicket(actor, eventId, 't1');
       expect(res).toEqual({ outcome: 'removed' });
-      expect(repo.hardDelete).toHaveBeenCalledWith(1, 't1');
+      expect(repo.hardDelete).toHaveBeenCalledWith(
+        1,
+        't1',
+        expect.any(Function),
+      );
       expect(repo.softDelete).not.toHaveBeenCalled();
     });
 
@@ -420,7 +426,11 @@ describe('TicketingService', () => {
       const res = await service.deleteTicket(actor, eventId, 't1');
       expect(res).toEqual({ outcome: 'retired' });
       // retire = soft delete: the row survives, so issued tickets keep resolving
-      expect(repo.softDelete).toHaveBeenCalledWith(1, 't1');
+      expect(repo.softDelete).toHaveBeenCalledWith(
+        1,
+        't1',
+        expect.any(Function),
+      );
       expect(repo.hardDelete).not.toHaveBeenCalled();
     });
 
@@ -525,6 +535,31 @@ describe('TicketingService', () => {
       );
       expect(repo.hardDelete).not.toHaveBeenCalled();
       expect(repo.softDelete).not.toHaveBeenCalled();
+    });
+
+    /*
+     * A seat map save that gives this type a row between the check above and
+     * the delete would have its row's type cleared by the seats' foreign key
+     * (ON DELETE SET NULL), so the removal looks again, under the type's lock.
+     */
+    it('checks the seat rows again inside the removal, under the type’s lock (409)', async () => {
+      const TX = {} as Tx;
+      repo.findTicket.mockResolvedValue(ticketRow({ id: 't3', name: 'Gold' }));
+      seats.seatsOfTicketTypeIn.mockResolvedValue(3);
+      repo.hardDelete.mockImplementation(
+        async (_org: number, _id: string, guard: (tx: Tx) => Promise<void>) => {
+          await guard(TX);
+          return true;
+        },
+      );
+      const err = await service
+        .deleteTicket(actor, eventId, 't3')
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(409);
+      expect((err as DomainException).message).toBe(
+        'Gold still has seat rows. Give them to another ticket type first.',
+      );
+      expect(seats.seatsOfTicketTypeIn).toHaveBeenCalledWith(TX, 1, 't3');
     });
 
     it('removes a type that has no seat rows', async () => {

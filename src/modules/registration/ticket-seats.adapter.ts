@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { Tx } from '../../db/tenant';
 import { TicketSeatsPort } from '../ticketing/ports/ticket-seats.port';
 import { SeatHoldRepository } from './seat-hold.repository';
 
@@ -25,5 +26,13 @@ export class TicketSeatsAdapter extends TicketSeatsPort {
     eventIds: string[],
   ): Promise<Set<string>> {
     return this.repo.eventsWithTypedSeats(organizationId, eventIds);
+  }
+
+  seatsOfTicketTypeIn(
+    tx: Tx,
+    organizationId: number,
+    ticketTypeId: string,
+  ): Promise<number> {
+    return this.repo.seatsOfTicketTypeIn(tx, organizationId, ticketTypeId);
   }
 }

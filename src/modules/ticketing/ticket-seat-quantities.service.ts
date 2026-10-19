@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { Tx } from '../../db/tenant';
 import type { EventActor } from '../events/events.types';
 import { EventsService } from '../events/events.service';
 import { TicketSeatsPort } from './ports/ticket-seats.port';
@@ -38,5 +39,22 @@ export class TicketSeatQuantitiesService {
     return this.policy.quantityFromSeats(event.seatingMode, seats.size > 0)
       ? seats
       : null;
+  }
+
+  /**
+   * Refuses (409) to remove a ticket type that still has seat rows, counted
+   * inside the removal's transaction under the type's lock (US-TKT-05).
+   */
+  async assertUnseatedIn(
+    tx: Tx,
+    organizationId: number,
+    ticket: { id: string; name: string },
+  ): Promise<void> {
+    const seats = await this.seats.seatsOfTicketTypeIn(
+      tx,
+      organizationId,
+      ticket.id,
+    );
+    this.policy.assertNoSeatRows(ticket.name, seats);
   }
 }

@@ -18,6 +18,7 @@ import { TicketingRepository } from './ticketing.repository';
 import type {
   CreateTicketInput,
   NewTicketValues,
+  RemovalGuard,
   TicketRow,
   DeleteTicketResult,
   TicketStatus,
@@ -333,11 +334,15 @@ export class TicketingService {
         'Someone is checking out with this ticket type — pause it and try again shortly.',
       );
     }
+    // Looked at once more under the tier's lock: a seat map save may have
+    // given it a row since (US-EVT-05).
+    const guard: RemovalGuard = (tx) =>
+      this.seatQuantities.assertUnseatedIn(tx, actor.organizationId, ticket);
     if (ticket.sold === 0) {
-      await this.repo.hardDelete(actor.organizationId, ticketId);
+      await this.repo.hardDelete(actor.organizationId, ticketId, guard);
       return { outcome: 'removed' };
     }
-    await this.repo.softDelete(actor.organizationId, ticketId);
+    await this.repo.softDelete(actor.organizationId, ticketId, guard);
     return { outcome: 'retired' };
   }
 

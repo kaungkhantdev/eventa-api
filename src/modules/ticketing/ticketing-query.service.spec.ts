@@ -62,6 +62,7 @@ describe('TicketingQueryService (US-TKT-04)', () => {
     seats = {
       seatsByTicketType: jest.fn().mockResolvedValue(new Map()),
       eventsWithTypedSeats: jest.fn().mockResolvedValue(new Set()),
+      seatsOfTicketTypeIn: jest.fn().mockResolvedValue(0),
     };
     service = new TicketingQueryService(
       repo,
