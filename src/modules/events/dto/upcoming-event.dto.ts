@@ -41,4 +41,11 @@ export class UpcomingEventDto {
 
   @ApiProperty({ example: 20, description: 'sold ÷ capacity, 0–100' })
   fillPercent!: number;
+
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: "The event's cover photo URL; null when it has none",
+  })
+  coverImage!: string | null;
 }

@@ -424,5 +424,17 @@ describe('EventsQueryService calendar/upcoming', () => {
       const [row] = await service.upcoming(auth, 20);
       expect(row).toMatchObject({ capacity: 200, sold: 10, fillPercent: 5 });
     });
+
+    it("carries the event's cover photo, or null when it has none", async () => {
+      const cover = 'https://cdn.eventa.test/org/1/event-covers/a.jpg';
+      repo.listUpcoming.mockResolvedValue([
+        eventRow({ id: 'e3', coverImage: cover }),
+        eventRow({ id: 'e4', coverImage: null }),
+      ]);
+      deps.tickets.salesByEvent.mockResolvedValue(new Map());
+      const [withCover, without] = await service.upcoming(auth, 20);
+      expect(withCover.coverImage).toBe(cover);
+      expect(without.coverImage).toBeNull();
+    });
   });
 });

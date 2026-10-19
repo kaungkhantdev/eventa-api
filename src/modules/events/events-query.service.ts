@@ -164,6 +164,7 @@ export class EventsQueryService {
       sold,
       capacity,
       fillPercent: capacity > 0 ? Math.round((sold / capacity) * 100) : 0,
+      coverImage: e.coverImage ?? null,
     };
   }
 

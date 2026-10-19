@@ -36,7 +36,10 @@ interface Upcoming {
   sold: number;
   capacity: number;
   fillPercent: number;
+  coverImage: string | null;
 }
+
+const FAR_COVER = 'https://cdn.eventa.test/org/1/event-covers/far.jpg';
 
 describe('Calendar & upcoming (e2e — US-EVT-12)', () => {
   let app: INestApplication;
@@ -78,7 +81,11 @@ describe('Calendar & upcoming (e2e — US-EVT-12)', () => {
     await pool.query(`UPDATE ticket_types SET sold = 40 WHERE id = $1`, [
       (ticket.body as Success<{ id: string }>).data.id,
     ]);
-    await createEvent('Far 2030', '2030-06-01T00:00:00Z');
+    const far = await createEvent('Far 2030', '2030-06-01T00:00:00Z');
+    await pool.query(`UPDATE events SET cover_image = $1 WHERE id = $2`, [
+      FAR_COVER,
+      far,
+    ]);
     await createEvent('Past 2020', '2020-01-01T00:00:00Z');
   }, 30000);
 
@@ -141,6 +148,9 @@ describe('Calendar & upcoming (e2e — US-EVT-12)', () => {
     const soon = rows[soonIdx];
     expect(soon.daysLeft).toBeGreaterThan(0);
     expect(soon).toMatchObject({ sold: 40, capacity: 200, fillPercent: 20 });
+    // The card shows the event's own photo, and falls back when it has none.
+    expect(soon.coverImage).toBeNull();
+    expect(rows[farIdx].coverImage).toBe(FAR_COVER);
   });
 
   it('forbids the calendar without evCreate (403)', async () => {
