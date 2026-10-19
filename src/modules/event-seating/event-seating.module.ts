@@ -23,7 +23,10 @@ import { SeatingReadinessAdapter } from './seating-readiness.adapter';
  * Events and Seating depend on each other (`forwardRef`): Seating lays out an
  * event's room through the Events service, and Events' publish gate asks
  * Seating, through `SeatingReadinessPort` (bound here), whether every seat row
- * has a ticket type and every ticket type a row (US-EVT-05).
+ * has a ticket type and every ticket type a row (US-EVT-05). Ticketing is
+ * imported with `forwardRef` too — not because it depends on Seating, but
+ * because it imports Events, which now imports this module, so the plain
+ * import would still be loading when this decorator runs.
  */
 @Module({
   imports: [
