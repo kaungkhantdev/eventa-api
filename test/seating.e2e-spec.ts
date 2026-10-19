@@ -418,6 +418,20 @@ describe('Seating (e2e — US-EVT-05)', () => {
       );
     });
 
+    it('refuses an entry that is no ticket type at all (422), naming the row', async () => {
+      const rowTicketTypes = [...example(), 'not-a-ticket-type'];
+      const res = await reserved(eventId, adminJwt, {
+        name: 'Hall',
+        rows: 8,
+        seatsPerRow: 16,
+        rowTicketTypes,
+      });
+      expect(res.status).toBe(422);
+      expect((res.body as Failure).message).toBe(
+        "Row 8's ticket type isn't one of this event's ticket types.",
+      );
+    });
+
     it('refuses a list that is not one entry per row (422)', async () => {
       await reserved(eventId, adminJwt, {
         name: 'Hall',

@@ -10,24 +10,25 @@ import {
   Min,
   MinLength,
   ValidateBy,
-  isUUID,
   type ValidationOptions,
 } from 'class-validator';
 
 const MAX_ROWS = 100;
 const MAX_SEATS_PER_ROW = 100;
 
-/** Every entry is a ticket type id or null — a row with no type yet. */
-function IsTicketTypeIdOrNullEach(options?: ValidationOptions) {
+/**
+ * Every entry is a string or null — a row with no type yet. Whether a string
+ * is one of this event's ticket types is the seating rule's to say, naming the
+ * row (US-EVT-05).
+ */
+function IsStringOrNullEach(options?: ValidationOptions) {
   return ValidateBy(
     {
-      name: 'isTicketTypeIdOrNullEach',
+      name: 'isStringOrNullEach',
       validator: {
         validate: (value: unknown) =>
           Array.isArray(value) &&
-          value.every(
-            (v) => v === null || (typeof v === 'string' && isUUID(v)),
-          ),
+          value.every((v) => v === null || typeof v === 'string'),
         defaultMessage: () =>
           'rowTicketTypes must hold a ticket type id or null for each row',
       },
@@ -70,6 +71,6 @@ export class ConfigureReservedDto {
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(MAX_ROWS)
-  @IsTicketTypeIdOrNullEach()
+  @IsStringOrNullEach()
   rowTicketTypes?: (string | null)[];
 }
