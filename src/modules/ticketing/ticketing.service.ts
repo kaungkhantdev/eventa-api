@@ -4,15 +4,14 @@ import { DomainException } from '../../common/errors/domain.exception';
 import { Clock } from '../../common/time/clock';
 import { pickDefined } from '../../common/util/pick-defined';
 import type { EventActor } from '../events/events.types';
-import { EventsService } from '../events/events.service';
 import { TicketResponseDto } from './dto/ticket-response.dto';
 import type { UpdatedTicketResponseDto } from './dto/updated-ticket-response.dto';
 import { CheckoutActivityPort } from './ports/checkout-activity.port';
-import { TicketSeatsPort } from './ports/ticket-seats.port';
 import {
   type WaitlistOfferOutcome,
   WaitlistOffersPort,
 } from './ports/waitlist-offers.port';
+import { TicketSeatQuantitiesService } from './ticket-seat-quantities.service';
 import { toTicketResponse, toUpdatedTicketResponse } from './ticketing.mapper';
 import { TicketingPolicy } from './ticketing.policy';
 import { TicketingRepository } from './ticketing.repository';
@@ -40,12 +39,6 @@ const UPDATABLE_KEYS: (keyof NewTicketValues & keyof UpdateTicketInput)[] = [
 
 const WAITLIST_OFFER_FAILED =
   'Raised a ticket allocation, but offering the new places to its waitlist failed';
-/**
- * The seats each ticket type's rows hold, on a reserved event whose rows have
- * types (US-EVT-05) — null on any other event, whose quantities are typed.
- */
-type SeatQuantities = ReadonlyMap<string, number> | null;
-
 /** No new places, so nothing was offered and nothing went wrong. */
 const NOTHING_TO_OFFER: WaitlistOfferOutcome = {
   offered: 0,
@@ -59,12 +52,11 @@ export class TicketingService {
 
   constructor(
     private readonly repo: TicketingRepository,
-    private readonly events: EventsService,
     private readonly policy: TicketingPolicy,
     private readonly clock: Clock,
     private readonly checkout: CheckoutActivityPort,
     private readonly waitlist: WaitlistOffersPort,
-    private readonly seats: TicketSeatsPort,
+    private readonly seatQuantities: TicketSeatQuantitiesService,
   ) {}
 
   async createTicket(
@@ -72,7 +64,7 @@ export class TicketingService {
     eventId: string,
     input: CreateTicketInput,
   ): Promise<TicketResponseDto> {
-    const seats = await this.seatQuantities(actor, eventId); // 404 if not in the org
+    const seats = await this.seatQuantities.forEvent(actor, eventId); // 404 if not in the org
     const name = input.name.trim();
     await this.assertNameFree(actor.organizationId, eventId, name);
 
@@ -115,7 +107,7 @@ export class TicketingService {
     actor: EventActor,
     eventId: string,
   ): Promise<TicketResponseDto[]> {
-    const seats = await this.seatQuantities(actor, eventId);
+    const seats = await this.seatQuantities.forEvent(actor, eventId);
     const rows = await this.repo.listByEvent(actor.organizationId, eventId);
     const rate = await this.repo.orgVatRate(actor.organizationId);
     return rows.map((r) => toTicketResponse(r, rate, seats !== null));
@@ -127,7 +119,7 @@ export class TicketingService {
     ticketId: string,
     input: UpdateTicketInput,
   ): Promise<UpdatedTicketResponseDto> {
-    const seats = await this.seatQuantities(actor, eventId);
+    const seats = await this.seatQuantities.forEvent(actor, eventId);
     const ticket = await this.load(actor.organizationId, eventId, ticketId);
     if (input.version !== undefined && input.version !== ticket.version) {
       throw this.stale();
@@ -275,7 +267,7 @@ export class TicketingService {
       ticket.version,
     );
     if (!updated) throw this.stale();
-    const seats = await this.seatQuantities(actor, ticket.eventId);
+    const seats = await this.seatQuantities.forEvent(actor, ticket.eventId);
     return this.respond(actor.organizationId, updated, seats !== null);
   }
 
@@ -334,7 +326,7 @@ export class TicketingService {
         'An event must keep at least one ticket type — this is the last one.',
       );
     }
-    const seats = await this.seatQuantities(actor, eventId);
+    const seats = await this.seatQuantities.forEvent(actor, eventId);
     this.policy.assertNoSeatRows(ticket.name, seats?.get(ticketId) ?? 0);
     if (await this.checkout.hasActiveHolds(actor.organizationId, ticketId)) {
       throw DomainException.conflict(
@@ -425,25 +417,6 @@ export class TicketingService {
       );
     }
     return ticket;
-  }
-
-  /**
-   * The seats each ticket type's rows hold when the event's seat map sets its
-   * quantities (US-EVT-05), else null. Reads the event through Events, so it is
-   * also the 404 for an event outside the caller's workspace.
-   */
-  private async seatQuantities(
-    actor: EventActor,
-    eventId: string,
-  ): Promise<SeatQuantities> {
-    const event = await this.events.getEvent(actor, eventId);
-    const seats = await this.seats.seatsByTicketType(
-      actor.organizationId,
-      eventId,
-    );
-    return this.policy.quantityFromSeats(event.seatingMode, seats.size > 0)
-      ? seats
-      : null;
   }
 
   private async respond(

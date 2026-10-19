@@ -5,6 +5,7 @@ import { EventsService } from '../events/events.service';
 import { CheckoutActivityPort } from './ports/checkout-activity.port';
 import { TicketSeatsPort } from './ports/ticket-seats.port';
 import { WaitlistOffersPort } from './ports/waitlist-offers.port';
+import { TicketSeatQuantitiesService } from './ticket-seat-quantities.service';
 import { TicketingPolicy } from './ticketing.policy';
 import { TicketingRepository } from './ticketing.repository';
 import { TicketingService } from './ticketing.service';
@@ -90,14 +91,14 @@ describe('TicketingService', () => {
       offerNewPlaces: jest.fn().mockResolvedValue(OFFERS_FINISHED(0)),
     };
     const clock: Clock = { now: () => NOW };
+    const policy = new TicketingPolicy();
     service = new TicketingService(
       repo,
-      events,
-      new TicketingPolicy(),
+      policy,
       clock,
       checkout,
       waitlist,
-      seats,
+      new TicketSeatQuantitiesService(events, seats, policy),
     );
   });
 

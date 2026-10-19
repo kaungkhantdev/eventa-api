@@ -16,6 +16,7 @@ import { TicketSalesAdapter } from './ticket-sales.adapter';
 import { TicketingPolicy } from './ticketing.policy';
 import { TicketingRepository } from './ticketing.repository';
 import { TicketingService } from './ticketing.service';
+import { TicketSeatQuantitiesService } from './ticket-seat-quantities.service';
 import { TicketingController } from './ticketing.controller';
 import { TicketingQueryController } from './ticketing-query.controller';
 import { TicketingQueryService } from './ticketing-query.service';
@@ -49,6 +50,7 @@ import { InventoryInsightsAdapter } from './inventory-insights.adapter';
   providers: [
     { provide: InventoryInsightsPort, useClass: InventoryInsightsAdapter },
     TicketingService,
+    TicketSeatQuantitiesService,
     TicketingQueryService,
     TicketingPolicy,
     TicketingRepository,
