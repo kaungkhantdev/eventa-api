@@ -37,7 +37,7 @@ import {
   statusAfterRefund,
 } from './approval-rules';
 import type { OrderTotals } from './checkout-pricing';
-import { heldSeatsMatch } from './held-seat-rules';
+import { heldSeatsMatch, seatSellsUnder } from './held-seat-rules';
 import { RedemptionLedgerPort } from './ports/redemption-ledger.port';
 
 /** Fallbacks if a workspace row somehow has none — the Thai statutory rate. */
@@ -286,6 +286,12 @@ interface SettlementContext {
   seatIds: number[];
   takenSeatIds: number[];
   /**
+   * Every held seat still sells under the order's ticket type (US-EVT-05). A
+   * lapsed hold does not keep its row's type, so a payment landing late can
+   * find the row given to another type.
+   */
+  seatTypesMatch: boolean;
+  /**
    * The order's places are already in `sold` — it has been waiting for approval
    * (US-REG-02). Counting them again would refuse the last place as sold out
    * because of the order itself, and leave `sold` one order too high.
@@ -342,10 +348,12 @@ function settlementBlocker(
     return said.soldOut;
   }
   if (context.takenSeatIds.length > 0) return said.seatsTaken;
-  // A reserved-seating order must seat every admission it is about to ticket.
+  // A reserved-seating order must seat every admission it is about to ticket,
+  // each in a seat its ticket type sells — never a VIP seat at Normal's price.
   if (context.seatIds.length > 0 && context.seatIds.length !== quantity) {
     return said.seatMismatch;
   }
+  if (!context.seatTypesMatch) return said.seatMismatch;
   return null;
 }
 
@@ -1257,12 +1265,49 @@ export class CheckoutRepository {
       .limit(1);
     const tier = item ? await this.lockTier(tx, item.ticketTypeId) : null;
     const seatIds = await this.heldSeatIds(tx, input, order.id);
+    const takenSeatIds = await this.seatsAlreadyAssigned(tx, input, seatIds);
+    const seatTypesMatch =
+      !item ||
+      (await this.seatsSellUnder(tx, input, order.eventId, seatIds, item));
     return {
       line: item && tier ? { ...item, ...tier } : null,
       seatIds,
-      takenSeatIds: await this.seatsAlreadyAssigned(tx, input, seatIds),
+      takenSeatIds,
+      seatTypesMatch,
       placesCounted: isAwaitingApproval(order),
     };
+  }
+
+  /**
+   * Whether every one of `seatIds` sells under `ticketTypeId` (US-EVT-05).
+   * Read after `seatsAlreadyAssigned` has locked the seats, so a seat map
+   * save retyping their row has either committed or waits behind this.
+   */
+  private async seatsSellUnder(
+    tx: Tx,
+    input: SettleOrderInput,
+    eventId: string,
+    seatIds: number[],
+    line: { ticketTypeId: string },
+  ): Promise<boolean> {
+    if (seatIds.length === 0) return true;
+    const held = await tx
+      .select({ ticketTypeId: seats.ticketTypeId })
+      .from(seats)
+      .where(
+        and(
+          eq(seats.organizationId, input.organizationId),
+          inArray(seats.id, seatIds),
+        ),
+      );
+    const mapTyped = await this.mapHasTypedSeats(
+      tx,
+      input.organizationId,
+      eventId,
+    );
+    return held.every((s) =>
+      seatSellsUnder(s.ticketTypeId, line.ticketTypeId, mapTyped),
+    );
   }
 
   /**

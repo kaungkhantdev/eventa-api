@@ -9,6 +9,7 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { OrderPaymentPort } from '../src/modules/payments/ports/order-payment.port';
 import { listenOnLoopback } from './support/loopback';
 
 const ORG = { slug: 'confirm-e2e', name: 'Confirm E2E' };
@@ -654,6 +655,69 @@ describe('Confirming a registration (e2e — US-DISC-06)', () => {
       const p = (res.body as Success<Placed>).data;
       expect(p.status).toBe('pending');
       expect(p.totalSatang).toBe(1_869 * BAHT); // ฿890 x2 + 5% fee
+    });
+
+    describe('when the money lands (US-DISC-05)', () => {
+      /** A pending Normal order on row 2's first seat. */
+      const placeNormal = async (): Promise<{
+        orderId: string;
+        holdIds: number[];
+      }> => {
+        const holdIds = await splitHold(ids.tiers.normal, [
+          ids.split.normal[0],
+        ]);
+        const res = await confirm({
+          eventId: ids.events[SPLIT],
+          ticketTypeId: ids.tiers.normal,
+          seatIds: [ids.split.normal[0]],
+          holdIds,
+          buyer,
+          idempotencyKey: nextKey(),
+        });
+        expect(res.status).toBe(201);
+        return { orderId: (res.body as Success<Placed>).data.orderId, holdIds };
+      };
+
+      const settle = (orderId: string) =>
+        app
+          .get(OrderPaymentPort)
+          .settle(ids.orgId, orderId, () => Promise.resolve());
+
+      const refundReasons = async (): Promise<string[]> => {
+        const { rows } = await pool.query<{ reason: string }>(
+          `SELECT payload->>'reason' AS reason FROM outbox_events
+            WHERE organization_id = $1 AND routing_key = 'payment.refund_required'`,
+          [ids.orgId],
+        );
+        return rows.map((r) => r.reason);
+      };
+
+      it('refunds a payment whose lapsed hold’s row went to VIP, never seating it at the Normal price', async () => {
+        const { orderId, holdIds } = await placeNormal();
+        // The checkout timer ran out with the money in flight, so the row was
+        // free to change type (US-EVT-05), and the organizer gave it to VIP.
+        await pool.query(
+          `UPDATE seat_holds SET expires_at = now() - interval '1 minute'
+            WHERE id = ANY($1)`,
+          [holdIds],
+        );
+        await pool.query(
+          `UPDATE seats SET ticket_type_id = $1 WHERE id = ANY($2)`,
+          [ids.tiers.vip, ids.split.normal],
+        );
+        try {
+          const settled = await settle(orderId);
+          expect(settled.outcome).toBe('refund_required');
+          expect(await assignedSeats()).toBe(0);
+          expect(await soldFor(ids.tiers.normal)).toBe(0);
+          expect(await refundReasons()).toEqual(['seat_mismatch']);
+        } finally {
+          await pool.query(
+            `UPDATE seats SET ticket_type_id = $1 WHERE id = ANY($2)`,
+            [ids.tiers.normal, ids.split.normal],
+          );
+        }
+      });
     });
   });
 
