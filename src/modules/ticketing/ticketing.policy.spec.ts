@@ -239,4 +239,23 @@ describe('TicketingPolicy', () => {
       expect(policy.raisesAllocation(10, 0)).toBe(false);
     });
   });
+
+  describe('assertSeatsCoverSold (US-EVT-05)', () => {
+    it('accepts rows holding at least the seats already sold', () => {
+      expect(
+        thrown(() => policy.assertSeatsCoverSold('VIP', 10, 10)),
+      ).toBeUndefined();
+      expect(
+        thrown(() => policy.assertSeatsCoverSold('VIP', 0, 0)),
+      ).toBeUndefined();
+    });
+
+    it('refuses rows that now hold fewer seats than were sold (409)', () => {
+      const err = thrown(() => policy.assertSeatsCoverSold('Normal', 60, 48));
+      expect(status(err)).toBe(409);
+      expect(message(err)).toBe(
+        'Normal has sold 60 tickets, more than the 48 seats its rows now hold.',
+      );
+    });
+  });
 });

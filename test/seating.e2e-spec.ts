@@ -32,9 +32,20 @@ interface Seating {
     seatsPerRow: number;
     totalSeats: number;
   } | null;
+  rows: { rowLabel: string; ticketTypeId: string | null; seats: number }[];
+  unassignedRows: number;
   ticketQuantity: number;
   seatShortfall: { totalSeats: number; ticketQuantity: number } | null;
   note: string | null;
+}
+interface Failure {
+  message: string;
+}
+interface Ticket {
+  id: string;
+  name: string;
+  total: number;
+  status: string;
 }
 
 describe('Seating (e2e — US-EVT-05)', () => {
@@ -238,6 +249,305 @@ describe('Seating (e2e — US-EVT-05)', () => {
     }).expect(200);
   });
 
+  describe('seat rows split between ticket types (US-EVT-05)', () => {
+    const FUTURE = '2027-03-01T02:00:00Z';
+    let eventId: string;
+    let tiers: Record<'vip' | 'normal' | 'free', string>;
+
+    const auth = () => ({ Authorization: `Bearer ${adminJwt}` });
+
+    async function addTicket(
+      id: string,
+      body: Record<string, unknown>,
+    ): Promise<string> {
+      const res = await request(server)
+        .post(`/api/v1/events/${id}/tickets`)
+        .set(auth())
+        .send(body)
+        .expect(201);
+      return (res.body as Success<{ id: string }>).data.id;
+    }
+
+    async function totals(id: string): Promise<Record<string, number>> {
+      const res = await request(server)
+        .get(`/api/v1/events/${id}/tickets`)
+        .set(auth())
+        .expect(200);
+      const list = (res.body as Success<Ticket[]>).data;
+      return Object.fromEntries(list.map((t) => [t.name, t.total]));
+    }
+
+    async function seatTypesByRow(id: string): Promise<Record<string, string>> {
+      const { rows } = await pool.query<{ row_label: string; types: string }>(
+        `SELECT se.row_label,
+                string_agg(DISTINCT coalesce(se.ticket_type_id::text, 'none'), ',') AS types
+           FROM seats se JOIN seat_maps m ON m.id = se.seat_map_id
+          WHERE m.event_id = $1 GROUP BY se.row_label`,
+        [id],
+      );
+      return Object.fromEntries(rows.map((r) => [r.row_label, r.types]));
+    }
+
+    /** Rows 1–2 VIP, 3–6 Normal, 7 Free — the user's own example. */
+    const example = () => [
+      tiers.vip,
+      tiers.vip,
+      tiers.normal,
+      tiers.normal,
+      tiers.normal,
+      tiers.normal,
+      tiers.free,
+    ];
+
+    beforeAll(async () => {
+      const res = await request(server)
+        .post('/api/v1/events')
+        .set(auth())
+        .send({ name: 'Rows Gala', type: 'Conference', startAt: FUTURE });
+      eventId = (res.body as Success<{ id: string }>).data.id;
+      tiers = {
+        vip: await addTicket(eventId, {
+          name: 'VIP',
+          priceSatang: 250000,
+          total: 100,
+        }),
+        normal: await addTicket(eventId, {
+          name: 'Normal',
+          priceSatang: 89000,
+          total: 100,
+        }),
+        free: await addTicket(eventId, {
+          name: 'Free',
+          isFree: true,
+          total: 100,
+        }),
+      };
+    });
+
+    it('gives whole rows a ticket type and makes each quantity its seats', async () => {
+      const res = await reserved(eventId, adminJwt, {
+        name: 'Hall',
+        rows: 7,
+        seatsPerRow: 16,
+        rowTicketTypes: example(),
+      });
+      expect(res.status).toBe(200);
+      const s = (res.body as Success<Seating>).data;
+      expect(s.rows).toHaveLength(7);
+      expect(s.rows[0]).toEqual({
+        rowLabel: '1',
+        ticketTypeId: tiers.vip,
+        seats: 16,
+      });
+      expect(s.rows[6]).toEqual({
+        rowLabel: '7',
+        ticketTypeId: tiers.free,
+        seats: 16,
+      });
+      expect(s.unassignedRows).toBe(0);
+      expect(await seatTypesByRow(eventId)).toMatchObject({
+        '1': tiers.vip,
+        '3': tiers.normal,
+        '7': tiers.free,
+      });
+      expect(await totals(eventId)).toEqual({ VIP: 32, Normal: 64, Free: 16 });
+    });
+
+    it('moves a row to another type and both quantities follow', async () => {
+      const rowTicketTypes = example();
+      rowTicketTypes[5] = tiers.vip;
+      await reserved(eventId, adminJwt, {
+        name: 'Hall',
+        rows: 7,
+        seatsPerRow: 16,
+        rowTicketTypes,
+      }).expect(200);
+      expect(await totals(eventId)).toEqual({ VIP: 48, Normal: 48, Free: 16 });
+    });
+
+    it('reads every row and its type back in row order', async () => {
+      const res = await getSeating(eventId, adminJwt).expect(200);
+      const s = (res.body as Success<Seating>).data;
+      expect(s.rows.map((r) => r.rowLabel)).toEqual([
+        '1',
+        '2',
+        '3',
+        '4',
+        '5',
+        '6',
+        '7',
+      ]);
+      expect(s.rows[5].ticketTypeId).toBe(tiers.vip);
+    });
+
+    it("keeps each row's type when no list is sent; a new row gets none", async () => {
+      const res = await reserved(eventId, adminJwt, {
+        name: 'Hall',
+        rows: 8,
+        seatsPerRow: 16,
+      }).expect(200);
+      const s = (res.body as Success<Seating>).data;
+      expect(s.rows[5].ticketTypeId).toBe(tiers.vip);
+      expect(s.rows[7]).toEqual({
+        rowLabel: '8',
+        ticketTypeId: null,
+        seats: 16,
+      });
+      expect(s.unassignedRows).toBe(1);
+      expect(await totals(eventId)).toEqual({ VIP: 48, Normal: 48, Free: 16 });
+    });
+
+    it("refuses a ticket type that isn't this event's (422), naming the row", async () => {
+      const otherEvent = await createEvent(adminJwt, 'Other Gala');
+      const stranger = await addTicket(otherEvent, {
+        name: 'Elsewhere',
+        priceSatang: 10000,
+        total: 10,
+      });
+      const rowTicketTypes = [...example(), null];
+      rowTicketTypes[1] = stranger;
+      const res = await reserved(eventId, adminJwt, {
+        name: 'Hall',
+        rows: 8,
+        seatsPerRow: 16,
+        rowTicketTypes,
+      });
+      expect(res.status).toBe(422);
+      expect((res.body as Failure).message).toBe(
+        "Row 2's ticket type isn't one of this event's ticket types.",
+      );
+    });
+
+    it('refuses a list that is not one entry per row (422)', async () => {
+      await reserved(eventId, adminJwt, {
+        name: 'Hall',
+        rows: 8,
+        seatsPerRow: 16,
+        rowTicketTypes: example(),
+      }).expect(422);
+    });
+
+    it('refuses rows that would hold fewer seats than a type sold (409)', async () => {
+      await pool.query(`UPDATE ticket_types SET sold = 40 WHERE id = $1`, [
+        tiers.normal,
+      ]);
+      const rowTicketTypes = [...example(), null];
+      rowTicketTypes[2] = tiers.vip;
+      rowTicketTypes[3] = tiers.vip;
+      const res = await reserved(eventId, adminJwt, {
+        name: 'Hall',
+        rows: 8,
+        seatsPerRow: 16,
+        rowTicketTypes,
+      });
+      await pool.query(`UPDATE ticket_types SET sold = 0 WHERE id = $1`, [
+        tiers.normal,
+      ]);
+      expect(res.status).toBe(409);
+      expect((res.body as Failure).message).toBe(
+        'Normal has sold 40 tickets, more than the 32 seats its rows now hold.',
+      );
+      // Nothing was written: row 3 still sells Normal.
+      expect((await seatTypesByRow(eventId))['3']).toBe(tiers.normal);
+    });
+
+    it("refuses to change the type of a row with a held seat (409); an expired hold doesn't count", async () => {
+      const { rows } = await pool.query<{ id: string; org: string }>(
+        `SELECT se.id, se.organization_id AS org FROM seats se
+           JOIN seat_maps m ON m.id = se.seat_map_id
+          WHERE m.event_id = $1 AND se.row_label = '4' AND se.seat_number = '8'`,
+        [eventId],
+      );
+      const insertHold = (expires: string) =>
+        pool.query(
+          `INSERT INTO seat_holds (organization_id, event_id, seat_id, quantity, status, expires_at)
+           VALUES ($1, $2, $3, 1, 'active', now() + $4::interval)`,
+          [rows[0].org, eventId, rows[0].id, expires],
+        );
+      const rowTicketTypes = [...example(), null];
+      rowTicketTypes[3] = tiers.vip;
+      const body = { name: 'Hall', rows: 8, seatsPerRow: 16, rowTicketTypes };
+
+      await insertHold('10 minutes');
+      const res = await reserved(eventId, adminJwt, body);
+      expect(res.status).toBe(409);
+      expect((res.body as Failure).message).toBe(
+        "Row 4 has booked or held seats, so its ticket type can't change.",
+      );
+      expect((await seatTypesByRow(eventId))['4']).toBe(tiers.normal);
+
+      await pool.query(`DELETE FROM seat_holds WHERE event_id = $1`, [eventId]);
+      await insertHold('-1 minute');
+      await reserved(eventId, adminJwt, body).expect(200);
+      expect((await seatTypesByRow(eventId))['4']).toBe(tiers.vip);
+      await pool.query(`DELETE FROM seat_holds WHERE event_id = $1`, [eventId]);
+    });
+
+    it('refuses to change the type of a row with a booked seat (409)', async () => {
+      await request(server)
+        .patch(`/api/v1/events/${eventId}`)
+        .set(auth())
+        .send({ description: 'A gala', venueName: 'Grand Hall' })
+        .expect(200);
+      await pool.query(
+        `UPDATE events SET status = 'upcoming', visibility = 'public', published_at = now()
+          WHERE id = $1`,
+        [eventId],
+      );
+      const { rows } = await pool.query<{ id: string }>(
+        `SELECT se.id FROM seats se JOIN seat_maps m ON m.id = se.seat_map_id
+          WHERE m.event_id = $1 AND se.row_label = '7' AND se.seat_number = '1'`,
+        [eventId],
+      );
+      const seatIds = [Number(rows[0].id)];
+      const held = await request(server)
+        .post('/api/v1/public/checkout/hold')
+        .send({ eventId, ticketTypeId: tiers.free, seatIds })
+        .expect(201);
+      const holdIds = (held.body as Success<{ holdIds: number[] }>).data
+        .holdIds;
+      await request(server)
+        .post('/api/v1/public/checkout/confirm')
+        .send({
+          eventId,
+          ticketTypeId: tiers.free,
+          seatIds,
+          holdIds,
+          buyer: { name: 'Anong P.', email: 'anong.p@example.test' },
+          idempotencyKey: 'seat-rows-booked-1',
+        })
+        .expect(201);
+
+      const rowTicketTypes = [...example(), null];
+      rowTicketTypes[6] = tiers.normal;
+      const res = await reserved(eventId, adminJwt, {
+        name: 'Hall',
+        rows: 8,
+        seatsPerRow: 16,
+        rowTicketTypes,
+      });
+      expect(res.status).toBe(409);
+      expect((res.body as Failure).message).toBe(
+        "Row 7 has booked or held seats, so its ticket type can't change.",
+      );
+      expect((await seatTypesByRow(eventId))['7']).toBe(tiers.free);
+    });
+
+    it('leaves a map laid out without ticket types on its typed quantities', async () => {
+      const legacy = await createEvent(adminJwt, 'Legacy Hall');
+      await addTicket(legacy, { name: 'Any', priceSatang: 10000, total: 50 });
+      const res = await reserved(legacy, adminJwt, {
+        name: 'Hall',
+        rows: 2,
+        seatsPerRow: 3,
+      }).expect(200);
+      const s = (res.body as Success<Seating>).data;
+      expect(s.rows.every((r) => r.ticketTypeId === null)).toBe(true);
+      expect(s.unassignedRows).toBe(2);
+      expect(await totals(legacy)).toEqual({ Any: 50 });
+    });
+  });
+
   it('forbids configuring seating without evCreate (403)', async () => {
     const id = await createEvent(adminJwt, 'Guarded Event');
     const limitedJwt = await token(LIMITED, ORG.slug);
@@ -312,6 +622,13 @@ async function seedOrg(
 
 async function cleanup(pool: Pool): Promise<void> {
   const slugs = [ORG.slug, ORG2.slug];
+  // A booked seat's assignment restricts deleting the seat, so the orders
+  // (and with them the tickets and assignments) go first.
+  await pool.query(
+    `DELETE FROM orders WHERE organization_id IN
+       (SELECT id FROM organizations WHERE slug = ANY($1))`,
+    [slugs],
+  );
   await pool.query(
     `DELETE FROM audit_events WHERE organization_id IN
        (SELECT id FROM organizations WHERE slug = ANY($1))`,

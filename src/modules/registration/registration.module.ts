@@ -2,8 +2,10 @@ import { Module, forwardRef } from '@nestjs/common';
 import { CheckoutActivityPort } from '../ticketing/ports/checkout-activity.port';
 import { TicketingModule } from '../ticketing/ticketing.module';
 import { SeatMapPort } from '../checkout/ports/seat-map.port';
+import { SeatOccupancyPort } from '../event-seating/ports/seat-occupancy.port';
 import { CheckoutActivityAdapter } from './checkout-activity.adapter';
 import { SeatMapAdapter } from './seat-map.adapter';
+import { SeatOccupancyAdapter } from './seat-occupancy.adapter';
 import { SeatHoldRepository } from './seat-hold.repository';
 import { SeatHoldService } from './seat-hold.service';
 import { TicketEligibilityPolicy } from './ticket-eligibility.policy';
@@ -22,6 +24,10 @@ import { TicketEligibilityPolicy } from './ticket-eligibility.policy';
  *   · Ticketing → Registration: `CheckoutActivityPort`, "is anyone mid-checkout
  *     with this tier?" — so retiring one never yanks inventory from a buyer
  *     who is paying (US-TKT-05). Registration binds the adapter here.
+ *
+ * It also answers Seating's `SeatOccupancyPort` ("which of these seats are
+ * booked or held?", US-EVT-05) from the same holds and assignments — Seating
+ * imports this module; nothing here imports Seating, so there is no cycle.
  */
 @Module({
   imports: [forwardRef(() => TicketingModule)],
@@ -31,12 +37,14 @@ import { TicketEligibilityPolicy } from './ticket-eligibility.policy';
     TicketEligibilityPolicy,
     { provide: CheckoutActivityPort, useClass: CheckoutActivityAdapter },
     { provide: SeatMapPort, useClass: SeatMapAdapter },
+    { provide: SeatOccupancyPort, useClass: SeatOccupancyAdapter },
   ],
   exports: [
     SeatHoldService,
     SeatHoldRepository,
     CheckoutActivityPort,
     SeatMapPort,
+    SeatOccupancyPort,
   ],
 })
 export class RegistrationModule {}

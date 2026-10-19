@@ -13,7 +13,7 @@ import {
 } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { organizations, ticketStatusEnum, ticketTypes } from '../../db/schema';
-import { withTenant } from '../../db/tenant';
+import { type Tx, withTenant } from '../../db/tenant';
 import type {
   NewTicketValues,
   SearchTicketsOptions,
@@ -251,6 +251,53 @@ export class TicketingRepository {
         .returning({ id: ticketTypes.id });
       return rows.length > 0;
     });
+  }
+
+  /**
+   * The event's live tiers, row-locked `FOR UPDATE` in id order inside the
+   * caller's transaction — the seat map's save (US-EVT-05).
+   */
+  lockLiveByEventIn(
+    tx: Tx,
+    organizationId: number,
+    eventId: string,
+  ): Promise<TicketRow[]> {
+    return tx
+      .select()
+      .from(ticketTypes)
+      .where(
+        and(
+          eq(ticketTypes.organizationId, organizationId),
+          eq(ticketTypes.eventId, eventId),
+          isNull(ticketTypes.deletedAt),
+        ),
+      )
+      .orderBy(asc(ticketTypes.id))
+      .for('update');
+  }
+
+  /** A tier's quantity and the status it implies, inside the caller's transaction. */
+  async setTotalIn(
+    tx: Tx,
+    organizationId: number,
+    ticketId: string,
+    total: number,
+    status: TicketRow['status'],
+  ): Promise<void> {
+    await tx
+      .update(ticketTypes)
+      .set({
+        total,
+        status,
+        version: sql`${ticketTypes.version} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(ticketTypes.id, ticketId),
+          eq(ticketTypes.organizationId, organizationId),
+        ),
+      );
   }
 
   /** Number of live tiers on the event (guards "can't remove the last one"). */

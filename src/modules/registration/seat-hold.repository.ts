@@ -299,6 +299,37 @@ export class SeatHoldRepository {
     });
   }
 
+  /**
+   * Of `seatIds`, the ones booked (a seat assignment not yet released) or held
+   * (an `active` hold unexpired at `now`), read inside the caller's
+   * transaction — the seat map's save, so a row somebody booked or is checking
+   * out with keeps its ticket type (US-EVT-05).
+   */
+  async occupiedSeatIdsIn(
+    tx: Tx,
+    organizationId: number,
+    seatIds: number[],
+    now: Date,
+  ): Promise<Set<number>> {
+    if (seatIds.length === 0) return new Set();
+    const held = await tx
+      .select({ seatId: seatHolds.seatId })
+      .from(seatHolds)
+      .where(
+        and(
+          eq(seatHolds.organizationId, organizationId),
+          inArray(seatHolds.seatId, seatIds),
+          eq(seatHolds.status, ACTIVE),
+          gt(seatHolds.expiresAt, now),
+        ),
+      );
+    const booked = await this.assignedSeatIds(tx, organizationId, seatIds);
+    const heldIds = held
+      .map((h) => h.seatId)
+      .filter((id): id is number => id !== null);
+    return new Set([...heldIds, ...booked]);
+  }
+
   /** Release active holds early (buyer abandoned checkout) — frees the inventory. */
   async release(organizationId: number, holdIds: number[]): Promise<void> {
     if (holdIds.length === 0) return;

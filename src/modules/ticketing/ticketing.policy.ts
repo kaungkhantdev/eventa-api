@@ -112,6 +112,18 @@ export class TicketingPolicy {
   }
 
   /**
+   * On a reserved event whose rows have ticket types, a type's quantity is the
+   * seats its rows hold (US-EVT-05) — so a seat-map change may not leave it
+   * with fewer seats than it has already sold.
+   */
+  assertSeatsCoverSold(name: string, sold: number, seats: number): void {
+    if (seats >= sold) return;
+    throw DomainException.conflict(
+      `${name} has sold ${sold} tickets, more than the ${seats} seats its rows now hold.`,
+    );
+  }
+
+  /**
    * The allocation grew, so there are new places to offer the waitlist
    * (US-REG-04). Leaving unlimited for a number is a cut, not new places; and
    * becoming unlimited offers nothing, because the seat-hold engine counts

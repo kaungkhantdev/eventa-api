@@ -1,17 +1,20 @@
 import { Injectable } from '@nestjs/common';
 import { DomainException } from '../../common/errors/domain.exception';
+import { Clock } from '../../common/time/clock';
 import type { EventActor, SeatingMode } from '../events/events.types';
 import type { EventResponseDto } from '../events/dto/event-response.dto';
 import { EventsService } from '../events/events.service';
 import { TicketAvailabilityPort } from '../events/ports/ticket-availability.port';
 import { SeatingResponseDto } from './dto/seating-response.dto';
+import { toSeatRows, unassignedRowCount } from './event-seating.mapper';
+import { EventSeatingPolicy } from './event-seating.policy';
 import { EventSeatingRepository } from './event-seating.repository';
 import type {
   ConfigureGeneralInput,
   ConfigureReservedInput,
   SeatMapRow,
-  SeatPosition,
   SeatRow,
+  SeatRowSummary,
 } from './event-seating.types';
 
 const RESERVED: SeatingMode = 'reserved';
@@ -20,16 +23,25 @@ const SOLD = 'sold';
 const ONLINE_NOTE =
   'Online events have no seating — a join link is emailed after registration.';
 
-/** Configure an event's seating: general-admission headcount or a reserved map. */
+/**
+ * Configure an event's seating: general-admission headcount or a reserved map,
+ * its rows split between the event's ticket types (US-EVT-05).
+ */
 @Injectable()
 export class EventSeatingService {
   constructor(
     private readonly repo: EventSeatingRepository,
     private readonly events: EventsService,
     private readonly tickets: TicketAvailabilityPort,
+    private readonly policy: EventSeatingPolicy,
+    private readonly clock: Clock,
   ) {}
 
-  /** Lay out reserved seating (rows × seats). In-person only; keeps sold seats. */
+  /**
+   * Lay out reserved seating (rows × seats) and give each row a ticket type.
+   * In-person only. The repository runs the whole save under its locks and the
+   * policy decides it there, so a refusal writes nothing.
+   */
   async configureReserved(
     actor: EventActor,
     eventId: string,
@@ -37,9 +49,10 @@ export class EventSeatingService {
   ): Promise<SeatingResponseDto> {
     const event = await this.events.getEvent(actor, eventId);
     this.assertInPerson(event);
-    const desired = generatePositions(input.rows, input.seatsPerRow);
-    // The repo does the locked read-diff-write + sold-seat guard atomically.
-    const result = await this.repo.applyReserved(
+    this.policy.assertOneTypePerRow(input.rows, input.rowTicketTypes);
+    // Only a published event's sold seats are guarded, as before.
+    const blockSoldRemoval = event.status !== 'draft';
+    const map = await this.repo.applyReserved(
       actor.organizationId,
       {
         eventId,
@@ -47,18 +60,13 @@ export class EventSeatingService {
         rows: input.rows,
         seatsPerRow: input.seatsPerRow,
       },
-      desired,
-      event.status !== 'draft',
+      (snapshot) => this.policy.planReserved(snapshot, input, blockSoldRemoval),
+      this.clock.now(),
     );
-    if (!result.ok) {
-      throw DomainException.validation(
-        'Seats that are already sold cannot be removed from a published event.',
-      );
-    }
     const updated = await this.events.updateEvent(actor, eventId, {
       seatingMode: RESERVED,
     });
-    return this.respond(actor.organizationId, updated, result.map);
+    return this.respond(actor.organizationId, updated, map);
   }
 
   /** Choose general admission with a headcount; drops any reserved map. */
@@ -96,7 +104,10 @@ export class EventSeatingService {
     return this.respond(actor.organizationId, event, map);
   }
 
-  /** Copy the source event's seat map onto a new event (fresh, all-available seats). */
+  /**
+   * Copy the source event's seat map onto a new event: fresh, all-available
+   * seats, with no ticket types on its rows.
+   */
   async cloneForEvent(
     actor: EventActor,
     srcEventId: string,
@@ -105,11 +116,12 @@ export class EventSeatingService {
     const map = await this.repo.findMap(actor.organizationId, srcEventId);
     if (!map?.layout) return;
     const { rows, seatsPerRow } = map.layout;
+    const input = { name: map.name, rows, seatsPerRow };
     await this.repo.applyReserved(
       actor.organizationId,
-      { eventId: destEventId, name: map.name, rows, seatsPerRow },
-      generatePositions(rows, seatsPerRow),
-      false,
+      { eventId: destEventId, ...input },
+      (snapshot) => this.policy.planReserved(snapshot, input, false),
+      this.clock.now(),
     );
   }
 
@@ -143,6 +155,8 @@ export class EventSeatingService {
         isOnline: true,
         capacity: event.capacity,
         seatMap: null,
+        rows: [],
+        unassignedRows: 0,
         ticketQuantity: 0,
         seatShortfall: null,
         note: ONLINE_NOTE,
@@ -164,11 +178,14 @@ export class EventSeatingService {
       event.seatingMode === RESERVED &&
       seatMap !== null &&
       seatMap.totalSeats < ticketQuantity;
+    const rows = await this.rowsOf(organizationId, map);
     return {
       seatingMode: event.seatingMode,
       isOnline: false,
       capacity: event.capacity,
       seatMap,
+      rows,
+      unassignedRows: unassignedRowCount(rows),
       ticketQuantity,
       seatShortfall: shortfall
         ? { totalSeats: seatMap.totalSeats, ticketQuantity }
@@ -176,21 +193,13 @@ export class EventSeatingService {
       note: null,
     };
   }
-}
 
-/** Every seat position for a rows × seatsPerRow grid (row/seat are 1-based). */
-function generatePositions(rows: number, seatsPerRow: number): SeatPosition[] {
-  const positions: SeatPosition[] = [];
-  for (let r = 1; r <= rows; r += 1) {
-    for (let s = 1; s <= seatsPerRow; s += 1) {
-      // section is '' (never null) so uq_seats_position actually enforces
-      // uniqueness — a NULL would make Postgres treat every seat as distinct.
-      positions.push({
-        section: '',
-        rowLabel: String(r),
-        seatNumber: String(s),
-      });
-    }
+  /** Each row of the map and the ticket type it sells; none without a map. */
+  private async rowsOf(
+    organizationId: number,
+    map: SeatMapRow | null,
+  ): Promise<SeatRowSummary[]> {
+    if (!map) return [];
+    return toSeatRows(await this.repo.rowTypeCounts(organizationId, map.id));
   }
-  return positions;
 }

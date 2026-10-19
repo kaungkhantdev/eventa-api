@@ -8,6 +8,8 @@ import { CheckoutModule } from '../checkout/checkout.module';
 import { TicketEligibilityPort } from '../registration/ports/ticket-eligibility.port';
 import { TicketCatalogPort } from '../checkout/ports/ticket-catalog.port';
 import { CheckoutCatalogAdapter } from './checkout-catalog.adapter';
+import { TicketQuantityPort } from '../event-seating/ports/ticket-quantity.port';
+import { TicketQuantityAdapter } from './ticket-quantity.adapter';
 import { TicketAvailabilityAdapter } from './ticket-availability.adapter';
 import { TicketEligibilityAdapter } from './ticket-eligibility.adapter';
 import { TicketSalesAdapter } from './ticket-sales.adapter';
@@ -31,6 +33,10 @@ import { InventoryInsightsAdapter } from './inventory-insights.adapter';
  * TicketCatalogPort, and a raised allocation is handed to it through
  * `WaitlistOffersPort` so the new places go to the waitlist (US-REG-04) —
  * Ticketing never reads orders or holds seats itself.
+ *
+ * Seating reads and sets the tiers its rows sell through `TicketQuantityPort`
+ * (US-EVT-05), inside the seat map's transaction; Seating imports this module,
+ * not the other way round.
  */
 @Module({
   imports: [
@@ -50,6 +56,7 @@ import { InventoryInsightsAdapter } from './inventory-insights.adapter';
     { provide: TicketSalesPort, useClass: TicketSalesAdapter },
     { provide: TicketEligibilityPort, useClass: TicketEligibilityAdapter },
     { provide: TicketCatalogPort, useClass: CheckoutCatalogAdapter },
+    { provide: TicketQuantityPort, useClass: TicketQuantityAdapter },
   ],
   exports: [
     InventoryInsightsPort,
@@ -58,6 +65,7 @@ import { InventoryInsightsAdapter } from './inventory-insights.adapter';
     TicketSalesPort,
     TicketEligibilityPort,
     TicketCatalogPort,
+    TicketQuantityPort,
   ],
 })
 export class TicketingModule {}
