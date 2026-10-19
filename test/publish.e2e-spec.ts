@@ -169,6 +169,70 @@ describe('Publish / unpublish (e2e — US-EVT-07)', () => {
     await publish(id, editorJwt).expect(403);
   });
 
+  describe('reserved seating (US-EVT-05)', () => {
+    /** A ready draft with a 3-row reserved map; returns its ticket ids. */
+    async function reservedDraft(
+      rowTicketTypes?: (string | null)[],
+    ): Promise<{ id: string; general: string; free: string }> {
+      const id = await readyDraft(FUTURE);
+      const list = await request(server)
+        .get(`/api/v1/events/${id}/tickets`)
+        .set(auth(adminJwt))
+        .expect(200);
+      const general = (list.body as Success<{ id: string }[]>).data[0].id;
+      const created = await request(server)
+        .post(`/api/v1/events/${id}/tickets`)
+        .set(auth(adminJwt))
+        .send({ name: 'Free', isFree: true, total: 10 })
+        .expect(201);
+      const free = (created.body as Success<{ id: string }>).data.id;
+      await seatRows(id, rowTicketTypes);
+      return { id, general, free };
+    }
+
+    const seatRows = (id: string, rowTicketTypes?: (string | null)[]) =>
+      request(server)
+        .put(`/api/v1/events/${id}/seating/reserved`)
+        .set(auth(adminJwt))
+        .send({ name: 'Hall', rows: 3, seatsPerRow: 2, rowTicketTypes })
+        .expect(200);
+
+    it('refuses while a seat row has no ticket type (422)', async () => {
+      const draft = await reservedDraft();
+      await seatRows(draft.id, [draft.general, draft.free, null]);
+      const res = await publish(draft.id, adminJwt, { visibility: 'public' });
+      expect(res.status).toBe(422);
+      expect((res.body as Failure).message).toBe(
+        'Give every seat row a ticket type before publishing.',
+      );
+    });
+
+    it('refuses while a ticket type has no seat row, naming it (422)', async () => {
+      const draft = await reservedDraft();
+      await seatRows(draft.id, [draft.general, draft.general, draft.general]);
+      const res = await publish(draft.id, adminJwt, { visibility: 'public' });
+      expect(res.status).toBe(422);
+      expect((res.body as Failure).message).toBe(
+        'Free has no seat rows. Give it a row or remove it.',
+      );
+    });
+
+    it('publishes once every row has a type and every type a row', async () => {
+      const draft = await reservedDraft();
+      await seatRows(draft.id, [draft.general, draft.general, draft.free]);
+      await publish(draft.id, adminJwt, { visibility: 'public' }).expect(200);
+    });
+
+    it('refuses a draft whose map was laid out without ticket types', async () => {
+      const draft = await reservedDraft();
+      const res = await publish(draft.id, adminJwt, { visibility: 'public' });
+      expect(res.status).toBe(422);
+      expect((res.body as Failure).message).toBe(
+        'Give every seat row a ticket type before publishing.',
+      );
+    });
+  });
+
   it('asks to confirm a past start date (422), then publishes when confirmed', async () => {
     const id = await readyDraft(PAST);
     const blocked = await publish(id, adminJwt);

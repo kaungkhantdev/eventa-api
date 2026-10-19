@@ -268,11 +268,13 @@ its own `ports/` folder; the **owner** implements it as an adapter and binds it
 (`{ provide: EventStatsPort, useClass: RegistrationStatsAdapter }`). So Events reads registration numbers
 without importing Registration's tables. Use `forwardRef` **only** for a genuine bidirectional dependency
 (auth↔access, auth↔auth-signup, auth↔auth-password, auth↔auth-social, auth↔users, events↔ticketing,
-ticketing↔registration, ticketing↔checkout — which pulls discounts→ticketing into the cycle too, and
-payment-settings→ticketing now that checkout asks PaymentSettings which methods are on — invoices↔payments)
-— not to paper over a bad boundary. Ports in play — the cross-context reads worth knowing; there are 52
-`*Port` abstract classes today and `grep -rn 'abstract class .*Port' src` is the inventory (the
-`reports`/`dashboard` read families and the payment-setup ports are not listed here):
+events↔event-seating — the publish gate asks Seating about seat rows, US-EVT-05, which also defers
+event-seating's import of ticketing, since that reaches events — ticketing↔registration, ticketing↔checkout —
+which pulls discounts→ticketing into the cycle too, and payment-settings→ticketing now that checkout asks
+PaymentSettings which methods are on — invoices↔payments) — not to paper over a bad boundary. Ports in
+play — the cross-context reads worth knowing; there are 56 `*Port` abstract classes today and
+`grep -rn 'abstract class .*Port' src` is the inventory (the `reports`/`dashboard` read families and the
+payment-setup ports are not listed here):
 `TicketAvailabilityPort` ·
 `EventStatsPort` · `TicketSalesPort` ·
 `TicketEligibilityPort` (Registration asks Ticketing "may this tier be sold right now?") ·
@@ -292,7 +294,13 @@ transaction) · `TaxableSalesPort` (the VAT ledger asks
 Payments what was collected each month) · `SettledFundsPort` (Payouts asks Payments what has settled) ·
 `PayoutAccountPort` (Payouts asks PaymentSettings whether a payout account is connected) ·
 `CheckInEventPort` (the door asks Events whether it may admit, which is also its tenancy check) ·
-`BookingClaimOrderPort` (AuthBookingSignup asks Checkout which booking a claim link names, US-DISC-15). Provider seams
+`BookingClaimOrderPort` (AuthBookingSignup asks Checkout which booking a claim link names, US-DISC-15) ·
+`TicketQuantityPort` (Seating locks the event's tiers and sets each one's quantity to its rows' seats
+through Ticketing, in the seat map's transaction, US-EVT-05) · `SeatOccupancyPort` (Seating asks
+Registration which seats are booked or held, in that transaction, so their row keeps its type) ·
+`SeatingReadinessPort` (the publish gate asks Seating whether every seat row has a ticket type and every
+type a row) · `TicketSeatsPort` (Ticketing asks Registration how many seats each tier's rows hold, so a
+seat-set quantity is read-only and a tier with rows can't be retired). Provider seams
 (infrastructure behind an abstract class, not cross-context reads): `SocialVerifierPort` (OAuth token
 verification) · `PaymentProviderPort` (the PSP adapter — PCI SAQ-A; also carries the payout settings link
 and payout retry) · `ObjectStoragePort` (S3 for profile photos).

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { DomainException } from '../../common/errors/domain.exception';
+import type { SeatRowsReadiness } from '../events/ports/seating-readiness.port';
 import type { SeatTier } from './ports/ticket-quantity.port';
 import type {
   ConfigureReservedInput,
@@ -10,6 +11,7 @@ import type {
   RowTicketTypes,
   SeatPosition,
   SeatRow,
+  SeatRowSummary,
 } from './event-seating.types';
 
 const SOLD = 'sold';
@@ -60,6 +62,25 @@ export class EventSeatingPolicy {
       removedSeatIds: grid.removed.map((s) => s.id),
       retyped,
       seatsByTier: seatsByTier(grid.kept, added, rowTypes, snapshot.tiers),
+    };
+  }
+
+  /**
+   * Where the rows stand against the event's live ticket types. A map none of
+   * whose rows has a type yet — one laid out before rows had types — is one
+   * gap, its rows, rather than one per ticket type as well.
+   */
+  readiness(rows: SeatRowSummary[], tiers: SeatTier[]): SeatRowsReadiness {
+    const rowsWithoutType = rows.filter((r) => r.ticketTypeId === null).length;
+    if (rows.length > 0 && rowsWithoutType === rows.length) {
+      return { rowsWithoutType, ticketTypesWithoutRows: [] };
+    }
+    const sold = new Set(rows.map((r) => r.ticketTypeId));
+    return {
+      rowsWithoutType,
+      ticketTypesWithoutRows: tiers
+        .filter((t) => !sold.has(t.id))
+        .map((t) => t.name),
     };
   }
 

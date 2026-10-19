@@ -277,4 +277,47 @@ describe('EventSeatingPolicy', () => {
       expect(plan.removedSeatIds).toEqual([104, 105]);
     });
   });
+
+  describe('readiness (US-EVT-05)', () => {
+    const row = (rowLabel: string, ticketTypeId: string | null) => ({
+      rowLabel,
+      ticketTypeId,
+      seats: 16,
+    });
+
+    it('is ready when every row has a type and every type a row', () => {
+      expect(
+        policy.readiness(
+          [row('1', VIP), row('2', NORMAL), row('3', FREE)],
+          TIERS,
+        ),
+      ).toEqual({ rowsWithoutType: 0, ticketTypesWithoutRows: [] });
+    });
+
+    it('counts the rows with no type, and names the types with no row in order', () => {
+      expect(
+        policy.readiness(
+          [row('1', VIP), row('2', null), row('3', null)],
+          TIERS,
+        ),
+      ).toEqual({
+        rowsWithoutType: 2,
+        ticketTypesWithoutRows: ['Normal', 'Free'],
+      });
+    });
+
+    it('is just its rows while no row has a type yet (a legacy map)', () => {
+      expect(policy.readiness([row('1', null), row('2', null)], TIERS)).toEqual(
+        { rowsWithoutType: 2, ticketTypesWithoutRows: [] },
+      );
+    });
+
+    it('names every type when there is no map yet', () => {
+      expect(policy.readiness([], TIERS).ticketTypesWithoutRows).toEqual([
+        'VIP',
+        'Normal',
+        'Free',
+      ]);
+    });
+  });
 });

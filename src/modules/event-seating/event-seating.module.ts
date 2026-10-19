@@ -1,12 +1,14 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { AccessModule } from '../access/access.module';
 import { TicketingModule } from '../ticketing/ticketing.module';
 import { EventsModule } from '../events/events.module';
+import { SeatingReadinessPort } from '../events/ports/seating-readiness.port';
 import { RegistrationModule } from '../registration/registration.module';
 import { EventSeatingController } from './event-seating.controller';
 import { EventSeatingPolicy } from './event-seating.policy';
 import { EventSeatingRepository } from './event-seating.repository';
 import { EventSeatingService } from './event-seating.service';
+import { SeatingReadinessAdapter } from './seating-readiness.adapter';
 
 /**
  * Seating sub-context of Events & Program: reserved seat maps + general-admission
@@ -16,12 +18,27 @@ import { EventSeatingService } from './event-seating.service';
  * `TicketQuantityPort`: the event's ticket types, locked and given their
  * seat-derived quantities inside the seat map's own transaction), Registration
  * (`SeatOccupancyPort`: which seats are booked or held, so their row keeps its
- * type) and AccessModule (the RBAC PermissionsGuard). A leaf importer — no cycles.
+ * type) and AccessModule (the RBAC PermissionsGuard).
+ *
+ * Events and Seating depend on each other (`forwardRef`): Seating lays out an
+ * event's room through the Events service, and Events' publish gate asks
+ * Seating, through `SeatingReadinessPort` (bound here), whether every seat row
+ * has a ticket type and every ticket type a row (US-EVT-05).
  */
 @Module({
-  imports: [EventsModule, TicketingModule, RegistrationModule, AccessModule],
+  imports: [
+    forwardRef(() => EventsModule),
+    forwardRef(() => TicketingModule),
+    RegistrationModule,
+    AccessModule,
+  ],
   controllers: [EventSeatingController],
-  providers: [EventSeatingService, EventSeatingRepository, EventSeatingPolicy],
-  exports: [EventSeatingService],
+  providers: [
+    EventSeatingService,
+    EventSeatingRepository,
+    EventSeatingPolicy,
+    { provide: SeatingReadinessPort, useClass: SeatingReadinessAdapter },
+  ],
+  exports: [EventSeatingService, SeatingReadinessPort],
 })
 export class EventSeatingModule {}

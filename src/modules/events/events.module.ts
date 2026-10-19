@@ -3,6 +3,7 @@ import { AdminGuard } from '../../common/guards/admin.guard';
 import { AccessModule } from '../access/access.module';
 import { PlatformModule } from '../platform/platform.module';
 import { TicketingModule } from '../ticketing/ticketing.module';
+import { EventSeatingModule } from '../event-seating/event-seating.module';
 import { EventsController } from './events.controller';
 import { CheckoutEventPort } from '../checkout/ports/checkout-event.port';
 import { EventOrgLookupPort } from '../discounts/ports/event-org-lookup.port';
@@ -27,7 +28,10 @@ import { MeetingEventAdapter } from './meeting-event.adapter';
  * global DatabaseModule (DRIZZLE), the app-wide JwtAuthGuard (AccessModule), the
  * transactional outbox (PlatformModule, for the "event published" notice), and
  * TicketAvailabilityPort from Ticketing (the publish gate's "≥1 ticket" check) —
- * wired with `forwardRef`.
+ * wired with `forwardRef`. The publish gate also asks Seating, through
+ * `SeatingReadinessPort`, whether a reserved event's seat rows and ticket types
+ * match (US-EVT-05); Seating depends on this module's service too, so that pair
+ * is a `forwardRef` as well.
  *
  * Each event sub-domain is its own module depending on this one's service:
  * event-categories · event-program · event-seating · event-sharing ·
@@ -39,6 +43,7 @@ import { MeetingEventAdapter } from './meeting-event.adapter';
     PlatformModule,
     UploadsModule,
     forwardRef(() => TicketingModule),
+    forwardRef(() => EventSeatingModule),
   ],
   controllers: [EventsController],
   providers: [

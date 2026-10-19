@@ -4,6 +4,7 @@ import { DomainException } from '../../common/errors/domain.exception';
 import { OutboxPort } from '../platform/outbox.port';
 import { EventsRepository } from './events.repository';
 import { EventsService } from './events.service';
+import { SeatingReadinessPort } from './ports/seating-readiness.port';
 import { TicketAvailabilityPort } from './ports/ticket-availability.port';
 import type { EventRow } from './events.types';
 
@@ -25,6 +26,11 @@ function makeDeps() {
     clock: {
       now: jest.fn().mockReturnValue(NOW),
     } as unknown as jest.Mocked<Clock>,
+    seating: {
+      seatRowsReadiness: jest
+        .fn()
+        .mockResolvedValue({ rowsWithoutType: 0, ticketTypesWithoutRows: [] }),
+    } as jest.Mocked<SeatingReadinessPort>,
   };
 }
 
@@ -88,7 +94,13 @@ describe('EventsService.createDraft', () => {
       list: jest.fn(),
     } as unknown as jest.Mocked<EventsRepository>;
     const deps = makeDeps();
-    service = new EventsService(repo, deps.tickets, deps.outbox, deps.clock);
+    service = new EventsService(
+      repo,
+      deps.tickets,
+      deps.outbox,
+      deps.clock,
+      deps.seating,
+    );
   });
 
   it('slugifies the name and defaults status=draft, bucket=active, organizer from org', async () => {
@@ -216,7 +228,13 @@ describe('EventsService get/update', () => {
         ),
     } as unknown as jest.Mocked<EventsRepository>;
     const deps = makeDeps();
-    service = new EventsService(repo, deps.tickets, deps.outbox, deps.clock);
+    service = new EventsService(
+      repo,
+      deps.tickets,
+      deps.outbox,
+      deps.clock,
+      deps.seating,
+    );
   });
 
   describe('getEvent', () => {
@@ -383,7 +401,13 @@ describe('EventsService publish/unpublish', () => {
         ),
     } as unknown as jest.Mocked<EventsRepository>;
     deps = makeDeps();
-    service = new EventsService(repo, deps.tickets, deps.outbox, deps.clock);
+    service = new EventsService(
+      repo,
+      deps.tickets,
+      deps.outbox,
+      deps.clock,
+      deps.seating,
+    );
   }
 
   describe('publishEvent', () => {
@@ -473,6 +497,72 @@ describe('EventsService publish/unpublish', () => {
     });
   });
 
+  describe('publishEvent on reserved seating (US-EVT-05)', () => {
+    const reserved = eventRow({ ...ready, seatingMode: 'reserved' });
+    const refusal = async (): Promise<DomainException> =>
+      (await service
+        .publishEvent(auth, 'e1', {})
+        .catch((e: unknown) => e)) as DomainException;
+
+    beforeEach(() => build(reserved));
+
+    it('refuses while a seat row has no ticket type (422)', async () => {
+      deps.seating.seatRowsReadiness.mockResolvedValue({
+        rowsWithoutType: 1,
+        ticketTypesWithoutRows: [],
+      });
+      const err = await refusal();
+      expect(err.getStatus()).toBe(422);
+      expect(err.message).toBe(
+        'Give every seat row a ticket type before publishing.',
+      );
+      expect(deps.seating.seatRowsReadiness).toHaveBeenCalledWith(1, 'e1');
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses while a ticket type has no seat row, naming it (422)', async () => {
+      deps.seating.seatRowsReadiness.mockResolvedValue({
+        rowsWithoutType: 0,
+        ticketTypesWithoutRows: ['Free'],
+      });
+      const err = await refusal();
+      expect(err.getStatus()).toBe(422);
+      expect(err.message).toBe(
+        'Free has no seat rows. Give it a row or remove it.',
+      );
+    });
+
+    it('lists the seating refusals after the other missing items', async () => {
+      build(eventRow({ ...reserved, description: null }));
+      deps.seating.seatRowsReadiness.mockResolvedValue({
+        rowsWithoutType: 2,
+        ticketTypesWithoutRows: ['Free', 'Late'],
+      });
+      const err = await refusal();
+      expect(err.getStatus()).toBe(422);
+      expect(err.message).toBe(
+        'Cannot publish yet — please add a description. ' +
+          'Give every seat row a ticket type before publishing. ' +
+          'Free has no seat rows. Give it a row or remove it. ' +
+          'Late has no seat rows. Give it a row or remove it.',
+      );
+    });
+
+    it('publishes once every row has a type and every type a row', async () => {
+      await expect(service.publishEvent(auth, 'e1', {})).resolves.toMatchObject(
+        { status: 'upcoming' },
+      );
+    });
+
+    it('does not ask about seat rows for general admission or an online event', async () => {
+      build(ready);
+      await service.publishEvent(auth, 'e1', {});
+      build(eventRow({ ...reserved, isOnline: true }));
+      await service.publishEvent(auth, 'e1', {});
+      expect(deps.seating.seatRowsReadiness).not.toHaveBeenCalled();
+    });
+  });
+
   describe('unpublishEvent', () => {
     it('reverts a published event to a private draft and clears published_at', async () => {
       build(
@@ -524,7 +614,13 @@ describe('EventsService delete/cancel', () => {
         ),
     } as unknown as jest.Mocked<EventsRepository>;
     deps = makeDeps();
-    service = new EventsService(repo, deps.tickets, deps.outbox, deps.clock);
+    service = new EventsService(
+      repo,
+      deps.tickets,
+      deps.outbox,
+      deps.clock,
+      deps.seating,
+    );
   }
 
   describe('deleteEvent', () => {

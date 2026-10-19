@@ -10,6 +10,7 @@ import { eventPublishedEvent } from './events/event-published.event';
 import { toEventResponse } from './events.mapper';
 import { EventsRepository } from './events.repository';
 import { sanitizeDescription } from './rich-text';
+import { SeatingReadinessPort } from './ports/seating-readiness.port';
 import { TicketAvailabilityPort } from './ports/ticket-availability.port';
 import type {
   CancelEventInput,
@@ -51,6 +52,15 @@ const PUBLISH_REQUIREMENTS = {
   tickets: 'at least one ticket type',
 } as const;
 type PublishRequirement = keyof typeof PUBLISH_REQUIREMENTS;
+
+/** The reserved-seating refusal's key among the publish gaps (US-EVT-05). */
+const SEATING_GAP = 'seating' as const;
+type PublishGap = PublishRequirement | typeof SEATING_GAP;
+const RESERVED_SEATING = 'reserved';
+const UNTYPED_SEAT_ROWS =
+  'Give every seat row a ticket type before publishing.';
+const rowlessTicketType = (name: string) =>
+  `${name} has no seat rows. Give it a row or remove it.`;
 
 /**
  * The description is rich text an ORGANIZER authors and an ATTENDEE loads on a
@@ -117,6 +127,8 @@ export class EventsService {
     private readonly tickets: TicketAvailabilityPort,
     private readonly outbox: OutboxPort,
     private readonly clock: Clock,
+    @Inject(forwardRef(() => SeatingReadinessPort))
+    private readonly seating: SeatingReadinessPort,
   ) {}
 
   /** Create an event in Draft; derives a unique per-org slug and defaults. */
@@ -252,7 +264,10 @@ export class EventsService {
       throw this.staleEvent();
     }
     const gaps = await this.readinessGaps(actor.organizationId, event);
-    if (gaps.length > 0) throw this.notReady(gaps);
+    const seatGaps = await this.seatingGaps(actor.organizationId, event);
+    if (gaps.length > 0 || seatGaps.length > 0) {
+      throw this.notReady(gaps, seatGaps);
+    }
     if (this.startsInPast(event.startAt) && !input.confirmPastStart) {
       throw DomainException.validation(
         "This event's start date is already in the past. Confirm to publish it anyway.",
@@ -426,12 +441,42 @@ export class EventsService {
     return gaps;
   }
 
-  private notReady(gaps: PublishRequirement[]): DomainException {
-    const items = gaps.map((g) => PUBLISH_REQUIREMENTS[g]).join(', ');
-    return DomainException.validation(
-      `Cannot publish yet — please add ${items}.`,
-      gaps,
+  /**
+   * A reserved, in-person event publishes only once every seat row has a
+   * ticket type and every ticket type a row (US-EVT-05). Only drafts reach
+   * here, so an event already published is never re-checked — but a draft
+   * whose map was laid out before rows had types must type them first.
+   */
+  private async seatingGaps(
+    organizationId: number,
+    e: EventRow,
+  ): Promise<string[]> {
+    if (e.seatingMode !== RESERVED_SEATING || e.isOnline) return [];
+    const readiness = await this.seating.seatRowsReadiness(
+      organizationId,
+      e.id,
     );
+    return [
+      ...(readiness.rowsWithoutType > 0 ? [UNTYPED_SEAT_ROWS] : []),
+      ...readiness.ticketTypesWithoutRows.map(rowlessTicketType),
+    ];
+  }
+
+  /** One 422 naming everything still missing, the seating sentences last. */
+  private notReady(
+    gaps: PublishRequirement[],
+    seatGaps: string[],
+  ): DomainException {
+    const items = gaps.map((g) => PUBLISH_REQUIREMENTS[g]).join(', ');
+    const sentences = [
+      ...(gaps.length > 0 ? [`Cannot publish yet — please add ${items}.`] : []),
+      ...seatGaps,
+    ];
+    const details: PublishGap[] = [
+      ...gaps,
+      ...(seatGaps.length > 0 ? [SEATING_GAP] : []),
+    ];
+    return DomainException.validation(sentences.join(' '), details);
   }
 
   private startsInPast(startAt: Date): boolean {
