@@ -5,7 +5,7 @@ import { SeatHoldRepository } from './seat-hold.repository';
 
 /**
  * Registration's implementation of Ticketing's `TicketSeatsPort` (US-EVT-05):
- * how many seats of an event's map each ticket type's rows hold, read from the
+ * how many seats of an event's map each ticket type holds, read from the
  * same seat map the checkout draws.
  */
 @Injectable()

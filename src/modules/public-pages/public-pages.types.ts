@@ -8,8 +8,9 @@ export interface PublicPage {
   speakers: PublicSpeaker[];
   tickets: PublicTicket[];
   /**
-   * How a reserved room's rows are split between the tickets (US-PAGE-05).
-   * Null for general admission, online, or a map whose rows have no types.
+   * How a reserved room's seats are split between the tickets, row by row
+   * (US-PAGE-05). Null for general admission, online, or a map none of whose
+   * seats has a type.
    */
   seatMap: PublicSeatMap | null;
   faqs: PublicFaq[];

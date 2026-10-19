@@ -291,7 +291,7 @@ export class SeatHoldRepository {
 
   /**
    * Seats per ticket type on the event's live seat map; a type with none is
-   * absent. On a reserved event whose rows have types this is each type's
+   * absent. On a reserved event whose seats have types this is each type's
    * quantity (US-EVT-05).
    */
   async seatsByTicketType(

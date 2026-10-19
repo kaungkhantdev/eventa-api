@@ -1,4 +1,4 @@
-/** One seat row of the public seat map and the ticket types its seats sell. */
+/** One row of the public seat map and the ticket types its seats sell. */
 export interface PublicSeatRow {
   /** The row's number as stored: "1", "2", … */
   label: string;

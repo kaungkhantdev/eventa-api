@@ -1,14 +1,14 @@
 import type { Tx } from '../../../db/tenant';
 
-/** A live ticket type a seat row can be given (US-EVT-05). */
+/** A live ticket type a seat can be given (US-EVT-05). */
 export interface SeatTier {
   id: string;
   name: string;
 }
 
 /**
- * Seating's way to read the ticket types its rows sell, and to make each one's
- * quantity the seats its rows hold, INSIDE the seat map's own transaction — so
+ * Seating's way to read the ticket types its seats sell, and to make each
+ * one's quantity the seats it holds, INSIDE the seat map's own transaction — so
  * the seats and the quantities commit or roll back together (US-EVT-05). Seating
  * owns the abstraction; Ticketing binds the adapter, because `ticket_types` is
  * its table and only it knows what a quantity below `sold` means. Same shape as
@@ -24,7 +24,7 @@ export abstract class TicketQuantityPort {
 
   /**
    * Sets every live ticket type's quantity to its seats (0 for one with no
-   * rows) and re-derives its status. Throws a 409 when that would leave a type
+   * seats) and re-derives its status. Throws a 409 when that would leave a type
    * with fewer seats than it has sold, which rolls the whole save back.
    */
   abstract setSeatQuantitiesIn(

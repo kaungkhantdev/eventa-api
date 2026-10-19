@@ -11,9 +11,9 @@ import type { TicketRow } from './ticketing.types';
 
 /**
  * Ticketing's implementation of Seating's `TicketQuantityPort` (US-EVT-05): on
- * a reserved event whose rows have ticket types, each type's quantity is the
- * seats its rows hold, written in the seat map's own transaction. The status is
- * re-derived exactly as a quantity edit re-derives it, so more rows put a
+ * a reserved event whose seats have ticket types, each type's quantity is the
+ * seats it holds, written in the seat map's own transaction. The status is
+ * re-derived exactly as a quantity edit re-derives it, so more seats put a
  * sold-out type back on sale and fewer can sell one out.
  */
 @Injectable()

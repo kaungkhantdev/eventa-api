@@ -2,9 +2,9 @@ import type { Tx } from '../../../db/tenant';
 
 /**
  * Ticketing asks Registration how many seats of an event's reserved map each
- * ticket type's rows hold (US-EVT-05) — on a reserved event whose rows have
- * types, that IS the type's quantity, so Ticketing shows it read-only and
- * refuses to retire a type that still sells rows. Registration binds the
+ * ticket type holds (US-EVT-05) — on a reserved event whose seats have types,
+ * that IS the type's quantity, so Ticketing shows it read-only and refuses to
+ * retire a type that still sells seats. Registration binds the
  * adapter: it already reads the seat map for the checkout, and Seating (which
  * owns the seats) depends on Ticketing, so it cannot answer without a cycle.
  * Ticketing and Registration are already wired both ways (`forwardRef`).
@@ -23,7 +23,7 @@ export abstract class TicketSeatsPort {
   ): Promise<Set<string>>;
 
   /**
-   * The seats whose row sells `ticketTypeId`, read inside the caller's
+   * The seats that sell `ticketTypeId`, read inside the caller's
    * transaction — the type's removal, under its lock (US-TKT-05).
    */
   abstract seatsOfTicketTypeIn(

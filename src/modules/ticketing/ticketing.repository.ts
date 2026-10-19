@@ -271,10 +271,10 @@ export class TicketingRepository {
   /**
    * Lock the tier `FOR UPDATE`, then let `guard` judge its removal in the same
    * transaction. A seat map's save locks the event's tiers before it gives a
-   * row a type (US-EVT-05), so the two take turns: the guard sees any row a
+   * seat a type (US-EVT-05), so the two take turns: the guard sees any seat a
    * save gave this tier, and a save that comes second no longer finds it.
    * Judged before the lock, a save could slip in between, and the seats'
-   * foreign key (`ON DELETE SET NULL`) would quietly clear that row's type.
+   * foreign key (`ON DELETE SET NULL`) would quietly clear those seats' type.
    */
   private async lockForRemoval(
     tx: Tx,

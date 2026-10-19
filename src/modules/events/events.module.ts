@@ -29,7 +29,7 @@ import { MeetingEventAdapter } from './meeting-event.adapter';
  * transactional outbox (PlatformModule, for the "event published" notice), and
  * TicketAvailabilityPort from Ticketing (the publish gate's "≥1 ticket" check) —
  * wired with `forwardRef`. The publish gate also asks Seating, through
- * `SeatingReadinessPort`, whether a reserved event's seat rows and ticket types
+ * `SeatingReadinessPort`, whether a reserved event's seats and ticket types
  * match (US-EVT-05); Seating depends on this module's service too, so that pair
  * is a `forwardRef` as well.
  *

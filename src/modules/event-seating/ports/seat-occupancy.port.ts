@@ -2,8 +2,8 @@ import type { Tx } from '../../../db/tenant';
 
 /**
  * Seating asks Registration which seats are taken right now, inside the seat
- * map's own transaction, so a row whose seats somebody booked or is checking out
- * with keeps its ticket type (US-EVT-05). Registration binds the adapter: the
+ * map's own transaction, so a seat somebody booked or is checking out with
+ * keeps its ticket type (US-EVT-05). Registration binds the adapter: the
  * seat holds and seat assignments are its tables.
  */
 export abstract class SeatOccupancyPort {

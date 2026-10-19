@@ -41,11 +41,15 @@ export class PublicPagesController {
   @ResponseMessage('Event page retrieved.')
   @ApiOkResponse({
     description:
-      'The full public page payload. `seatMap` is `{ seatsPerRow, rows: [{ label, ticketTypeId }] }` — ' +
-      'every seat row in row-number order with the ticket type it sells (one of `tickets[].id`; ' +
-      'null for a row with no type) — for an in-person, reserved event whose rows have ticket ' +
-      'types, and null for general admission, online, or a map with no typed row (US-PAGE-05). ' +
-      'It carries no seat status, holds or sales.',
+      'The full public page payload. `seatMap` is ' +
+      '`{ seatsPerRow, rows: [{ label, ticketTypeId, seatTicketTypes }] }` — every seat row in ' +
+      "row-number order. `seatTicketTypes` is each seat's ticket type in seat-number order " +
+      '(index 0 = seat 1; one of `tickets[].id`, or null for a seat with no type). ' +
+      "`ticketTypeId` is the row's type when every seat of it shares one, and null when its " +
+      'seats sell different types or none — so a row split between Free and Normal reads null. ' +
+      'Set for an in-person, reserved event once any seat has a ticket type (a partly typed row ' +
+      'counts), and null for general admission, online, or a map with no typed seat ' +
+      '(US-PAGE-05). It carries no seat status, holds or sales.',
   })
   getPage(@Param('slug') slug: string): Promise<PublicPage> {
     return this.pages.getPage(slug);

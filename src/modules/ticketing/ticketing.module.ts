@@ -35,7 +35,7 @@ import { InventoryInsightsAdapter } from './inventory-insights.adapter';
  * `WaitlistOffersPort` so the new places go to the waitlist (US-REG-04) —
  * Ticketing never reads orders or holds seats itself.
  *
- * Seating reads and sets the tiers its rows sell through `TicketQuantityPort`
+ * Seating reads and sets the tiers its seats sell through `TicketQuantityPort`
  * (US-EVT-05), inside the seat map's transaction; Seating imports this module,
  * not the other way round.
  */

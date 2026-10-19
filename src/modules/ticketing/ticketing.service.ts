@@ -71,7 +71,7 @@ export class TicketingService {
 
     const isFree = input.isFree ?? false;
     const priceSatang = isFree ? 0 : (input.priceSatang ?? 0);
-    // Where the seat map sets quantities, a new type has no rows yet: 0 seats.
+    // Where the seat map sets quantities, a new type has no seats yet: 0.
     const total = seats ? 0 : (input.total ?? 0);
     const minPerOrder = input.minPerOrder ?? 1;
     const maxPerOrder = input.maxPerOrder ?? MAX_SEATS_PER_BOOKING;

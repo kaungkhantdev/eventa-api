@@ -26,8 +26,8 @@ import { TicketEligibilityPolicy } from './ticket-eligibility.policy';
  *   · Ticketing → Registration: `CheckoutActivityPort`, "is anyone mid-checkout
  *     with this tier?" — so retiring one never yanks inventory from a buyer
  *     who is paying (US-TKT-05). Registration binds the adapter here.
- *   · Ticketing → Registration: `TicketSeatsPort`, "how many seats do this
- *     event's rows give each tier?" — on a reserved event whose rows have
+ *   · Ticketing → Registration: `TicketSeatsPort`, "how many of this event's
+ *     seats does each tier hold?" — on a reserved event whose seats have
  *     ticket types that is the tier's quantity (US-EVT-05).
  *
  * It also answers Seating's `SeatOccupancyPort` ("which of these seats are
