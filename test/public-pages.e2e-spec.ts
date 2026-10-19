@@ -195,6 +195,25 @@ describe('Public event page (e2e — US-PAGE-01…08)', () => {
     expect(free?.priceLabel).toBe('Free');
   });
 
+  // As the speakers above: ids and names both sort apart from the order of
+  // entry. Copper and Bronze share a moment, so their ids settle it — as the
+  // wizard's list does, so a ticket keeps its colour on both (US-EVT-05).
+  it('US-PAGE-05: tickets render in the order the organizer added them', async () => {
+    await pool.query(
+      `INSERT INTO ticket_types (id, organization_id, event_id, name, price_satang, is_free, total, created_at)
+       VALUES ('cccccccc-0000-4000-8000-000000000011',$1,$2,'Gold',90000,false,10, now() - interval '3 minutes'),
+              ('eeeeeeee-0000-4000-8000-000000000012',$1,$2,'Silver',60000,false,10, now() - interval '2 minutes'),
+              ('bbbbbbbb-0000-4000-8000-000000000013',$1,$2,'Bronze',30000,false,10, now() - interval '1 minute'),
+              ('aaaaaaaa-0000-4000-8000-000000000014',$1,$2,'Copper',10000,false,10, now() - interval '1 minute')`,
+      [orgId, liveId],
+    );
+    const p = ((await page(LIVE)).body as Success<Page>).data;
+    const added = ['Gold', 'Silver', 'Bronze', 'Copper'];
+    expect(
+      p.tickets.map((t) => t.name).filter((n) => added.includes(n)),
+    ).toEqual(['Gold', 'Silver', 'Copper', 'Bronze']);
+  });
+
   it('US-PAGE-05: an urgency line appears when few remain', async () => {
     await pool.query(
       `INSERT INTO ticket_types (organization_id, event_id, name, price_satang, is_free, total, sold)

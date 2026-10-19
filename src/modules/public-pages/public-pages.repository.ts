@@ -138,6 +138,11 @@ export class PublicPagesRepository {
       .orderBy(asc(speakers.createdAt), asc(speakers.id));
   }
 
+  /**
+   * In the order they were added (US-PAGE-05), ties by id — as the wizard
+   * lists them, so a ticket's seat colour, which follows that order, is the
+   * same on both (US-EVT-05). Ids are random UUIDs, so alone they are no order.
+   */
   tickets(eventId: string) {
     return this.db
       .select({
@@ -158,6 +163,6 @@ export class PublicPagesRepository {
       .where(
         and(eq(ticketTypes.eventId, eventId), isNull(ticketTypes.deletedAt)),
       )
-      .orderBy(asc(ticketTypes.id));
+      .orderBy(asc(ticketTypes.createdAt), asc(ticketTypes.id));
   }
 }
