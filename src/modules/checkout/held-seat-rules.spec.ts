@@ -12,6 +12,7 @@ function check(o: Partial<HeldSeatsCheck>): HeldSeatsCheck {
       [32, NORMAL],
     ]),
     ticketTypeId: NORMAL,
+    mapTyped: true,
     ...o,
   };
 }
@@ -30,9 +31,23 @@ describe('heldSeatsMatch (US-DISC-04)', () => {
             [32, null],
           ]),
           ticketTypeId: VIP,
+          mapTyped: false,
         }),
       ),
     ).toBe(true);
+  });
+
+  it('refuses an untyped seat once the map gives seats types (US-EVT-05)', () => {
+    expect(
+      heldSeatsMatch(
+        check({
+          seatTypes: new Map([
+            [31, NORMAL],
+            [32, null],
+          ]),
+        }),
+      ),
+    ).toBe(false);
   });
 
   it('refuses holds on other seats than the ones priced — a VIP seat held, a Normal one priced', () => {

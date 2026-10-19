@@ -21,6 +21,7 @@ import {
   organizations,
   seatAssignments,
   seatHolds,
+  seatMaps,
   seats,
   ticketTypes,
   tickets,
@@ -1496,9 +1497,10 @@ export class CheckoutRepository {
   /**
    * A reserved order is seated from its holds (a paid one when the money
    * lands) but priced from the seats the request named, so the two must be the
-   * same seats, each of this order's ticket type — or a buyer could hold a VIP
-   * seat and pay the Normal price for it. Plain reads, no locks: a row with an
-   * active hold cannot change type (US-EVT-05), so neither answer can move.
+   * same seats, each selling under this order's ticket type — or a buyer could
+   * hold a VIP seat and pay the Normal price for it. Plain reads, no locks: a
+   * row with an active hold cannot change type (US-EVT-05), so neither answer
+   * can move.
    */
   private async assertHeldSeatsMatch(
     tx: Tx,
@@ -1529,9 +1531,36 @@ export class CheckoutRepository {
       heldSeatIds: held.flatMap((h) => (h.seatId === null ? [] : [h.seatId])),
       seatTypes: new Map(priced.map((s) => [s.id, s.ticketTypeId])),
       ticketTypeId: input.ticketTypeId,
+      mapTyped: await this.mapHasTypedSeats(
+        tx,
+        input.organizationId,
+        input.eventId,
+      ),
     });
     if (match) return;
     throw DomainException.conflict('Your seats changed. Please choose again.');
+  }
+
+  /** Whether any seat of the event's map has a ticket type (US-EVT-05). */
+  private async mapHasTypedSeats(
+    tx: Tx,
+    organizationId: number,
+    eventId: string,
+  ): Promise<boolean> {
+    const [typed] = await tx
+      .select({ id: seats.id })
+      .from(seats)
+      .innerJoin(seatMaps, eq(seats.seatMapId, seatMaps.id))
+      .where(
+        and(
+          eq(seats.organizationId, organizationId),
+          eq(seatMaps.eventId, eventId),
+          isNull(seatMaps.deletedAt),
+          isNotNull(seats.ticketTypeId),
+        ),
+      )
+      .limit(1);
+    return typed !== undefined;
   }
 
   /** This buyer's entry for this ticket, if they are already in line. */

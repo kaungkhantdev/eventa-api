@@ -45,7 +45,7 @@ describe('Confirming a registration (e2e — US-DISC-06)', () => {
     events: Record<string, string>;
     tiers: Record<string, string>;
     seats: number[];
-    split: { vip: number[]; normal: number[] };
+    split: { vip: number[]; normal: number[]; untyped: number[] };
   };
   let keySeq = 0;
 
@@ -586,6 +586,20 @@ describe('Confirming a registration (e2e — US-DISC-06)', () => {
       );
     });
 
+    it('refuses to hold a seat with no ticket type once rows have types (422)', async () => {
+      const res = await request(server)
+        .post('/api/v1/public/checkout/hold')
+        .send({
+          eventId: ids.events[SPLIT],
+          ticketTypeId: ids.tiers.normal,
+          seatIds: ids.split.untyped,
+        });
+      expect(res.status).toBe(422);
+      expect((res.body as { message: string }).message).toBe(
+        "Those seats aren't on sale. Please choose different seats.",
+      );
+    });
+
     it('refuses to confirm a held VIP seat as a Normal order (409) — nothing is placed', async () => {
       const vipHold = await splitHold(ids.tiers.vip, [ids.split.vip[0]]);
       const res = await confirm({
@@ -686,7 +700,7 @@ async function seed(pool: Pool): Promise<{
   events: Record<string, string>;
   tiers: Record<string, string>;
   seats: number[];
-  split: { vip: number[]; normal: number[] };
+  split: { vip: number[]; normal: number[]; untyped: number[] };
 }> {
   const org = await pool.query<{ id: string }>(
     `INSERT INTO organizations (name, slug, vat_rate, service_fee_rate)
@@ -744,10 +758,11 @@ async function seed(pool: Pool): Promise<{
     price: 890 * BAHT,
     total: 2,
   });
-  // Row 1 sells VIP, row 2 Normal (US-EVT-05).
+  // Row 1 sells VIP, row 2 Normal (US-EVT-05); row 3 was left without a type.
   const split = {
     vip: await insertSeats(pool, orgId, events[SPLIT], tiers.vip, '1', 2),
     normal: await insertSeats(pool, orgId, events[SPLIT], tiers.normal, '2', 2),
+    untyped: await insertSeats(pool, orgId, events[SPLIT], null, '3', 1),
   };
   return { orgId, events, tiers, seats, split };
 }
@@ -791,7 +806,7 @@ async function insertSeats(
   pool: Pool,
   orgId: number,
   eventId: string,
-  ticketTypeId: string,
+  ticketTypeId: string | null,
   rowLabel = 'A',
   count = 4,
 ): Promise<number[]> {

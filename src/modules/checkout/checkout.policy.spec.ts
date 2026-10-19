@@ -166,12 +166,11 @@ describe('CheckoutPolicy (US-DISC-04)', () => {
     });
 
     /*
-     * US-DISC-04: "I can pick up to 8 available seats from a seat map". The
-     * organizer lays a reserved map out as rows × seats-per-row (US-EVT-05)
-     * and never gives a seat a tier, so every seat the console makes has none.
-     * Refusing those refused every seat of every reserved event.
+     * US-DISC-04: "I can pick up to 8 available seats from a seat map". A map
+     * laid out before rows had ticket types (US-EVT-05) has no typed seat at
+     * all; refusing those seats refused every seat of every such event.
      */
-    it('takes a seat with no ticket type under whichever tier is being bought', () => {
+    it('takes a seat with no ticket type under whichever tier is being bought, on a map with no typed seat', () => {
       const seats = [
         seat(1, { ticketTypeId: null }),
         seat(2, { ticketTypeId: null }),
@@ -182,6 +181,19 @@ describe('CheckoutPolicy (US-DISC-04)', () => {
       expect(
         policy.resolveSeats(seats, [2], OTHER_TIER).map((s) => s.id),
       ).toEqual([2]);
+    });
+
+    /*
+     * US-EVT-05: once rows have ticket types, a seat with none is not on sale —
+     * it would otherwise sell at whichever price the buyer picked.
+     */
+    it('refuses a seat with no ticket type once the map gives seats types (422)', () => {
+      const seats = [seat(1), seat(2, { ticketTypeId: null })];
+      const err = thrown(() => policy.resolveSeats(seats, [2], TIER));
+      expect((err as DomainException).getStatus()).toBe(422);
+      expect(message(err)).toBe(
+        "Those seats aren't on sale. Please choose different seats.",
+      );
     });
 
     it('refuses a seat someone else has already taken', () => {
