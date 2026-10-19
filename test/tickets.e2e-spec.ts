@@ -135,6 +135,33 @@ describe('Ticket types (e2e — US-EVT-06)', () => {
     expect(names).toEqual(expect.arrayContaining(['VIP', 'Free']));
   });
 
+  // Student and Standard were added in one moment, so their ids settle it —
+  // the order the public page uses, so a ticket keeps its seat colour on
+  // both (US-EVT-05). Each id sorts apart from the order of entry.
+  it('lists the tiers in the order they were added, ties by id', async () => {
+    const jwt = await token(ADMIN, ORG.slug);
+    const ordered = await createEvent(jwt, 'Ordered Event');
+    await pool.query(
+      `INSERT INTO ticket_types (id, organization_id, event_id, name, price_satang, is_free, total, created_at)
+       SELECT v.id::uuid, e.organization_id, e.id, v.name, 50000, false, 10, now() - v.age::interval
+         FROM events e,
+              (VALUES ('ffffffff-0000-4000-8000-000000000021','Early bird','2 minutes'),
+                      ('bbbbbbbb-0000-4000-8000-000000000022','Standard','1 minute'),
+                      ('aaaaaaaa-0000-4000-8000-000000000023','Student','1 minute'))
+                AS v(id, name, age)
+        WHERE e.id = $1`,
+      [ordered],
+    );
+    const res = await request(server)
+      .get(`/api/v1/events/${ordered}/tickets`)
+      .set('Authorization', `Bearer ${jwt}`);
+    expect((res.body as Success<Ticket[]>).data.map((t) => t.name)).toEqual([
+      'Early bird',
+      'Student',
+      'Standard',
+    ]);
+  });
+
   it('rejects lowering total below what has already sold (422)', async () => {
     const jwt = await token(ADMIN, ORG.slug);
     const created = await createTicket(jwt, { name: 'Early Bird', total: 100 });

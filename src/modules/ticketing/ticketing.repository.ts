@@ -61,6 +61,10 @@ export class TicketingRepository {
     });
   }
 
+  /**
+   * In the order they were added, ties by id — the public page's order too, so
+   * a ticket's seat colour is the same in the wizard and on the page (US-EVT-05).
+   */
   async listByEvent(
     organizationId: number,
     eventId: string,
@@ -76,7 +80,7 @@ export class TicketingRepository {
             isNull(ticketTypes.deletedAt),
           ),
         )
-        .orderBy(asc(ticketTypes.createdAt)),
+        .orderBy(asc(ticketTypes.createdAt), asc(ticketTypes.id)),
     );
   }
 
