@@ -7,8 +7,9 @@ import { EventsRepository } from './events.repository';
 
 /**
  * Events' implementation of Ticketing's `EventLookupPort` — it reads the `events`
- * table (which it owns) and hands back only ids and names, so the cross-event
- * ticket inventory can label and search tiers without ever joining events.
+ * table (which it owns) and hands back only ids, names and seating modes, so the
+ * cross-event ticket inventory can label and search tiers without ever joining
+ * events.
  */
 @Injectable()
 export class EventLookupAdapter extends EventLookupPort {

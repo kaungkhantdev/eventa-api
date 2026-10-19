@@ -1,11 +1,13 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { CheckoutActivityPort } from '../ticketing/ports/checkout-activity.port';
+import { TicketSeatsPort } from '../ticketing/ports/ticket-seats.port';
 import { TicketingModule } from '../ticketing/ticketing.module';
 import { SeatMapPort } from '../checkout/ports/seat-map.port';
 import { SeatOccupancyPort } from '../event-seating/ports/seat-occupancy.port';
 import { CheckoutActivityAdapter } from './checkout-activity.adapter';
 import { SeatMapAdapter } from './seat-map.adapter';
 import { SeatOccupancyAdapter } from './seat-occupancy.adapter';
+import { TicketSeatsAdapter } from './ticket-seats.adapter';
 import { SeatHoldRepository } from './seat-hold.repository';
 import { SeatHoldService } from './seat-hold.service';
 import { TicketEligibilityPolicy } from './ticket-eligibility.policy';
@@ -24,6 +26,9 @@ import { TicketEligibilityPolicy } from './ticket-eligibility.policy';
  *   · Ticketing → Registration: `CheckoutActivityPort`, "is anyone mid-checkout
  *     with this tier?" — so retiring one never yanks inventory from a buyer
  *     who is paying (US-TKT-05). Registration binds the adapter here.
+ *   · Ticketing → Registration: `TicketSeatsPort`, "how many seats do this
+ *     event's rows give each tier?" — on a reserved event whose rows have
+ *     ticket types that is the tier's quantity (US-EVT-05).
  *
  * It also answers Seating's `SeatOccupancyPort` ("which of these seats are
  * booked or held?", US-EVT-05) from the same holds and assignments — Seating
@@ -38,6 +43,7 @@ import { TicketEligibilityPolicy } from './ticket-eligibility.policy';
     { provide: CheckoutActivityPort, useClass: CheckoutActivityAdapter },
     { provide: SeatMapPort, useClass: SeatMapAdapter },
     { provide: SeatOccupancyPort, useClass: SeatOccupancyAdapter },
+    { provide: TicketSeatsPort, useClass: TicketSeatsAdapter },
   ],
   exports: [
     SeatHoldService,
@@ -45,6 +51,7 @@ import { TicketEligibilityPolicy } from './ticket-eligibility.policy';
     CheckoutActivityPort,
     SeatMapPort,
     SeatOccupancyPort,
+    TicketSeatsPort,
   ],
 })
 export class RegistrationModule {}

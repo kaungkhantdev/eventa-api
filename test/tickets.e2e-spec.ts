@@ -31,6 +31,7 @@ interface Ticket {
   vatSatang: number;
   total: number;
   status: string;
+  quantityFromSeats: boolean;
 }
 
 describe('Ticket types (e2e — US-EVT-06)', () => {
@@ -520,6 +521,151 @@ describe('Ticket types (e2e — US-EVT-06)', () => {
       .set('Authorization', `Bearer ${jwt}`);
     expect(res.status).toBe(409);
     expect((res.body as { message: string }).message).toMatch(/pause/i);
+  });
+
+  describe('on a reserved event whose rows have ticket types (US-EVT-05)', () => {
+    let gala: string;
+    let vip: string;
+    let normal: string;
+    let jwt: string;
+
+    const tickets = (id: string) =>
+      request(server)
+        .get(`/api/v1/events/${id}/tickets`)
+        .set('Authorization', `Bearer ${jwt}`);
+    const patch = (ticketId: string, body: Record<string, unknown>) =>
+      request(server)
+        .patch(`/api/v1/events/${gala}/tickets/${ticketId}`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send(body);
+    const add = async (id: string, body: Record<string, unknown>) => {
+      const res = await request(server)
+        .post(`/api/v1/events/${id}/tickets`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send(body)
+        .expect(201);
+      return (res.body as Success<Ticket>).data;
+    };
+
+    beforeAll(async () => {
+      jwt = await token(ADMIN, ORG.slug);
+      gala = await createEvent(jwt, 'Seat Rows Gala');
+      vip = (await add(gala, { name: 'VIP', priceSatang: 250000, total: 100 }))
+        .id;
+      normal = (
+        await add(gala, { name: 'Normal', priceSatang: 89000, total: 100 })
+      ).id;
+      // 4 rows × 3 seats: rows 1 VIP, rows 2–4 Normal.
+      await request(server)
+        .put(`/api/v1/events/${gala}/seating/reserved`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({
+          name: 'Hall',
+          rows: 4,
+          seatsPerRow: 3,
+          rowTicketTypes: [vip, normal, normal, normal],
+        })
+        .expect(200);
+    });
+
+    it('lists each quantity as its seats, set by the seat map', async () => {
+      const res = await tickets(gala).expect(200);
+      const list = res.body as Success<Ticket[]>;
+      expect(
+        list.data.map((t) => [t.name, t.total, t.quantityFromSeats]),
+      ).toEqual([
+        ['VIP', 3, true],
+        ['Normal', 9, true],
+      ]);
+    });
+
+    it('refuses a different quantity (409) but saves the same one with other changes', async () => {
+      const refused = await patch(normal, { total: 100 });
+      expect(refused.status).toBe(409);
+      expect((refused.body as { message: string }).message).toBe(
+        "This event's ticket quantities come from its seat map. Give rows to a ticket type instead.",
+      );
+      const saved = await patch(normal, { total: 9, name: 'Standard' });
+      expect(saved.status).toBe(200);
+      expect((saved.body as Success<Ticket>).data).toMatchObject({
+        name: 'Standard',
+        total: 9,
+        quantityFromSeats: true,
+      });
+      // 3 seats, 8 per order: still editable — the rows set the quantity.
+      await patch(vip, { name: 'VIP Lounge' }).expect(200);
+    });
+
+    it('starts a new ticket type at 0 seats until it gets rows', async () => {
+      const late = await add(gala, {
+        name: 'Late',
+        priceSatang: 50000,
+        total: 40,
+      });
+      expect(late).toMatchObject({ total: 0, quantityFromSeats: true });
+      // A type with no rows can go.
+      await request(server)
+        .delete(`/api/v1/events/${gala}/tickets/${late.id}`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .expect(200);
+    });
+
+    it('refuses to delete a type that still has seat rows (409)', async () => {
+      const res = await request(server)
+        .delete(`/api/v1/events/${gala}/tickets/${vip}`)
+        .set('Authorization', `Bearer ${jwt}`);
+      expect(res.status).toBe(409);
+      expect((res.body as { message: string }).message).toBe(
+        'VIP Lounge still has seat rows. Give them to another ticket type first.',
+      );
+      await tickets(gala)
+        .expect(200)
+        .then((r) =>
+          expect(
+            (r.body as Success<Ticket[]>).data.map((t) => t.name),
+          ).toContain('VIP Lounge'),
+        );
+    });
+
+    it('marks them in the cross-event inventory, and nothing else', async () => {
+      const res = await request(server)
+        .get(`/api/v1/tickets?limit=100`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .expect(200);
+      const items = (
+        res.body as Success<
+          { eventId: string; name: string; quantityFromSeats: boolean }[]
+        >
+      ).data;
+      const onGala = items.filter((t) => t.eventId === gala);
+      expect(onGala.map((t) => t.quantityFromSeats)).toEqual([true, true]);
+      const elsewhere = items.filter((t) => t.eventId !== gala);
+      expect(elsewhere.length).toBeGreaterThan(0);
+      expect(elsewhere.every((t) => !t.quantityFromSeats)).toBe(true);
+    });
+
+    it('keeps typed quantities on a reserved map with no typed rows', async () => {
+      const legacy = await createEvent(jwt, 'Untyped Rows Hall');
+      const any = await add(legacy, {
+        name: 'Any seat',
+        priceSatang: 10000,
+        total: 50,
+      });
+      await request(server)
+        .put(`/api/v1/events/${legacy}/seating/reserved`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({ name: 'Hall', rows: 2, seatsPerRow: 2 })
+        .expect(200);
+      const res = await request(server)
+        .patch(`/api/v1/events/${legacy}/tickets/${any.id}`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({ total: 60 })
+        .expect(200);
+      expect((res.body as Success<Ticket>).data).toMatchObject({
+        total: 60,
+        quantityFromSeats: false,
+      });
+    });
   });
 
   it('refuses to delete the last remaining tier but allows others', async () => {

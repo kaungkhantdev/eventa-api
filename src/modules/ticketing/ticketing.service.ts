@@ -8,6 +8,7 @@ import { EventsService } from '../events/events.service';
 import { TicketResponseDto } from './dto/ticket-response.dto';
 import type { UpdatedTicketResponseDto } from './dto/updated-ticket-response.dto';
 import { CheckoutActivityPort } from './ports/checkout-activity.port';
+import { TicketSeatsPort } from './ports/ticket-seats.port';
 import {
   type WaitlistOfferOutcome,
   WaitlistOffersPort,
@@ -39,6 +40,12 @@ const UPDATABLE_KEYS: (keyof NewTicketValues & keyof UpdateTicketInput)[] = [
 
 const WAITLIST_OFFER_FAILED =
   'Raised a ticket allocation, but offering the new places to its waitlist failed';
+/**
+ * The seats each ticket type's rows hold, on a reserved event whose rows have
+ * types (US-EVT-05) — null on any other event, whose quantities are typed.
+ */
+type SeatQuantities = ReadonlyMap<string, number> | null;
+
 /** No new places, so nothing was offered and nothing went wrong. */
 const NOTHING_TO_OFFER: WaitlistOfferOutcome = {
   offered: 0,
@@ -57,6 +64,7 @@ export class TicketingService {
     private readonly clock: Clock,
     private readonly checkout: CheckoutActivityPort,
     private readonly waitlist: WaitlistOffersPort,
+    private readonly seats: TicketSeatsPort,
   ) {}
 
   async createTicket(
@@ -64,13 +72,14 @@ export class TicketingService {
     eventId: string,
     input: CreateTicketInput,
   ): Promise<TicketResponseDto> {
-    await this.events.getEvent(actor, eventId); // 404 if not in the caller's org
+    const seats = await this.seatQuantities(actor, eventId); // 404 if not in the org
     const name = input.name.trim();
     await this.assertNameFree(actor.organizationId, eventId, name);
 
     const isFree = input.isFree ?? false;
     const priceSatang = isFree ? 0 : (input.priceSatang ?? 0);
-    const total = input.total ?? 0;
+    // Where the seat map sets quantities, a new type has no rows yet: 0 seats.
+    const total = seats ? 0 : (input.total ?? 0);
     const minPerOrder = input.minPerOrder ?? 1;
     const maxPerOrder = input.maxPerOrder ?? MAX_SEATS_PER_BOOKING;
     const salesStartAt = input.salesStartAt ?? null;
@@ -98,17 +107,18 @@ export class TicketingService {
       salesStartAt,
       salesEndAt,
     };
-    return this.respond(actor.organizationId, await this.repo.insert(values));
+    const row = await this.repo.insert(values);
+    return this.respond(actor.organizationId, row, seats !== null);
   }
 
   async listTickets(
     actor: EventActor,
     eventId: string,
   ): Promise<TicketResponseDto[]> {
-    await this.events.getEvent(actor, eventId);
+    const seats = await this.seatQuantities(actor, eventId);
     const rows = await this.repo.listByEvent(actor.organizationId, eventId);
     const rate = await this.repo.orgVatRate(actor.organizationId);
-    return rows.map((r) => toTicketResponse(r, rate));
+    return rows.map((r) => toTicketResponse(r, rate, seats !== null));
   }
 
   async updateTicket(
@@ -117,11 +127,18 @@ export class TicketingService {
     ticketId: string,
     input: UpdateTicketInput,
   ): Promise<UpdatedTicketResponseDto> {
+    const seats = await this.seatQuantities(actor, eventId);
     const ticket = await this.load(actor.organizationId, eventId, ticketId);
     if (input.version !== undefined && input.version !== ticket.version) {
       throw this.stale();
     }
     this.policy.assertChangeAllowedAfterSales(ticket, input);
+    if (seats) {
+      this.policy.assertQuantityFromSeats(
+        input.total,
+        seats.get(ticketId) ?? 0,
+      );
+    }
     await this.assertRenameAllowed(
       actor.organizationId,
       eventId,
@@ -137,6 +154,7 @@ export class TicketingService {
       merged.minPerOrder,
       merged.maxPerOrder,
       merged.total,
+      seats !== null,
     );
 
     const updated = await this.repo.update(
@@ -150,7 +168,12 @@ export class TicketingService {
       ticket.version,
     );
     if (!updated) throw this.stale();
-    return this.respondToUpdate(actor.organizationId, ticket, updated);
+    return this.respondToUpdate(
+      actor.organizationId,
+      ticket,
+      updated,
+      seats !== null,
+    );
   }
 
   /**
@@ -162,6 +185,7 @@ export class TicketingService {
     organizationId: number,
     before: TicketRow,
     after: TicketRow,
+    quantityFromSeats: boolean,
   ): Promise<UpdatedTicketResponseDto> {
     const outcome = await this.offerRaisedPlaces(organizationId, before, after);
     const current =
@@ -169,7 +193,7 @@ export class TicketingService {
         ? await this.load(organizationId, after.eventId, after.id)
         : after;
     const rate = await this.repo.orgVatRate(organizationId);
-    return toUpdatedTicketResponse(current, rate, outcome);
+    return toUpdatedTicketResponse(current, rate, outcome, quantityFromSeats);
   }
 
   /**
@@ -212,7 +236,7 @@ export class TicketingService {
     ticketId: string,
   ): Promise<TicketResponseDto> {
     const ticket = await this.load(actor.organizationId, eventId, ticketId);
-    return this.setStatus(actor.organizationId, ticket, 'paused');
+    return this.setStatus(actor, ticket, 'paused');
   }
 
   /**
@@ -236,22 +260,23 @@ export class TicketingService {
       { ...ticket, status: 'onsale' },
       now,
     );
-    return this.setStatus(actor.organizationId, ticket, status);
+    return this.setStatus(actor, ticket, status);
   }
 
   private async setStatus(
-    organizationId: number,
+    actor: EventActor,
     ticket: TicketRow,
     status: TicketStatus,
   ): Promise<TicketResponseDto> {
     const updated = await this.repo.update(
-      organizationId,
+      actor.organizationId,
       ticket.id,
       { status },
       ticket.version,
     );
     if (!updated) throw this.stale();
-    return this.respond(organizationId, updated);
+    const seats = await this.seatQuantities(actor, ticket.eventId);
+    return this.respond(actor.organizationId, updated, seats !== null);
   }
 
   /** The tier as it will be once `input` is applied — what the rules judge. */
@@ -309,6 +334,8 @@ export class TicketingService {
         'An event must keep at least one ticket type — this is the last one.',
       );
     }
+    const seats = await this.seatQuantities(actor, eventId);
+    this.policy.assertNoSeatRows(ticket.name, seats?.get(ticketId) ?? 0);
     if (await this.checkout.hasActiveHolds(actor.organizationId, ticketId)) {
       throw DomainException.conflict(
         'Someone is checking out with this ticket type — pause it and try again shortly.',
@@ -400,12 +427,33 @@ export class TicketingService {
     return ticket;
   }
 
+  /**
+   * The seats each ticket type's rows hold when the event's seat map sets its
+   * quantities (US-EVT-05), else null. Reads the event through Events, so it is
+   * also the 404 for an event outside the caller's workspace.
+   */
+  private async seatQuantities(
+    actor: EventActor,
+    eventId: string,
+  ): Promise<SeatQuantities> {
+    const event = await this.events.getEvent(actor, eventId);
+    if (event.seatingMode !== 'reserved') return null;
+    const seats = await this.seats.seatsByTicketType(
+      actor.organizationId,
+      eventId,
+    );
+    return this.policy.quantityFromSeats(event.seatingMode, seats.size > 0)
+      ? seats
+      : null;
+  }
+
   private async respond(
     organizationId: number,
     row: TicketRow,
+    quantityFromSeats: boolean,
   ): Promise<TicketResponseDto> {
     const rate = await this.repo.orgVatRate(organizationId);
-    return toTicketResponse(row, rate);
+    return toTicketResponse(row, rate, quantityFromSeats);
   }
 
   private stale(): DomainException {

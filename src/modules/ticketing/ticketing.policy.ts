@@ -8,6 +8,8 @@ import type { TicketStatus } from './ticketing.types';
 
 /** An allocation of 0 means "unlimited" — never sold out, no per-order ceiling. */
 const UNLIMITED = 0;
+/** The seating mode whose seat map can set the quantities (US-EVT-05). */
+const RESERVED = 'reserved';
 
 /** The fields that are frozen once a tier has sold a single seat (US-TKT-02). */
 interface LockedAfterSales {
@@ -51,12 +53,15 @@ export class TicketingPolicy {
   /**
    * The per-order limit sits inside two ceilings: the platform booking cap, and
    * the tier's own allocation — offering more seats per order than exist would
-   * strand every buyer at checkout.
+   * strand every buyer at checkout. Where the seat map sets the quantity
+   * (`quantityFromSeats`, US-EVT-05) the rows decide how many there are, so it
+   * is not a ceiling the organizer could fix here.
    */
   assertPerOrderBounds(
     minPerOrder: number,
     maxPerOrder: number,
     total: number,
+    quantityFromSeats = false,
   ): void {
     if (maxPerOrder > MAX_SEATS_PER_BOOKING) {
       throw DomainException.validation(
@@ -68,7 +73,7 @@ export class TicketingPolicy {
         'The minimum per order must be at least 1 and no more than the maximum.',
       );
     }
-    if (total !== UNLIMITED && maxPerOrder > total) {
+    if (!quantityFromSeats && total !== UNLIMITED && maxPerOrder > total) {
       throw DomainException.validation(
         `The per-order limit (${maxPerOrder}) can't exceed the ${total} seats available.`,
       );
@@ -108,6 +113,35 @@ export class TicketingPolicy {
     if (total >= sold) return;
     throw DomainException.validation(
       `Cannot set the quantity (${total}) below the ${sold} already sold.`,
+    );
+  }
+
+  /**
+   * A reserved event whose seat map gives any seat a ticket type takes every
+   * ticket type's quantity from its rows (US-EVT-05). A reserved map with no
+   * typed seat — one laid out before rows had types — keeps typed quantities.
+   */
+  quantityFromSeats(seatingMode: string, hasTypedSeats: boolean): boolean {
+    return seatingMode === RESERVED && hasTypedSeats;
+  }
+
+  /** Where the seat map sets the quantity, only that same number may be sent. */
+  assertQuantityFromSeats(total: number | undefined, seats: number): void {
+    if (total === undefined || total === seats) return;
+    throw DomainException.conflict(
+      "This event's ticket quantities come from its seat map. Give rows to a ticket type instead.",
+    );
+  }
+
+  /**
+   * A type that still sells seat rows can't go (US-TKT-05): deleting it would
+   * leave those rows selling under any type, and retiring it would leave them
+   * selling under none.
+   */
+  assertNoSeatRows(name: string, seats: number): void {
+    if (seats === 0) return;
+    throw DomainException.conflict(
+      `${name} still has seat rows. Give them to another ticket type first.`,
     );
   }
 

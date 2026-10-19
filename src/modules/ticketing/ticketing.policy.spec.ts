@@ -258,4 +258,65 @@ describe('TicketingPolicy', () => {
       );
     });
   });
+
+  describe('quantityFromSeats (US-EVT-05)', () => {
+    it('is a reserved event with at least one seat carrying a ticket type', () => {
+      expect(policy.quantityFromSeats('reserved', true)).toBe(true);
+    });
+
+    it('is not a reserved map with no typed seat, nor general admission', () => {
+      expect(policy.quantityFromSeats('reserved', false)).toBe(false);
+      expect(policy.quantityFromSeats('ga', true)).toBe(false);
+    });
+  });
+
+  describe('assertQuantityFromSeats (US-EVT-05)', () => {
+    it('accepts no quantity, or the seats the rows hold', () => {
+      expect(
+        thrown(() => policy.assertQuantityFromSeats(undefined, 48)),
+      ).toBeUndefined();
+      expect(
+        thrown(() => policy.assertQuantityFromSeats(48, 48)),
+      ).toBeUndefined();
+    });
+
+    it('refuses any other quantity (409)', () => {
+      const err = thrown(() => policy.assertQuantityFromSeats(100, 48));
+      expect(status(err)).toBe(409);
+      expect(message(err)).toBe(
+        "This event's ticket quantities come from its seat map. Give rows to a ticket type instead.",
+      );
+    });
+  });
+
+  describe('assertNoSeatRows (US-TKT-05)', () => {
+    it('lets a type with no seat rows go', () => {
+      expect(thrown(() => policy.assertNoSeatRows('Free', 0))).toBeUndefined();
+    });
+
+    it('keeps a type that still has seat rows (409)', () => {
+      const err = thrown(() => policy.assertNoSeatRows('Free', 16));
+      expect(status(err)).toBe(409);
+      expect(message(err)).toBe(
+        'Free still has seat rows. Give them to another ticket type first.',
+      );
+    });
+  });
+
+  describe('assertPerOrderBounds on seat-set quantities (US-EVT-05)', () => {
+    it("does not cap the per-order limit at the seats a type's rows hold", () => {
+      expect(
+        thrown(() => policy.assertPerOrderBounds(1, 8, 4, true)),
+      ).toBeUndefined();
+    });
+
+    it('still keeps the platform cap and the min/max order', () => {
+      expect(
+        status(thrown(() => policy.assertPerOrderBounds(1, 9, 4, true))),
+      ).toBe(422);
+      expect(
+        status(thrown(() => policy.assertPerOrderBounds(3, 2, 4, true))),
+      ).toBe(422);
+    });
+  });
 });

@@ -133,12 +133,16 @@ export class EventsRepository {
   async briefsByIds(
     organizationId: number,
     eventIds: string[],
-  ): Promise<{ id: string; name: string }[]> {
+  ): Promise<{ id: string; name: string; seatingMode: string }[]> {
     const ids = [...new Set(eventIds)];
     if (ids.length === 0) return [];
     return withTenant(this.db, organizationId, (tx) =>
       tx
-        .select({ id: events.id, name: events.name })
+        .select({
+          id: events.id,
+          name: events.name,
+          seatingMode: events.seatingMode,
+        })
         .from(events)
         .where(
           and(

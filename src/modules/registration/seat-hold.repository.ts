@@ -274,6 +274,63 @@ export class SeatHoldRepository {
   }
 
   /**
+   * Seats per ticket type on the event's live seat map; a type with none is
+   * absent. On a reserved event whose rows have types this is each type's
+   * quantity (US-EVT-05).
+   */
+  async seatsByTicketType(
+    organizationId: number,
+    eventId: string,
+  ): Promise<Map<string, number>> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({
+          ticketTypeId: seats.ticketTypeId,
+          seats: sql<number>`count(*)::int`,
+        })
+        .from(seats)
+        .innerJoin(seatMaps, eq(seats.seatMapId, seatMaps.id))
+        .where(
+          and(
+            eq(seats.organizationId, organizationId),
+            eq(seatMaps.eventId, eventId),
+            isNull(seatMaps.deletedAt),
+            isNotNull(seats.ticketTypeId),
+          ),
+        )
+        .groupBy(seats.ticketTypeId);
+      return new Map(
+        rows.flatMap((r) =>
+          r.ticketTypeId ? [[r.ticketTypeId, r.seats]] : [],
+        ),
+      );
+    });
+  }
+
+  /** Of `eventIds`, the events whose live seat map has a seat with a ticket type. */
+  async eventsWithTypedSeats(
+    organizationId: number,
+    eventIds: string[],
+  ): Promise<Set<string>> {
+    if (eventIds.length === 0) return new Set();
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .selectDistinct({ eventId: seatMaps.eventId })
+        .from(seats)
+        .innerJoin(seatMaps, eq(seats.seatMapId, seatMaps.id))
+        .where(
+          and(
+            eq(seats.organizationId, organizationId),
+            inArray(seatMaps.eventId, eventIds),
+            isNull(seatMaps.deletedAt),
+            isNotNull(seats.ticketTypeId),
+          ),
+        );
+      return new Set(rows.map((r) => r.eventId));
+    });
+  }
+
+  /**
    * Is a checkout still holding this tier? Only unexpired `active` holds count —
    * a lapsed one reserves nothing and must not block the organizer (US-TKT-05).
    */

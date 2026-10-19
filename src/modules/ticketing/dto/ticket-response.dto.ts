@@ -59,4 +59,11 @@ export class TicketResponseDto {
 
   @ApiProperty({ example: 1, description: 'Optimistic-concurrency token' })
   version!: number;
+
+  @ApiProperty({
+    example: false,
+    description:
+      "True on a reserved event whose seat rows have ticket types: `total` is the seats this type's rows hold, set from the seat map and not typed (US-EVT-05).",
+  })
+  quantityFromSeats!: boolean;
 }

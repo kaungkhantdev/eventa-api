@@ -1,7 +1,9 @@
 import { Paginated } from '../../common/http/paginated';
 import type { EventLookupPort } from './ports/event-lookup.port';
+import type { TicketSeatsPort } from './ports/ticket-seats.port';
 import { TicketingQueryService } from './ticketing-query.service';
 import type { TicketingRepository } from './ticketing.repository';
+import { TicketingPolicy } from './ticketing.policy';
 import type { TicketRow } from './ticketing.types';
 
 const actor = { organizationId: 1, userId: 'u1' };
@@ -38,6 +40,7 @@ function row(o: Partial<TicketRow> = {}): TicketRow {
 describe('TicketingQueryService (US-TKT-04)', () => {
   let repo: jest.Mocked<TicketingRepository>;
   let events: jest.Mocked<EventLookupPort>;
+  let seats: jest.Mocked<TicketSeatsPort>;
   let service: TicketingQueryService;
 
   beforeEach(() => {
@@ -51,10 +54,21 @@ describe('TicketingQueryService (US-TKT-04)', () => {
     events = {
       briefsByIds: jest
         .fn()
-        .mockResolvedValue(new Map([['e1', { id: 'e1', name: 'Jazz Fest' }]])),
+        .mockResolvedValue(
+          new Map([['e1', { id: 'e1', name: 'Jazz Fest', seatingMode: 'ga' }]]),
+        ),
       idsMatchingName: jest.fn().mockResolvedValue([]),
     };
-    service = new TicketingQueryService(repo, events);
+    seats = {
+      seatsByTicketType: jest.fn().mockResolvedValue(new Map()),
+      eventsWithTypedSeats: jest.fn().mockResolvedValue(new Set()),
+    };
+    service = new TicketingQueryService(
+      repo,
+      events,
+      seats,
+      new TicketingPolicy(),
+    );
   });
 
   it('returns a page carrying sales progress, status and the event name', async () => {
@@ -110,6 +124,36 @@ describe('TicketingQueryService (US-TKT-04)', () => {
     const page = await service.list(actor, { search: 'nothing' });
     expect(page.items).toEqual([]);
     expect(page.meta.total).toBe(0);
+  });
+
+  it('marks the tiers whose quantity the seat map sets (US-EVT-05)', async () => {
+    repo.search.mockResolvedValue({
+      items: [
+        row({ id: 't1', eventId: 'gala' }),
+        row({ id: 't2', eventId: 'legacy' }),
+        row({ id: 't3', eventId: 'e1' }),
+      ],
+      total: 3,
+    });
+    events.briefsByIds.mockResolvedValue(
+      new Map([
+        ['gala', { id: 'gala', name: 'Gala', seatingMode: 'reserved' }],
+        ['legacy', { id: 'legacy', name: 'Old Hall', seatingMode: 'reserved' }],
+        ['e1', { id: 'e1', name: 'Jazz Fest', seatingMode: 'ga' }],
+      ]),
+    );
+    seats.eventsWithTypedSeats.mockResolvedValue(new Set(['gala', 'e1']));
+    const page = await service.list(actor, {});
+    expect(page.items.map((t) => t.quantityFromSeats)).toEqual([
+      true,
+      false,
+      false,
+    ]);
+    expect(seats.eventsWithTypedSeats).toHaveBeenCalledWith(1, [
+      'gala',
+      'legacy',
+      'e1',
+    ]);
   });
 
   it('labels a tier whose event vanished rather than dropping it', async () => {
