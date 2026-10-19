@@ -48,11 +48,7 @@ export class EventSeatingPolicy {
     this.assertLiveTypes(rowTypes, snapshot.tiers);
     const grid = diffGrid(snapshot.seats, input.rows, input.seatsPerRow);
     this.assertNoSoldSeatRemoved(grid.removed, blockSoldRemoval);
-    const retyped = this.retypedRows(
-      grid.kept,
-      rowTypes,
-      snapshot.occupiedSeatIds,
-    );
+    const retyped = this.retypedRows(grid.kept, rowTypes, snapshot);
     const added = grid.added.map((p) => ({
       ...p,
       ticketTypeId: rowTypes.get(p.rowLabel) ?? null,
@@ -75,11 +71,11 @@ export class EventSeatingPolicy {
     if (rows.length > 0 && rowsWithoutType === rows.length) {
       return { rowsWithoutType, ticketTypesWithoutRows: [] };
     }
-    const sold = new Set(rows.map((r) => r.ticketTypeId));
+    const typesWithRows = new Set(rows.map((r) => r.ticketTypeId));
     return {
       rowsWithoutType,
       ticketTypesWithoutRows: tiers
-        .filter((t) => !sold.has(t.id))
+        .filter((t) => !typesWithRows.has(t.id))
         .map((t) => t.name),
     };
   }
@@ -125,20 +121,22 @@ export class EventSeatingPolicy {
   }
 
   /**
-   * The rows whose kept seats change type. A row with any seat booked or held
-   * keeps the type it was sold or held under — retyping it would sell one seat
-   * twice over, under two prices.
+   * The rows whose kept seats change type. A row with any seat booked or held —
+   * counting seats this save removes — keeps the type it was sold or held
+   * under: retyping it would sell one seat twice over, under two prices.
    */
   private retypedRows(
     kept: SeatRow[],
     rowTypes: RowTypes,
-    occupied: ReadonlySet<number>,
+    snapshot: ReservedSnapshot,
   ): RowRetype[] {
+    const rowsBefore = groupByRow(snapshot.seats);
     const retyped: RowRetype[] = [];
     for (const [row, seats] of groupByRow(kept)) {
       const ticketTypeId = rowTypes.get(row) ?? null;
       if (seats.every((s) => s.ticketTypeId === ticketTypeId)) continue;
-      if (seats.some((s) => occupied.has(s.id))) {
+      const before = rowsBefore.get(row) ?? seats;
+      if (before.some((s) => snapshot.occupiedSeatIds.has(s.id))) {
         throw DomainException.conflict(
           `Row ${row} has booked or held seats, so its ticket type can't change.`,
         );

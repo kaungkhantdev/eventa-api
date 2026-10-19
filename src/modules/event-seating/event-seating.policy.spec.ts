@@ -206,6 +206,20 @@ describe('EventSeatingPolicy', () => {
       );
     });
 
+    it("counts a booked seat the save also removes as the row's (409)", () => {
+      // Row 2's seat 2 (id 103) is booked; the row shrinks to 1 seat and moves.
+      const seats = existingGrid(2, 2, () => VIP);
+      const err = refusal(() =>
+        policy.planReserved(
+          snapshot({ seats, occupiedSeatIds: new Set([103]) }),
+          input({ seatsPerRow: 1, rowTicketTypes: [VIP, NORMAL] }),
+          false,
+        ),
+      );
+      expect(err.getStatus()).toBe(409);
+      expect(err.message).toMatch(/^Row 2 /);
+    });
+
     it('lets a row with booked seats keep its type while others move', () => {
       const seats = existingGrid(2, 2, () => VIP);
       const plan = policy.planReserved(

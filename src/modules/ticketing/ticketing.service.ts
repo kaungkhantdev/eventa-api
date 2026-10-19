@@ -437,7 +437,6 @@ export class TicketingService {
     eventId: string,
   ): Promise<SeatQuantities> {
     const event = await this.events.getEvent(actor, eventId);
-    if (event.seatingMode !== 'reserved') return null;
     const seats = await this.seats.seatsByTicketType(
       actor.organizationId,
       eventId,
