@@ -532,7 +532,8 @@ describe('Seating (e2e — US-EVT-05)', () => {
         })
         .expect(201);
 
-      const rowTicketTypes = [...example(), null];
+      // Published now, so every row is sent with a type.
+      const rowTicketTypes = [...example(), tiers.normal];
       rowTicketTypes[6] = tiers.normal;
       const res = await reserved(eventId, adminJwt, {
         name: 'Hall',
@@ -545,6 +546,37 @@ describe('Seating (e2e — US-EVT-05)', () => {
         "Row 7 has booked or held seats, so its ticket type can't change.",
       );
       expect((await seatTypesByRow(eventId))['7']).toBe(tiers.free);
+    });
+
+    it('refuses a published event a row with no ticket type (422); every new row needs one', async () => {
+      // Published by the test above; its row 8 was added untyped as a draft.
+      const res = await reserved(eventId, adminJwt, {
+        name: 'Hall',
+        rows: 9,
+        seatsPerRow: 16,
+        rowTicketTypes: [...example(), tiers.normal, null],
+      });
+      expect(res.status).toBe(422);
+      expect((res.body as Failure).message).toBe(
+        'Give row 9 a ticket type. Every row of a published event needs one.',
+      );
+      const kept = await reserved(eventId, adminJwt, {
+        name: 'Hall',
+        rows: 9,
+        seatsPerRow: 16,
+      });
+      expect(kept.status).toBe(422);
+      expect((kept.body as Failure).message).toMatch(/^Give row 8 /);
+      expect(Object.keys(await seatTypesByRow(eventId))).toHaveLength(8);
+
+      const typed = await reserved(eventId, adminJwt, {
+        name: 'Hall',
+        rows: 9,
+        seatsPerRow: 16,
+        rowTicketTypes: [...example(), tiers.normal, tiers.vip],
+      });
+      expect(typed.status).toBe(200);
+      expect((typed.body as Success<Seating>).data.unassignedRows).toBe(0);
     });
 
     it('leaves a map laid out without ticket types on its typed quantities', async () => {

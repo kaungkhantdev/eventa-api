@@ -290,6 +290,55 @@ describe('EventSeatingPolicy', () => {
       const plan = policy.planReserved(snapshot({ seats }), input({}), false);
       expect(plan.removedSeatIds).toEqual([104, 105]);
     });
+
+    describe('on a published event whose rows have ticket types', () => {
+      const PUBLISHED = true;
+
+      it('refuses a new row with no type when no list is sent (422, row named)', () => {
+        const seats = existingGrid(2, 2, () => VIP);
+        const err = refusal(() =>
+          policy.planReserved(
+            snapshot({ seats }),
+            input({ rows: 3 }),
+            PUBLISHED,
+          ),
+        );
+        expect(err.getStatus()).toBe(422);
+        expect(err.message).toBe(
+          'Give row 3 a ticket type. Every row of a published event needs one.',
+        );
+      });
+
+      it('refuses a row sent with no type (422, row named)', () => {
+        const err = refusal(() =>
+          policy.planReserved(
+            snapshot({ seats: existingGrid(2, 2, () => VIP) }),
+            input({ rowTicketTypes: [null, NORMAL] }),
+            PUBLISHED,
+          ),
+        );
+        expect(err.getStatus()).toBe(422);
+        expect(err.message).toMatch(/^Give row 1 a ticket type\./);
+      });
+
+      it('takes a new row that is sent with a type', () => {
+        const plan = policy.planReserved(
+          snapshot({ seats: existingGrid(2, 2, () => VIP) }),
+          input({ rows: 3, rowTicketTypes: [VIP, VIP, NORMAL] }),
+          PUBLISHED,
+        );
+        expect(plan.seatsByTier?.get(NORMAL)).toBe(2);
+      });
+
+      it('still lets a map with no typed seat grow untyped (legacy)', () => {
+        const plan = policy.planReserved(
+          snapshot({ seats: existingGrid(2, 2) }),
+          input({ rows: 3 }),
+          PUBLISHED,
+        );
+        expect(plan.seatsByTier).toBeNull();
+      });
+    });
   });
 
   describe('readiness (US-EVT-05)', () => {

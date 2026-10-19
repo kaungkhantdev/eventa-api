@@ -38,16 +38,19 @@ export class EventSeatingPolicy {
    * What laying the map out as `input` writes: the seats added (each with its
    * row's type), the seats removed, the rows moving to another type, and — once
    * any seat carries a type — the seats each live ticket type ends up with.
+   * `published` is any event past its draft: its sold seats stay, and so does
+   * a type on every row once any row has one.
    */
   planReserved(
     snapshot: ReservedSnapshot,
     input: ConfigureReservedInput,
-    blockSoldRemoval: boolean,
+    published: boolean,
   ): ReservedPlan {
     const rowTypes = this.rowTypesAfter(snapshot.seats, input);
     this.assertLiveTypes(rowTypes, snapshot.tiers);
+    this.assertEveryRowTyped(rowTypes, published);
     const grid = diffGrid(snapshot.seats, input.rows, input.seatsPerRow);
-    this.assertNoSoldSeatRemoved(grid.removed, blockSoldRemoval);
+    this.assertNoSoldSeatRemoved(grid.removed, published);
     const retyped = this.retypedRows(grid.kept, rowTypes, snapshot);
     const added = grid.added.map((p) => ({
       ...p,
@@ -110,6 +113,23 @@ export class EventSeatingPolicy {
         `Row ${row}'s ticket type isn't one of this event's ticket types.`,
       );
     }
+  }
+
+  /**
+   * Once a published event's rows have ticket types, every row needs one: a
+   * seat with none would sell under whichever type the buyer picks, at that
+   * type's price (US-EVT-05). A draft may leave rows open until it publishes,
+   * and a map none of whose rows has a type still sells as it always has.
+   */
+  private assertEveryRowTyped(rowTypes: RowTypes, published: boolean): void {
+    if (!published) return;
+    const types = [...rowTypes.values()];
+    if (types.every((type) => type === null)) return;
+    const untyped = [...rowTypes].find(([, type]) => type === null);
+    if (!untyped) return;
+    throw DomainException.validation(
+      `Give row ${untyped[0]} a ticket type. Every row of a published event needs one.`,
+    );
   }
 
   /** A published event must never lose seats that are already sold. */

@@ -50,8 +50,9 @@ export class EventSeatingService {
     const event = await this.events.getEvent(actor, eventId);
     this.assertInPerson(event);
     this.policy.assertOneTypePerRow(input.rows, input.rowTicketTypes);
-    // Only a published event's sold seats are guarded, as before.
-    const blockSoldRemoval = event.status !== 'draft';
+    // A published event keeps its sold seats, and a type on every row once
+    // any row has one; a draft may leave either open until it publishes.
+    const published = event.status !== 'draft';
     const map = await this.repo.applyReserved(
       actor.organizationId,
       {
@@ -60,7 +61,7 @@ export class EventSeatingService {
         rows: input.rows,
         seatsPerRow: input.seatsPerRow,
       },
-      (snapshot) => this.policy.planReserved(snapshot, input, blockSoldRemoval),
+      (snapshot) => this.policy.planReserved(snapshot, input, published),
       this.clock.now(),
     );
     const updated = await this.events.updateEvent(actor, eventId, {
