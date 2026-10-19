@@ -637,13 +637,13 @@ describe('Ticket types (e2e — US-EVT-06)', () => {
         .expect(200);
     });
 
-    it('refuses to delete a type that still has seat rows (409)', async () => {
+    it('refuses to delete a type that still has seats (409)', async () => {
       const res = await request(server)
         .delete(`/api/v1/events/${gala}/tickets/${vip}`)
         .set('Authorization', `Bearer ${jwt}`);
       expect(res.status).toBe(409);
       expect((res.body as { message: string }).message).toBe(
-        'VIP Lounge still has seat rows. Give them to another ticket type first.',
+        'VIP Lounge still has seats. Give them to another ticket type first.',
       );
       await tickets(gala)
         .expect(200)
@@ -686,7 +686,7 @@ describe('Ticket types (e2e — US-EVT-06)', () => {
         const res = await deleting;
         expect(res.status).toBe(409);
         expect((res.body as { message: string }).message).toBe(
-          'Gold still has seat rows. Give them to another ticket type first.',
+          'Gold still has seats. Give them to another ticket type first.',
         );
       } finally {
         other.release();

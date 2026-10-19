@@ -197,23 +197,46 @@ describe('Publish / unpublish (e2e — US-EVT-07)', () => {
         .send({ name: 'Hall', rows: 3, seatsPerRow: 2, rowTicketTypes })
         .expect(200);
 
-    it('refuses while a seat row has no ticket type (422)', async () => {
+    /** The same 3 × 2 map, typed seat by seat. */
+    const seatTypes = (id: string, seatTicketTypes: (string | null)[][]) =>
+      request(server)
+        .put(`/api/v1/events/${id}/seating/reserved`)
+        .set(auth(adminJwt))
+        .send({ name: 'Hall', rows: 3, seatsPerRow: 2, seatTicketTypes })
+        .expect(200);
+
+    it('refuses while a row of seats has no ticket type (422)', async () => {
       const draft = await reservedDraft();
       await seatRows(draft.id, [draft.general, draft.free, null]);
       const res = await publish(draft.id, adminJwt, { visibility: 'public' });
       expect(res.status).toBe(422);
       expect((res.body as Failure).message).toBe(
-        'Give every seat row a ticket type before publishing.',
+        'Give every seat a ticket type before publishing.',
       );
     });
 
-    it('refuses while a ticket type has no seat row, naming it (422)', async () => {
+    it('refuses while a single seat of a typed row has no ticket type (422)', async () => {
+      const draft = await reservedDraft();
+      const { general: g, free: f } = draft;
+      await seatTypes(draft.id, [
+        [g, g],
+        [f, f],
+        [g, null],
+      ]);
+      const res = await publish(draft.id, adminJwt, { visibility: 'public' });
+      expect(res.status).toBe(422);
+      expect((res.body as Failure).message).toBe(
+        'Give every seat a ticket type before publishing.',
+      );
+    });
+
+    it('refuses while a ticket type has no seat, naming it (422)', async () => {
       const draft = await reservedDraft();
       await seatRows(draft.id, [draft.general, draft.general, draft.general]);
       const res = await publish(draft.id, adminJwt, { visibility: 'public' });
       expect(res.status).toBe(422);
       expect((res.body as Failure).message).toBe(
-        'Free has no seat rows. Give it a row or remove it.',
+        'Free has no seats. Give it some seats or remove it.',
       );
     });
 
@@ -223,12 +246,23 @@ describe('Publish / unpublish (e2e — US-EVT-07)', () => {
       await publish(draft.id, adminJwt, { visibility: 'public' }).expect(200);
     });
 
+    it('publishes once every seat has a type, a type holding just one seat of a row', async () => {
+      const draft = await reservedDraft();
+      const { general: g, free: f } = draft;
+      await seatTypes(draft.id, [
+        [g, g],
+        [g, g],
+        [f, g],
+      ]);
+      await publish(draft.id, adminJwt, { visibility: 'public' }).expect(200);
+    });
+
     it('refuses a draft whose map was laid out without ticket types', async () => {
       const draft = await reservedDraft();
       const res = await publish(draft.id, adminJwt, { visibility: 'public' });
       expect(res.status).toBe(422);
       expect((res.body as Failure).message).toBe(
-        'Give every seat row a ticket type before publishing.',
+        'Give every seat a ticket type before publishing.',
       );
     });
   });

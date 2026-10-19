@@ -49,7 +49,11 @@ interface Page {
   speakers: { name: string }[];
   seatMap: {
     seatsPerRow: number;
-    rows: { label: string; ticketTypeId: string | null }[];
+    rows: {
+      label: string;
+      ticketTypeId: string | null;
+      seatTicketTypes: (string | null)[];
+    }[];
   } | null;
 }
 
@@ -255,21 +259,46 @@ describe('Public event page (e2e — US-PAGE-01…08)', () => {
     const idOf = (p: Page, name: string) =>
       p.tickets.find((t) => t.name === name)?.id;
 
-    it("shows each row, in number order, with its ticket type's id", async () => {
+    /** One seat of the seated event's map given the named ticket type. */
+    const typeSeat = (row: string, seat: string, name: string) =>
+      pool.query(
+        `UPDATE seats SET ticket_type_id =
+           (SELECT id FROM ticket_types WHERE event_id = $1 AND name = $4)
+          WHERE seat_map_id = (SELECT id FROM seat_maps WHERE event_id = $1)
+            AND row_label = $2 AND seat_number = $3`,
+        [seatedId, row, seat, name],
+      );
+
+    it("shows each row, in number order, with its ticket type's id and each seat's", async () => {
       const p = await seated();
       const [vip, normal, free] = ['VIP', 'Normal', 'Free'].map((n) =>
         idOf(p, n),
       );
+      const row = (label: string, type: string | undefined) => ({
+        label,
+        ticketTypeId: type,
+        seatTicketTypes: [type, type],
+      });
       expect(p.seatMap?.seatsPerRow).toBe(2);
       expect(p.seatMap?.rows).toEqual([
-        { label: '1', ticketTypeId: vip },
-        { label: '2', ticketTypeId: vip },
-        ...['3', '4', '5', '6', '7', '8', '9'].map((label) => ({
-          label,
-          ticketTypeId: normal,
-        })),
-        { label: '10', ticketTypeId: free },
+        row('1', vip),
+        row('2', vip),
+        ...['3', '4', '5', '6', '7', '8', '9'].map((label) =>
+          row(label, normal),
+        ),
+        row('10', free),
       ]);
+    });
+
+    it('shows a row split between types seat by seat, with no type of its own', async () => {
+      await typeSeat('10', '1', 'Normal');
+      const p = await seated();
+      expect(p.seatMap?.rows.find((r) => r.label === '10')).toEqual({
+        label: '10',
+        ticketTypeId: null,
+        seatTicketTypes: [idOf(p, 'Normal'), idOf(p, 'Free')],
+      });
+      await typeSeat('10', '1', 'Free');
     });
 
     it('carries the layout only — no seat status, holds or sales', async () => {
@@ -279,7 +308,11 @@ describe('Public event page (e2e — US-PAGE-01…08)', () => {
         'seatsPerRow',
       ]);
       for (const row of p.seatMap?.rows ?? []) {
-        expect(Object.keys(row).sort()).toEqual(['label', 'ticketTypeId']);
+        expect(Object.keys(row).sort()).toEqual([
+          'label',
+          'seatTicketTypes',
+          'ticketTypeId',
+        ]);
       }
     });
 
@@ -311,13 +344,29 @@ describe('Public event page (e2e — US-PAGE-01…08)', () => {
       ]);
     });
 
-    it('has none when no row has a ticket type (a map from before rows had types)', async () => {
+    it('has none when no seat has a ticket type (a map from before seats had types)', async () => {
       await pool.query(
         `UPDATE seats SET ticket_type_id = NULL
           WHERE seat_map_id = (SELECT id FROM seat_maps WHERE event_id = $1)`,
         [seatedId],
       );
       expect((await seated()).seatMap).toBeNull();
+    });
+
+    it('shows the map once any seat has a type, a partly typed row included', async () => {
+      await typeSeat('3', '2', 'VIP');
+      const p = await seated();
+      expect(p.seatMap?.rows).toHaveLength(10);
+      expect(p.seatMap?.rows.find((r) => r.label === '3')).toEqual({
+        label: '3',
+        ticketTypeId: null,
+        seatTicketTypes: [null, idOf(p, 'VIP')],
+      });
+      expect(p.seatMap?.rows.find((r) => r.label === '4')).toEqual({
+        label: '4',
+        ticketTypeId: null,
+        seatTicketTypes: [null, null],
+      });
     });
   });
 
