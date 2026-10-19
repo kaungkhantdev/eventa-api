@@ -36,6 +36,7 @@ import {
   isOnCheckoutClock,
   statusAfterRefund,
 } from './approval-rules';
+import { exceedsAllocation } from './allocation-rules';
 import type { OrderTotals } from './checkout-pricing';
 import { heldSeatsMatch, seatSellsUnder } from './held-seat-rules';
 import { RedemptionLedgerPort } from './ports/redemption-ledger.port';
@@ -342,9 +343,8 @@ function settlementBlocker(
 ): string | null {
   const said = BLOCKERS[mode];
   if (!context.line) return said.noTier;
-  const { sold, total, quantity } = context.line;
-  const counted = context.placesCounted;
-  if (!counted && total !== UNLIMITED && sold + quantity > total) {
+  const { quantity } = context.line;
+  if (!context.placesCounted && exceedsAllocation(context.line, quantity)) {
     return said.soldOut;
   }
   if (context.takenSeatIds.length > 0) return said.seatsTaken;
@@ -365,8 +365,6 @@ const DECIDED_ELSEWHERE =
 const PAID_WHILE_DECIDING =
   'This registration was paid for while you were deciding — refresh to see where it stands.';
 
-/** An allocation of 0 means unlimited — mirrors `TicketingPolicy`. */
-const UNLIMITED = 0;
 const ACTIVE_HOLD = 'active';
 /** A ticket that still admits someone — the set a refund takes back. */
 const LIVE_TICKET_STATUSES = ['issued', 'checked_in'] as const;
@@ -1796,15 +1794,14 @@ export class CheckoutRepository {
     if (!tier) {
       throw DomainException.conflict('That ticket type is no longer on sale.');
     }
-    const sold = tier.sold + input.quantity;
-    if (tier.total !== UNLIMITED && sold > tier.total) {
+    if (exceedsAllocation(tier, input.quantity)) {
       throw DomainException.conflict(
         'Those tickets sold out while you were checking out. Please choose again.',
       );
     }
     await tx
       .update(ticketTypes)
-      .set({ sold, updatedAt: input.now })
+      .set({ sold: tier.sold + input.quantity, updatedAt: input.now })
       .where(eq(ticketTypes.id, input.ticketTypeId));
   }
 

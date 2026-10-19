@@ -718,6 +718,28 @@ describe('Confirming a registration (e2e — US-DISC-06)', () => {
           );
         }
       });
+
+      it('refunds a payment for a type whose rows were all taken away (0 seats), rather than failing to settle', async () => {
+        const { orderId, holdIds } = await placeNormal();
+        // The organizer removed Normal's only row with the money in flight:
+        // its seats went, the hold with them, and Normal now has 0 seats.
+        await pool.query(`DELETE FROM seat_holds WHERE id = ANY($1)`, [
+          holdIds,
+        ]);
+        await pool.query(`UPDATE ticket_types SET total = 0 WHERE id = $1`, [
+          ids.tiers.normal,
+        ]);
+        try {
+          const settled = await settle(orderId);
+          expect(settled.outcome).toBe('refund_required');
+          expect(await soldFor(ids.tiers.normal)).toBe(0);
+          expect(await refundReasons()).toEqual(['soldout']);
+        } finally {
+          await pool.query(`UPDATE ticket_types SET total = 2 WHERE id = $1`, [
+            ids.tiers.normal,
+          ]);
+        }
+      });
     });
   });
 
