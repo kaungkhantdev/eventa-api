@@ -196,6 +196,47 @@ describe('CheckoutPolicy (US-DISC-04)', () => {
       );
     });
 
+    /*
+     * US-EVT-05: a seat sells as its own type, not its row's — row 7 can sell
+     * seats 1–5 Free and seats 6–16 Normal.
+     */
+    describe('on a row split between types seat by seat', () => {
+      const row7 = Array.from({ length: 16 }, (_, i) =>
+        seat(71 + i, {
+          rowLabel: '7',
+          seatNumber: String(i + 1),
+          ticketTypeId: i < 5 ? TIER : OTHER_TIER,
+        }),
+      );
+      const refusal = (ids: number[], tier: string) =>
+        thrown(() => policy.resolveSeats(row7, ids, tier)) as DomainException;
+
+      it('sells seats 1–5 only under their type', () => {
+        expect(
+          policy.resolveSeats(row7, [71, 75], TIER).map((s) => s.seatNumber),
+        ).toEqual(['1', '5']);
+        expect(refusal([71], OTHER_TIER).getStatus()).toBe(422);
+        expect(message(refusal([75], OTHER_TIER))).toBe(
+          'Those seats belong to a different ticket type. Please choose again.',
+        );
+      });
+
+      it('sells seats 6–16 only under theirs', () => {
+        expect(
+          policy
+            .resolveSeats(row7, [76, 86], OTHER_TIER)
+            .map((s) => s.seatNumber),
+        ).toEqual(['6', '16']);
+        expect(refusal([76], TIER).getStatus()).toBe(422);
+        expect(refusal([86], TIER).getStatus()).toBe(422);
+      });
+
+      it('refuses a pick spanning both halves under either type', () => {
+        expect(refusal([75, 76], TIER).getStatus()).toBe(422);
+        expect(refusal([75, 76], OTHER_TIER).getStatus()).toBe(422);
+      });
+    });
+
     it('refuses a seat someone else has already taken', () => {
       const seats = [seat(1), seat(2, { available: false })];
       const err = thrown(() => policy.resolveSeats(seats, [1, 2], TIER));

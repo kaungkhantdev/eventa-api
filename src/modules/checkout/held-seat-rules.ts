@@ -4,7 +4,7 @@ export interface HeldSeatsCheck {
   pricedSeatIds: readonly number[];
   /** The seats its holds reserve. */
   heldSeatIds: readonly number[];
-  /** Each priced seat's ticket type (null on a seat whose row has none). */
+  /** Each priced seat's own ticket type (null on a seat with none). */
   seatTypes: ReadonlyMap<number, string | null>;
   /** The order's ticket type. */
   ticketTypeId: string;
@@ -31,8 +31,8 @@ export function heldSeatsMatch(check: HeldSeatsCheck): boolean {
 /**
  * Whether a seat may be sold as `ticketTypeId` (US-EVT-05). A seat with a type
  * sells only as that type. A seat with none sells as any type, but only on a
- * map none of whose seats has a type — one laid out before rows had types.
- * Once rows have types an untyped seat is not on sale: it would sell at
+ * map none of whose seats has a type — one laid out before seats had types.
+ * Once any seat has a type an untyped seat is not on sale: it would sell at
  * whichever price the buyer picked.
  */
 export function seatSellsUnder(

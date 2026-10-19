@@ -288,8 +288,8 @@ interface SettlementContext {
   takenSeatIds: number[];
   /**
    * Every held seat still sells under the order's ticket type (US-EVT-05). A
-   * lapsed hold does not keep its row's type, so a payment landing late can
-   * find the row given to another type.
+   * lapsed hold does not keep its seat's type, so a payment landing late can
+   * find the seat given to another type.
    */
   seatTypesMatch: boolean;
   /**
@@ -1279,7 +1279,7 @@ export class CheckoutRepository {
   /**
    * Whether every one of `seatIds` sells under `ticketTypeId` (US-EVT-05).
    * Read after `seatsAlreadyAssigned` has locked the seats, so a seat map
-   * save retyping their row has either committed or waits behind this.
+   * save retyping them has either committed or waits behind this.
    */
   private async seatsSellUnder(
     tx: Tx,
@@ -1542,7 +1542,7 @@ export class CheckoutRepository {
    * lands) but priced from the seats the request named, so the two must be the
    * same seats, each selling under this order's ticket type — or a buyer could
    * hold a VIP seat and pay the Normal price for it. Plain reads, no locks: a
-   * row with an active hold cannot change type (US-EVT-05), so neither answer
+   * seat with an active hold cannot change type (US-EVT-05), so neither answer
    * can move.
    */
   private async assertHeldSeatsMatch(

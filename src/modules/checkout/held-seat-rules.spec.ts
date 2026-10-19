@@ -75,6 +75,40 @@ describe('heldSeatsMatch (US-DISC-04)', () => {
     ).toBe(false);
   });
 
+  describe('a row split between types seat by seat (US-EVT-05)', () => {
+    const FREE = 'free';
+    /** Row 7: seats 1–5 (ids 71–75) Free, seats 6–16 (ids 76–86) Normal. */
+    const row7 = new Map<number, string | null>(
+      Array.from({ length: 16 }, (_, i) => [71 + i, i < 5 ? FREE : NORMAL]),
+    );
+    const order = (ticketTypeId: string, seatIds: number[]) =>
+      heldSeatsMatch(
+        check({
+          pricedSeatIds: seatIds,
+          heldSeatIds: seatIds,
+          seatTypes: row7,
+          ticketTypeId,
+        }),
+      );
+
+    it('places seats 1–5 only as Free', () => {
+      expect(order(FREE, [71, 75])).toBe(true);
+      expect(order(NORMAL, [71])).toBe(false);
+      expect(order(NORMAL, [75])).toBe(false);
+    });
+
+    it('places seats 6–16 only as Normal', () => {
+      expect(order(NORMAL, [76, 86])).toBe(true);
+      expect(order(FREE, [76])).toBe(false);
+      expect(order(FREE, [86])).toBe(false);
+    });
+
+    it('refuses an order spanning both halves under either type', () => {
+      expect(order(FREE, [75, 76])).toBe(false);
+      expect(order(NORMAL, [75, 76])).toBe(false);
+    });
+  });
+
   it('refuses a priced seat the map no longer has', () => {
     expect(heldSeatsMatch(check({ seatTypes: new Map([[31, NORMAL]]) }))).toBe(
       false,

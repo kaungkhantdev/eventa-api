@@ -75,10 +75,11 @@ export class CheckoutPolicy {
   /**
    * Match the chosen seat ids to the map, in the order asked. Every seat must
    * exist, still be free, and sell under the tier being bought: a seat carries
-   * its row's ticket type (US-EVT-05) and sells only as that type, or the
-   * summary would quote a price the seat does not carry. A seat with no type
-   * sells under whichever tier is chosen only on a map laid out before rows
-   * had types; once the map's rows have types, it is not on sale.
+   * its own ticket type (US-EVT-05) — a row may split between types — and
+   * sells only as that type, or the summary would quote a price the seat does
+   * not carry. A seat with no type sells under whichever tier is chosen only
+   * on a map laid out before seats had types; once any seat has a type, it is
+   * not on sale.
    */
   resolveSeats(
     seats: CheckoutSeat[],
