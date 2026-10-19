@@ -254,8 +254,10 @@ export class TicketingRepository {
   }
 
   /**
-   * The event's live tiers, row-locked `FOR UPDATE` in id order inside the
-   * caller's transaction — the seat map's save (US-EVT-05).
+   * The event's live tiers, row-locked in id order inside the caller's
+   * transaction — the seat map's save (US-EVT-05). `FOR NO KEY UPDATE`: the
+   * save changes quantities, never a key, so a seat hold's foreign key on the
+   * tier is not made to wait behind it.
    */
   lockLiveByEventIn(
     tx: Tx,
@@ -273,7 +275,7 @@ export class TicketingRepository {
         ),
       )
       .orderBy(asc(ticketTypes.id))
-      .for('update');
+      .for('no key update');
   }
 
   /** A tier's quantity and the status it implies, inside the caller's transaction. */

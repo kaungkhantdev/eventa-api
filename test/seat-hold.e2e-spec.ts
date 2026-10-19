@@ -248,6 +248,35 @@ describe('Seat-hold engine (US-TKT-03 reserve/hold, e2e)', () => {
     });
   });
 
+  describe('lock order (US-EVT-05)', () => {
+    // A seat map's save and an order's settlement lock the tier, then its
+    // seats. A seat hold names its tier now, so it must take the tier before
+    // the seats too — the other way round, the two wait on each other.
+    it('waits for a tier lock before taking any seat, so neither side deadlocks', async () => {
+      const seat = seats[0];
+      const other = await pool.connect();
+      try {
+        await other.query('BEGIN');
+        await other.query(
+          'SELECT id FROM ticket_types WHERE id = $1 FOR UPDATE',
+          [ticketTypeId],
+        );
+        const held = service.holdSeats(
+          { organizationId: orgId },
+          { eventId, ticketTypeId, seatIds: [seat] },
+        );
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        await other.query('SELECT id FROM seats WHERE id = $1 FOR UPDATE', [
+          seat,
+        ]);
+        await other.query('COMMIT');
+        await expect(held).resolves.toHaveLength(1);
+      } finally {
+        other.release();
+      }
+    });
+  });
+
   describe('service rules over the engine', () => {
     it('rejects a 9-seat booking before touching the database (422)', async () => {
       await expect(

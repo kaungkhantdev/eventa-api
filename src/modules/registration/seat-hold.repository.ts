@@ -46,7 +46,10 @@ export class SeatHoldRepository {
    * (freeing the `uq_seat_hold_active` unique), then re-checks availability under
    * the lock before inserting. A seat is holdable only if it exists, belongs to
    * this event, is `available`, has no active hold, and has no live assignment.
-   * Each hold records the tier being bought, as a GA hold does (US-DISC-04).
+   * Each hold records the tier being bought, as a GA hold does (US-DISC-04),
+   * so the tier is locked first (`FOR KEY SHARE`, what the hold's foreign key
+   * takes anyway): tier before seats is the order a seat map's save and an
+   * order's settlement lock in, and the reverse order deadlocks with them.
    */
   async holdSeats(
     organizationId: number,
@@ -63,6 +66,16 @@ export class SeatHoldRepository {
     if (ids.length === 0) return { ok: false, unavailableSeatIds: [] };
 
     return withTenant(this.db, organizationId, async (tx) => {
+      await tx
+        .select({ id: ticketTypes.id })
+        .from(ticketTypes)
+        .where(
+          and(
+            eq(ticketTypes.organizationId, organizationId),
+            eq(ticketTypes.id, ticketTypeId),
+          ),
+        )
+        .for('key share');
       const locked = await tx
         .select()
         .from(seats)

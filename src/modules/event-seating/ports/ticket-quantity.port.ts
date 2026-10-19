@@ -15,7 +15,7 @@ export interface SeatTier {
  * Checkout's `RedemptionLedgerPort.redeemIn`.
  */
 export abstract class TicketQuantityPort {
-  /** The event's live ticket types, row-locked `FOR UPDATE` in id order. */
+  /** The event's live ticket types, row-locked in id order. */
   abstract lockLiveTiersIn(
     tx: Tx,
     organizationId: number,
