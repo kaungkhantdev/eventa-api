@@ -146,7 +146,7 @@ describe('CheckoutPolicy (US-DISC-04)', () => {
     });
   });
 
-  describe('resolveSeats — a seat must belong to the tier being bought', () => {
+  describe('resolveSeats — a seat with a tier must be the tier being bought', () => {
     it('returns the chosen seats in the order asked', () => {
       const found = policy.resolveSeats([seat(1), seat(2)], [2, 1], TIER);
       expect(found.map((s) => s.id)).toEqual([2, 1]);
@@ -163,6 +163,25 @@ describe('CheckoutPolicy (US-DISC-04)', () => {
       expect(
         message(thrown(() => policy.resolveSeats(seats, [1, 2], TIER))),
       ).toMatch(/ticket type/i);
+    });
+
+    /*
+     * US-DISC-04: "I can pick up to 8 available seats from a seat map". The
+     * organizer lays a reserved map out as rows × seats-per-row (US-EVT-05)
+     * and never gives a seat a tier, so every seat the console makes has none.
+     * Refusing those refused every seat of every reserved event.
+     */
+    it('takes a seat with no ticket type under whichever tier is being bought', () => {
+      const seats = [
+        seat(1, { ticketTypeId: null }),
+        seat(2, { ticketTypeId: null }),
+      ];
+      expect(policy.resolveSeats(seats, [1, 2], TIER).map((s) => s.id)).toEqual(
+        [1, 2],
+      );
+      expect(
+        policy.resolveSeats(seats, [2], OTHER_TIER).map((s) => s.id),
+      ).toEqual([2]);
     });
 
     it('refuses a seat someone else has already taken', () => {

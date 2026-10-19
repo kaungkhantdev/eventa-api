@@ -18,6 +18,7 @@ const GA = 'chk-ga-summit';
 const FREE = 'chk-free-meetup';
 const ONLINE = 'chk-online-webinar';
 const GALA = 'chk-gala-dinner';
+const HALL = 'chk-laid-out-hall';
 const DRAFT = 'chk-draft-secret';
 const STARTED = 'chk-already-started';
 const FOREIGN = 'chk-foreign-summit';
@@ -70,6 +71,7 @@ describe('Checkout (e2e — US-DISC-04)', () => {
     events: Record<string, string>;
     tiers: Record<string, string>;
     seats: number[];
+    hallSeats: number[];
   };
 
   beforeAll(async () => {
@@ -275,6 +277,43 @@ describe('Checkout (e2e — US-DISC-04)', () => {
       expect((await gaQuote({ eventId: UNKNOWN_UUID })).status).toBe(404);
     });
 
+    /*
+     * US-DISC-04: "I can pick up to 8 available seats from a seat map". The
+     * console never gives a seat a tier (US-EVT-05), and refusing such seats
+     * left every reserved event unbookable under every tier.
+     */
+    describe('a seat map laid out without tiers', () => {
+      it('prices a seat under whichever tier the buyer chose', async () => {
+        const free = await quote({
+          eventId: ids.events[HALL],
+          ticketTypeId: ids.tiers.hallFree,
+          seatIds: [ids.hallSeats[0]],
+        });
+        const stalls = await quote({
+          eventId: ids.events[HALL],
+          ticketTypeId: ids.tiers.hallStalls,
+          seatIds: [ids.hallSeats[0]],
+        });
+
+        expect(free.status).toBe(200);
+        expect((free.body as Success<Summary>).data.totalSatang).toBe(0);
+        expect(stalls.status).toBe(200);
+        expect((stalls.body as Success<Summary>).data.subtotalSatang).toBe(
+          500 * BAHT,
+        );
+      });
+
+      it('holds the chosen seats for the buyer', async () => {
+        const res = await hold({
+          eventId: ids.events[HALL],
+          ticketTypeId: ids.tiers.hallStalls,
+          seatIds: ids.hallSeats.slice(1, 3),
+        });
+        expect(res.status).toBe(201);
+        expect((res.body as Success<Hold>).data.holdIds).toHaveLength(2);
+      });
+    });
+
     describe('reserved seating', () => {
       const galaQuote = (body: object = {}) =>
         quote({
@@ -419,6 +458,7 @@ async function seed(pool: Pool): Promise<{
   events: Record<string, string>;
   tiers: Record<string, string>;
   seats: number[];
+  hallSeats: number[];
 }> {
   const orgId = await insertOrg(pool, ORG);
   const otherOrgId = await insertOrg(pool, OTHER_ORG);
@@ -477,6 +517,26 @@ async function seed(pool: Pool): Promise<{
   });
   const seats = await insertSeatMap(pool, orgId, events[GALA], tiers.gala);
 
+  // Laid out the way the console lays a reserved event out (US-EVT-05): rows ×
+  // seats-per-row, no seat given a tier, sold under any of the event's tiers.
+  events[HALL] = await insertEvent(pool, orgId, {
+    slug: HALL,
+    name: 'Laid-out Hall',
+    seatingMode: 'reserved',
+  });
+  tiers.hallFree = await insertTier(pool, orgId, events[HALL], {
+    name: 'Free',
+    price: 0,
+    total: 10,
+    isFree: true,
+  });
+  tiers.hallStalls = await insertTier(pool, orgId, events[HALL], {
+    name: 'Stalls',
+    price: 500 * BAHT,
+    total: 10,
+  });
+  const hallSeats = await insertSeatMap(pool, orgId, events[HALL], null);
+
   events[DRAFT] = await insertEvent(pool, orgId, {
     slug: DRAFT,
     name: 'Draft Secret',
@@ -506,7 +566,7 @@ async function seed(pool: Pool): Promise<{
      VALUES ($1,$2,'CHK25','percent',25,'active')`,
     [orgId, events[GA]],
   );
-  return { orgId, events, tiers, seats };
+  return { orgId, events, tiers, seats, hallSeats };
 }
 
 async function insertOrg(
@@ -582,12 +642,15 @@ async function insertTier(
   return res.rows[0].id;
 }
 
-/** Six seats bound to the tier, one of them blocked so the map has both states. */
+/**
+ * Six seats, one of them blocked so the map has both states — bound to the
+ * tier, or to none (`null`) as the console's rows × seats-per-row layout makes.
+ */
 async function insertSeatMap(
   pool: Pool,
   orgId: number,
   eventId: string,
-  ticketTypeId: string,
+  ticketTypeId: string | null,
 ): Promise<number[]> {
   const map = await pool.query<{ id: string }>(
     `INSERT INTO seat_maps (organization_id, event_id, name, total_seats)

@@ -68,8 +68,11 @@ export class CheckoutPolicy {
 
   /**
    * Match the chosen seat ids to the map, in the order asked. Every seat must
-   * exist, still be free, and be priced by the ticket type being bought —
-   * otherwise the summary would quote a price the seat does not carry.
+   * exist and still be free. A seat with no ticket type is sold under
+   * whichever tier is being bought — the organizer lays a reserved map out as
+   * rows × seats-per-row (US-EVT-05) and never gives a seat a tier. A seat that
+   * does carry a tier must carry this one, or the summary would quote a price
+   * the seat does not carry.
    */
   resolveSeats(
     seats: CheckoutSeat[],
@@ -84,7 +87,7 @@ export class CheckoutPolicy {
           'One of those seats is no longer available. Please choose again.',
         );
       }
-      if (seat.ticketTypeId !== ticketTypeId) {
+      if (seat.ticketTypeId !== null && seat.ticketTypeId !== ticketTypeId) {
         throw DomainException.validation(
           'Those seats belong to a different ticket type. Please choose again.',
         );
