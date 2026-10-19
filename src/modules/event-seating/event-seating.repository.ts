@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { seatMaps, seats } from '../../db/schema';
 import { type Tx, withTenant } from '../../db/tenant';
@@ -10,10 +10,10 @@ import type {
   NewSeatValues,
   ReservedPlan,
   ReservedPlanner,
-  RowRetype,
-  RowTypeCount,
   SeatMapRow,
+  SeatRetype,
   SeatRow,
+  SeatTypeRow,
 } from './event-seating.types';
 
 /** Parameters describing a reserved layout to apply. */
@@ -69,17 +69,17 @@ export class EventSeatingRepository {
     });
   }
 
-  /** Seats per row and ticket type — how a map's row types are read back. */
-  async rowTypeCounts(
+  /** Every seat of the map and its ticket type — how a map's types are read back. */
+  async seatTypes(
     organizationId: number,
     seatMapId: number,
-  ): Promise<RowTypeCount[]> {
+  ): Promise<SeatTypeRow[]> {
     return withTenant(this.db, organizationId, (tx) =>
       tx
         .select({
           rowLabel: seats.rowLabel,
+          seatNumber: seats.seatNumber,
           ticketTypeId: seats.ticketTypeId,
-          seats: sql<number>`count(*)::int`,
         })
         .from(seats)
         .where(
@@ -87,8 +87,7 @@ export class EventSeatingRepository {
             eq(seats.organizationId, organizationId),
             eq(seats.seatMapId, seatMapId),
           ),
-        )
-        .groupBy(seats.rowLabel, seats.ticketTypeId),
+        ),
     );
   }
 
@@ -205,17 +204,17 @@ export class EventSeatingRepository {
     if (plan.removedSeatIds.length > 0) {
       await tx.delete(seats).where(inArray(seats.id, plan.removedSeatIds));
     }
-    await this.retypeRows(tx, plan.retyped);
+    await this.retypeSeats(tx, plan.retyped);
     await this.insertSeats(tx, organizationId, seatMapId, plan.added);
   }
 
-  /** A whole row at a time: every seat of it moves to the row's new type. */
-  private async retypeRows(tx: Tx, retyped: RowRetype[]): Promise<void> {
-    for (const row of retyped) {
+  /** One statement per new type: every seat moving to it at once. */
+  private async retypeSeats(tx: Tx, retyped: SeatRetype[]): Promise<void> {
+    for (const group of retyped) {
       await tx
         .update(seats)
-        .set({ ticketTypeId: row.ticketTypeId, updatedAt: new Date() })
-        .where(inArray(seats.id, row.seatIds));
+        .set({ ticketTypeId: group.ticketTypeId, updatedAt: new Date() })
+        .where(inArray(seats.id, group.seatIds));
     }
   }
 

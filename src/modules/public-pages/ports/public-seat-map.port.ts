@@ -1,13 +1,21 @@
-/** One seat row of the public seat map and the ticket type it sells. */
+/** One seat row of the public seat map and the ticket types its seats sell. */
 export interface PublicSeatRow {
   /** The row's number as stored: "1", "2", … */
   label: string;
-  /** One of the page's `tickets[].id`; null for a row with no type. */
+  /**
+   * One of the page's `tickets[].id` when every seat of the row sells it;
+   * null when its seats differ or have none.
+   */
   ticketTypeId: string | null;
+  /**
+   * Each seat's ticket type in seat-number order (index 0 = seat 1): one of
+   * the page's `tickets[].id`, or null for a seat with no type.
+   */
+  seatTicketTypes: (string | null)[];
 }
 
 /**
- * How a reserved room's rows are split between ticket types (US-PAGE-05,
+ * How a reserved room's seats are split between ticket types (US-PAGE-05,
  * US-EVT-05) — the layout only: no seat status, holds or sales, ever.
  */
 export interface PublicSeatMap {
@@ -17,14 +25,14 @@ export interface PublicSeatMap {
 }
 
 /**
- * The public page asks Seating how an event's seat rows are split between its
+ * The public page asks Seating how an event's seats are split between its
  * ticket types. PublicPages owns the abstraction; Seating binds the adapter,
  * because the seats are its table.
  */
 export abstract class PublicSeatMapPort {
   /**
-   * The event's seat map with each row's ticket type — null when the event has
-   * no map, or none of its rows has a type yet.
+   * The event's seat map with each seat's ticket type — null when the event
+   * has no map, or none of its seats has a type yet.
    */
   abstract typedSeatMap(
     organizationId: number,

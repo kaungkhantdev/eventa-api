@@ -525,13 +525,13 @@ describe('TicketingService', () => {
       expect(repo.update).toHaveBeenCalled();
     });
 
-    it('refuses to delete or retire a type that still has seat rows (409)', async () => {
+    it('refuses to delete or retire a type that still has seats (409)', async () => {
       const err = await service
         .deleteTicket(actor, eventId, 't1')
         .catch((e: unknown) => e);
       expect((err as DomainException).getStatus()).toBe(409);
       expect((err as DomainException).message).toBe(
-        'VIP still has seat rows. Give them to another ticket type first.',
+        'VIP still has seats. Give them to another ticket type first.',
       );
       expect(repo.hardDelete).not.toHaveBeenCalled();
       expect(repo.softDelete).not.toHaveBeenCalled();
@@ -542,7 +542,7 @@ describe('TicketingService', () => {
      * the delete would have its row's type cleared by the seats' foreign key
      * (ON DELETE SET NULL), so the removal looks again, under the type's lock.
      */
-    it('checks the seat rows again inside the removal, under the type’s lock (409)', async () => {
+    it('checks the seats again inside the removal, under the type’s lock (409)', async () => {
       const TX = {} as Tx;
       repo.findTicket.mockResolvedValue(ticketRow({ id: 't3', name: 'Gold' }));
       seats.seatsOfTicketTypeIn.mockResolvedValue(3);
@@ -557,12 +557,12 @@ describe('TicketingService', () => {
         .catch((e: unknown) => e);
       expect((err as DomainException).getStatus()).toBe(409);
       expect((err as DomainException).message).toBe(
-        'Gold still has seat rows. Give them to another ticket type first.',
+        'Gold still has seats. Give them to another ticket type first.',
       );
       expect(seats.seatsOfTicketTypeIn).toHaveBeenCalledWith(TX, 1, 't3');
     });
 
-    it('removes a type that has no seat rows', async () => {
+    it('removes a type that has no seats', async () => {
       repo.findTicket.mockResolvedValue(ticketRow({ id: 't3', total: 0 }));
       await expect(service.deleteTicket(actor, eventId, 't3')).resolves.toEqual(
         { outcome: 'removed' },

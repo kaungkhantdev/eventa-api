@@ -126,7 +126,7 @@ describe('TicketQuantityAdapter (US-EVT-05)', () => {
     expect(err).toBeInstanceOf(DomainException);
     expect((err as DomainException).getStatus()).toBe(409);
     expect((err as DomainException).message).toBe(
-      'Normal has sold 60 tickets, more than the 48 seats its rows now hold.',
+      'Normal has sold 60 tickets, more than the 48 seats it now holds.',
     );
     expect(repo.setTotalIn).not.toHaveBeenCalled();
   });

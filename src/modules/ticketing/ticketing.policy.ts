@@ -118,8 +118,8 @@ export class TicketingPolicy {
 
   /**
    * A reserved event whose seat map gives any seat a ticket type takes every
-   * ticket type's quantity from its rows (US-EVT-05). A reserved map with no
-   * typed seat — one laid out before rows had types — keeps typed quantities.
+   * ticket type's quantity from its seats (US-EVT-05). A reserved map with no
+   * typed seat — one laid out before seats had types — keeps typed quantities.
    */
   quantityFromSeats(seatingMode: string, hasTypedSeats: boolean): boolean {
     return seatingMode === RESERVED && hasTypedSeats;
@@ -134,26 +134,26 @@ export class TicketingPolicy {
   }
 
   /**
-   * A type that still sells seat rows can't go (US-TKT-05): deleting it would
-   * leave those rows selling under any type, and retiring it would leave them
+   * A type that still sells seats can't go (US-TKT-05): deleting it would
+   * leave those seats selling under any type, and retiring it would leave them
    * selling under none.
    */
-  assertNoSeatRows(name: string, seats: number): void {
+  assertNoSeats(name: string, seats: number): void {
     if (seats === 0) return;
     throw DomainException.conflict(
-      `${name} still has seat rows. Give them to another ticket type first.`,
+      `${name} still has seats. Give them to another ticket type first.`,
     );
   }
 
   /**
-   * On a reserved event whose rows have ticket types, a type's quantity is the
-   * seats its rows hold (US-EVT-05) — so a seat-map change may not leave it
+   * On a reserved event whose seats have ticket types, a type's quantity is
+   * the seats it holds (US-EVT-05) — so a seat-map change may not leave it
    * with fewer seats than it has already sold.
    */
   assertSeatsCoverSold(name: string, sold: number, seats: number): void {
     if (seats >= sold) return;
     throw DomainException.conflict(
-      `${name} has sold ${sold} tickets, more than the ${seats} seats its rows now hold.`,
+      `${name} has sold ${sold} tickets, more than the ${seats} seats it now holds.`,
     );
   }
 

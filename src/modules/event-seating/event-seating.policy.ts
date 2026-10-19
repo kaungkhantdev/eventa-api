@@ -1,134 +1,131 @@
 import { Injectable } from '@nestjs/common';
 import { DomainException } from '../../common/errors/domain.exception';
-import type { SeatRowsReadiness } from '../events/ports/seating-readiness.port';
+import type { SeatsReadiness } from '../events/ports/seating-readiness.port';
 import type { SeatTier } from './ports/ticket-quantity.port';
 import type {
   ConfigureReservedInput,
   NewSeatPosition,
   ReservedPlan,
   ReservedSnapshot,
-  RowRetype,
-  RowTicketTypes,
   SeatPosition,
+  SeatRetype,
   SeatRow,
-  SeatRowSummary,
 } from './event-seating.types';
 
 const SOLD = 'sold';
 
-/** Each row's ticket type after the save, keyed by row label ("1".."N"). */
-type RowTypes = Map<string, string | null>;
+/**
+ * Every seat of the grid once the save lands, row by row and seat by seat,
+ * with the ticket type it will sell (null for none).
+ */
+type Layout = NewSeatPosition[];
 
 /**
- * The rules of a reserved seat map split between ticket types by whole rows
- * (US-EVT-05). Pure: it decides on what the save read under its locks, so a
- * refusal here rolls the save back before anything is written.
+ * The rules of a reserved seat map split between ticket types seat by seat,
+ * whole rows being a shorthand (US-EVT-05). Pure: it decides on what the save
+ * read under its locks, so a refusal here rolls the save back before anything
+ * is written.
  */
 @Injectable()
 export class EventSeatingPolicy {
-  /** A row list, when sent, has exactly one entry per row (index 0 = row 1). */
-  assertOneTypePerRow(rows: number, rowTicketTypes?: RowTicketTypes): void {
-    if (rowTicketTypes === undefined || rowTicketTypes.length === rows) return;
-    throw DomainException.validation(
-      `Send one ticket type per row: this map has ${rows} rows, but ${rowTicketTypes.length} were sent.`,
+  /**
+   * The ticket types, when sent, come as one list or the other: one entry per
+   * row, or one per seat of every row (index 0 = row 1, seat 1).
+   */
+  assertTypeShape(input: ConfigureReservedInput): void {
+    const { rowTicketTypes, seatTicketTypes } = input;
+    if (rowTicketTypes && seatTicketTypes) {
+      throw DomainException.validation(
+        'Send rowTicketTypes or seatTicketTypes, not both.',
+      );
+    }
+    assertOnePerRow(input.rows, rowTicketTypes ?? seatTicketTypes);
+    seatTicketTypes?.forEach((seats, i) =>
+      assertOnePerSeat(i + 1, input.seatsPerRow, seats),
     );
   }
 
   /**
    * What laying the map out as `input` writes: the seats added (each with its
-   * row's type), the seats removed, the rows moving to another type, and — once
-   * any seat carries a type — the seats each live ticket type ends up with.
+   * type), the seats removed, the seats moving to another type, and — once any
+   * seat carries a type — the seats each live ticket type ends up with.
    * `published` is any event past its draft: its sold seats stay, and so does
-   * a type on every row once any row has one.
+   * a type on every seat once any seat has one.
    */
   planReserved(
     snapshot: ReservedSnapshot,
     input: ConfigureReservedInput,
     published: boolean,
   ): ReservedPlan {
-    const rowTypes = this.rowTypesAfter(snapshot.seats, input);
-    this.assertLiveTypes(rowTypes, snapshot.tiers);
-    this.assertEveryRowTyped(rowTypes, published);
-    const grid = diffGrid(snapshot.seats, input.rows, input.seatsPerRow);
-    this.assertNoSoldSeatRemoved(grid.removed, published);
-    const retyped = this.retypedRows(grid.kept, rowTypes, snapshot);
-    const added = grid.added.map((p) => ({
-      ...p,
-      ticketTypeId: rowTypes.get(p.rowLabel) ?? null,
-    }));
+    const layout = layoutAfter(snapshot.seats, input);
+    this.assertLiveTypes(layout, snapshot.tiers, Boolean(input.rowTicketTypes));
+    this.assertEverySeatTyped(layout, published);
+    const diff = diffLayout(snapshot.seats, layout);
+    this.assertNoSoldSeatRemoved(diff.removed, published);
     return {
-      added,
-      removedSeatIds: grid.removed.map((s) => s.id),
-      retyped,
-      seatsByTier: seatsByTier(grid.kept, added, rowTypes, snapshot.tiers),
+      added: diff.added,
+      removedSeatIds: diff.removed.map((s) => s.id),
+      retyped: this.retypedSeats(diff.kept, layout, snapshot.occupiedSeatIds),
+      seatsByTier: seatsByTier(layout, snapshot.tiers),
     };
   }
 
   /**
-   * Where the rows stand against the event's live ticket types. A map none of
-   * whose rows has a type yet — one laid out before rows had types — is one
-   * gap, its rows, rather than one per ticket type as well.
+   * Where the seats stand against the event's live ticket types. A map none
+   * of whose seats has a type yet — one laid out before seats had types — is
+   * one gap, its seats, rather than one per ticket type as well.
    */
-  readiness(rows: SeatRowSummary[], tiers: SeatTier[]): SeatRowsReadiness {
-    const rowsWithoutType = rows.filter((r) => r.ticketTypeId === null).length;
-    if (rows.length > 0 && rowsWithoutType === rows.length) {
-      return { rowsWithoutType, ticketTypesWithoutRows: [] };
+  readiness(
+    seatTypes: readonly (string | null)[],
+    tiers: SeatTier[],
+  ): SeatsReadiness {
+    const seatsWithoutType = seatTypes.filter((t) => t === null).length;
+    if (seatTypes.length > 0 && seatsWithoutType === seatTypes.length) {
+      return { seatsWithoutType, ticketTypesWithoutSeats: [] };
     }
-    const typesWithRows = new Set(rows.map((r) => r.ticketTypeId));
+    const typesWithSeats = new Set(seatTypes);
     return {
-      rowsWithoutType,
-      ticketTypesWithoutRows: tiers
-        .filter((t) => !typesWithRows.has(t.id))
+      seatsWithoutType,
+      ticketTypesWithoutSeats: tiers
+        .filter((t) => !typesWithSeats.has(t.id))
         .map((t) => t.name),
     };
   }
 
   /**
-   * The type each row will sell: the one sent for it, or — when no list is
-   * sent — the type its seats already carry (a new row gets none).
+   * Every type must be a live ticket type of this event. A row list names the
+   * row, as it was sent; otherwise the seat is named.
    */
-  private rowTypesAfter(
-    seats: SeatRow[],
-    input: ConfigureReservedInput,
-  ): RowTypes {
-    const current = currentRowTypes(seats);
-    const types: RowTypes = new Map();
-    for (let row = 1; row <= input.rows; row += 1) {
-      const label = String(row);
-      const sent = input.rowTicketTypes?.[row - 1];
-      types.set(
-        label,
-        sent !== undefined ? sent : (current.get(label) ?? null),
-      );
-    }
-    return types;
-  }
-
-  /** Every type sent must be a live ticket type of this event. */
-  private assertLiveTypes(rowTypes: RowTypes, tiers: SeatTier[]): void {
+  private assertLiveTypes(
+    layout: Layout,
+    tiers: SeatTier[],
+    sentByRow: boolean,
+  ): void {
     const live = new Set(tiers.map((t) => t.id));
-    for (const [row, type] of rowTypes) {
-      if (type === null || live.has(type)) continue;
-      throw DomainException.validation(
-        `Row ${row}'s ticket type isn't one of this event's ticket types.`,
-      );
-    }
+    const stray = layout.find(
+      (s) => s.ticketTypeId !== null && !live.has(s.ticketTypeId),
+    );
+    if (!stray) return;
+    const whose = sentByRow
+      ? `Row ${stray.rowLabel}'s`
+      : `Row ${stray.rowLabel} seat ${stray.seatNumber}'s`;
+    throw DomainException.validation(
+      `${whose} ticket type isn't one of this event's ticket types.`,
+    );
   }
 
   /**
-   * Once a published event's rows have ticket types, every row needs one: a
+   * Once a published event's seats have ticket types, every seat needs one: a
    * seat with none would sell under whichever type the buyer picks, at that
-   * type's price (US-EVT-05). A draft may leave rows open until it publishes,
-   * and a map none of whose rows has a type still sells as it always has.
+   * type's price (US-EVT-05). A draft may leave seats open until it publishes,
+   * and a map none of whose seats has a type still sells as it always has.
    */
-  private assertEveryRowTyped(rowTypes: RowTypes, published: boolean): void {
-    if (!published) return;
-    const types = [...rowTypes.values()];
-    if (types.every((type) => type === null)) return;
-    const untyped = [...rowTypes].find(([, type]) => type === null);
+  private assertEverySeatTyped(layout: Layout, published: boolean): void {
+    if (!published || layout.every((s) => s.ticketTypeId === null)) return;
+    const untyped = layout.find((s) => s.ticketTypeId === null);
     if (!untyped) return;
     throw DomainException.validation(
-      `Give row ${untyped[0]} a ticket type. Every row of a published event needs one.`,
+      `Give every seat in row ${untyped.rowLabel} a ticket type. Every seat of a published event needs one.`,
     );
   }
 
@@ -141,86 +138,124 @@ export class EventSeatingPolicy {
   }
 
   /**
-   * The rows whose kept seats change type. A row with any seat booked or held —
-   * counting seats this save removes — keeps the type it was sold or held
-   * under: retyping it would sell one seat twice over, under two prices.
+   * The kept seats whose type changes, grouped by the type they move to. A
+   * seat booked or held keeps the type it was sold or held under: retyping it
+   * would sell one seat twice over, under two prices. Its row's other seats
+   * may still move.
    */
-  private retypedRows(
+  private retypedSeats(
     kept: SeatRow[],
-    rowTypes: RowTypes,
-    snapshot: ReservedSnapshot,
-  ): RowRetype[] {
-    const rowsBefore = groupByRow(snapshot.seats);
-    const retyped: RowRetype[] = [];
-    for (const [row, seats] of groupByRow(kept)) {
-      const ticketTypeId = rowTypes.get(row) ?? null;
-      if (seats.every((s) => s.ticketTypeId === ticketTypeId)) continue;
-      const before = rowsBefore.get(row) ?? seats;
-      if (before.some((s) => snapshot.occupiedSeatIds.has(s.id))) {
-        throw DomainException.conflict(
-          `Row ${row} has booked or held seats, so its ticket type can't change.`,
-        );
-      }
-      retyped.push({ ticketTypeId, seatIds: seats.map((s) => s.id) });
+    layout: Layout,
+    occupiedSeatIds: ReadonlySet<number>,
+  ): SeatRetype[] {
+    const typeAt = new Map(layout.map((s) => [positionKey(s), s.ticketTypeId]));
+    const typeOf = (s: SeatRow) => typeAt.get(positionKey(s)) ?? null;
+    const moving = kept.filter((s) => s.ticketTypeId !== typeOf(s));
+    const locked = moving.find((s) => occupiedSeatIds.has(s.id));
+    if (locked) {
+      throw DomainException.conflict(
+        `Row ${locked.rowLabel} seat ${locked.seatNumber} is booked or held, so its ticket type can't change.`,
+      );
     }
-    return retyped;
+    return groupByType(moving, typeOf);
   }
 }
 
-/**
- * Seats per live ticket type once the save lands, 0 for a type with no rows —
- * or null when no seat carries a type, which leaves the quantities typed.
- */
-function seatsByTier(
-  kept: SeatRow[],
-  added: NewSeatPosition[],
-  rowTypes: RowTypes,
-  tiers: SeatTier[],
-): ReadonlyMap<string, number> | null {
-  const types = [
-    ...kept.map((s) => rowTypes.get(s.rowLabel ?? '') ?? null),
-    ...added.map((s) => s.ticketTypeId),
-  ];
-  if (types.every((t) => t === null)) return null;
-  return new Map(
-    tiers.map((t) => [t.id, types.filter((id) => id === t.id).length]),
+/** A list sent per row, or per seat of every row, has one entry per row. */
+function assertOnePerRow(
+  rows: number,
+  perRow: readonly unknown[] | null | undefined,
+): void {
+  if (!perRow || perRow.length === rows) return;
+  throw DomainException.validation(
+    `Send one ticket type per row: this map has ${rows} rows, but ${perRow.length} were sent.`,
   );
 }
 
-/** The type each existing row's seats carry (its first seat answers for it). */
-function currentRowTypes(seats: SeatRow[]): Map<string, string | null> {
-  const types = new Map<string, string | null>();
-  for (const [row, rowSeats] of groupByRow(seats)) {
-    types.set(row, rowSeats[0].ticketTypeId);
-  }
-  return types;
-}
-
-/** Seats grouped by row label, rows in the order they first appear. */
-function groupByRow(seats: SeatRow[]): Map<string, SeatRow[]> {
-  const rows = new Map<string, SeatRow[]>();
-  for (const seat of seats) {
-    const row = seat.rowLabel ?? '';
-    const list = rows.get(row);
-    if (list) list.push(seat);
-    else rows.set(row, [seat]);
-  }
-  return rows;
-}
-
-/** The existing seats a rows × seatsPerRow grid keeps and drops, and what it adds. */
-function diffGrid(
-  seats: SeatRow[],
-  rows: number,
+/** Each row of a per-seat list has one entry per seat. */
+function assertOnePerSeat(
+  row: number,
   seatsPerRow: number,
-): { kept: SeatRow[]; removed: SeatRow[]; added: SeatPosition[] } {
-  const desired = gridPositions(rows, seatsPerRow);
-  const desiredKeys = new Set(desired.map(positionKey));
-  const existingKeys = new Set(seats.map(positionKey));
+  seats: readonly unknown[],
+): void {
+  if (seats.length === seatsPerRow) return;
+  throw DomainException.validation(
+    `Send one ticket type per seat: row ${row} has ${seatsPerRow} seats, but ${seats.length} were sent.`,
+  );
+}
+
+/**
+ * Every seat of the rows × seatsPerRow grid with the type it will sell: the
+ * one sent for it (its own, or its row's), or — when nothing is sent — the
+ * type it carries now. A new seat gets none.
+ */
+function layoutAfter(seats: SeatRow[], input: ConfigureReservedInput): Layout {
+  const current = new Map(seats.map((s) => [positionKey(s), s.ticketTypeId]));
+  return gridPositions(input.rows, input.seatsPerRow).map((p) => {
+    const sent = sentTypeAt(input, p);
+    const ticketTypeId =
+      sent === undefined ? (current.get(positionKey(p)) ?? null) : sent;
+    return { ...p, ticketTypeId };
+  });
+}
+
+/** The type sent for the seat at `p`; undefined when no list was sent. */
+function sentTypeAt(
+  input: ConfigureReservedInput,
+  p: SeatPosition,
+): string | null | undefined {
+  const row = Number(p.rowLabel) - 1;
+  if (input.seatTicketTypes) {
+    return input.seatTicketTypes[row]?.[Number(p.seatNumber) - 1];
+  }
+  return input.rowTicketTypes?.[row];
+}
+
+/**
+ * Seats per live ticket type once the save lands, 0 for a type with no seats —
+ * or null when no seat carries a type, which leaves the quantities typed.
+ */
+function seatsByTier(
+  layout: Layout,
+  tiers: SeatTier[],
+): ReadonlyMap<string, number> | null {
+  if (layout.every((s) => s.ticketTypeId === null)) return null;
+  const counts = new Map<string | null, number>();
+  for (const { ticketTypeId } of layout) {
+    counts.set(ticketTypeId, (counts.get(ticketTypeId) ?? 0) + 1);
+  }
+  return new Map(tiers.map((t) => [t.id, counts.get(t.id) ?? 0]));
+}
+
+/** Seats grouped by the type they move to, groups in order of first seat. */
+function groupByType(
+  seats: SeatRow[],
+  typeOf: (s: SeatRow) => string | null,
+): SeatRetype[] {
+  const groups = new Map<string | null, number[]>();
+  for (const seat of seats) {
+    const type = typeOf(seat);
+    const ids = groups.get(type);
+    if (ids) ids.push(seat.id);
+    else groups.set(type, [seat.id]);
+  }
+  return [...groups].map(([ticketTypeId, seatIds]) => ({
+    ticketTypeId,
+    seatIds,
+  }));
+}
+
+/** The existing seats a layout keeps and drops, and the seats it adds. */
+function diffLayout(
+  seats: SeatRow[],
+  layout: Layout,
+): { kept: SeatRow[]; removed: SeatRow[]; added: NewSeatPosition[] } {
+  const wanted = new Set(layout.map(positionKey));
+  const existing = new Set(seats.map(positionKey));
   return {
-    kept: seats.filter((s) => desiredKeys.has(positionKey(s))),
-    removed: seats.filter((s) => !desiredKeys.has(positionKey(s))),
-    added: desired.filter((p) => !existingKeys.has(positionKey(p))),
+    kept: seats.filter((s) => wanted.has(positionKey(s))),
+    removed: seats.filter((s) => !wanted.has(positionKey(s))),
+    added: layout.filter((p) => !existing.has(positionKey(p))),
   };
 }
 

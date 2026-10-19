@@ -57,10 +57,9 @@ type PublishRequirement = keyof typeof PUBLISH_REQUIREMENTS;
 const SEATING_GAP = 'seating' as const;
 type PublishGap = PublishRequirement | typeof SEATING_GAP;
 const RESERVED_SEATING = 'reserved';
-const UNTYPED_SEAT_ROWS =
-  'Give every seat row a ticket type before publishing.';
-const rowlessTicketType = (name: string) =>
-  `${name} has no seat rows. Give it a row or remove it.`;
+const UNTYPED_SEATS = 'Give every seat a ticket type before publishing.';
+const seatlessTicketType = (name: string) =>
+  `${name} has no seats. Give it some seats or remove it.`;
 
 /**
  * The description is rich text an ORGANIZER authors and an ATTENDEE loads on a
@@ -442,23 +441,20 @@ export class EventsService {
   }
 
   /**
-   * A reserved, in-person event publishes only once every seat row has a
-   * ticket type and every ticket type a row (US-EVT-05). Only drafts reach
-   * here, so an event already published is never re-checked — but a draft
-   * whose map was laid out before rows had types must type them first.
+   * A reserved, in-person event publishes only once every seat has a ticket
+   * type and every ticket type a seat (US-EVT-05). Only drafts reach here, so
+   * an event already published is never re-checked — but a draft whose map
+   * was laid out before seats had types must type them first.
    */
   private async seatingGaps(
     organizationId: number,
     e: EventRow,
   ): Promise<string[]> {
     if (e.seatingMode !== RESERVED_SEATING || e.isOnline) return [];
-    const readiness = await this.seating.seatRowsReadiness(
-      organizationId,
-      e.id,
-    );
+    const readiness = await this.seating.seatsReadiness(organizationId, e.id);
     return [
-      ...(readiness.rowsWithoutType > 0 ? [UNTYPED_SEAT_ROWS] : []),
-      ...readiness.ticketTypesWithoutRows.map(rowlessTicketType),
+      ...(readiness.seatsWithoutType > 0 ? [UNTYPED_SEATS] : []),
+      ...readiness.ticketTypesWithoutSeats.map(seatlessTicketType),
     ];
   }
 

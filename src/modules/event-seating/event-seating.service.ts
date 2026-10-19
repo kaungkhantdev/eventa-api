@@ -6,7 +6,11 @@ import type { EventResponseDto } from '../events/dto/event-response.dto';
 import { EventsService } from '../events/events.service';
 import { TicketAvailabilityPort } from '../events/ports/ticket-availability.port';
 import { SeatingResponseDto } from './dto/seating-response.dto';
-import { toSeatRows, unassignedRowCount } from './event-seating.mapper';
+import {
+  toSeatRows,
+  unassignedRowCount,
+  unassignedSeatCount,
+} from './event-seating.mapper';
 import { EventSeatingPolicy } from './event-seating.policy';
 import { EventSeatingRepository } from './event-seating.repository';
 import type {
@@ -25,7 +29,8 @@ const ONLINE_NOTE =
 
 /**
  * Configure an event's seating: general-admission headcount or a reserved map,
- * its rows split between the event's ticket types (US-EVT-05).
+ * its seats split between the event's ticket types — seat by seat, or a whole
+ * row at a time (US-EVT-05).
  */
 @Injectable()
 export class EventSeatingService {
@@ -38,9 +43,10 @@ export class EventSeatingService {
   ) {}
 
   /**
-   * Lay out reserved seating (rows × seats) and give each row a ticket type.
-   * In-person only. The repository runs the whole save under its locks and the
-   * policy decides it there, so a refusal writes nothing.
+   * Lay out reserved seating (rows × seats) and give each seat a ticket type,
+   * one by one or a row at a time. In-person only. The repository runs the
+   * whole save under its locks and the policy decides it there, so a refusal
+   * writes nothing.
    */
   async configureReserved(
     actor: EventActor,
@@ -49,9 +55,9 @@ export class EventSeatingService {
   ): Promise<SeatingResponseDto> {
     const event = await this.events.getEvent(actor, eventId);
     this.assertInPerson(event);
-    this.policy.assertOneTypePerRow(input.rows, input.rowTicketTypes);
-    // A published event keeps its sold seats, and a type on every row once
-    // any row has one; a draft may leave either open until it publishes.
+    this.policy.assertTypeShape(input);
+    // A published event keeps its sold seats, and a type on every seat once
+    // any seat has one; a draft may leave either open until it publishes.
     const published = event.status !== 'draft';
     const map = await this.repo.applyReserved(
       actor.organizationId,
@@ -107,7 +113,7 @@ export class EventSeatingService {
 
   /**
    * Copy the source event's seat map onto a new event: fresh, all-available
-   * seats, with no ticket types on its rows.
+   * seats, with no ticket types.
    */
   async cloneForEvent(
     actor: EventActor,
@@ -158,6 +164,7 @@ export class EventSeatingService {
         seatMap: null,
         rows: [],
         unassignedRows: 0,
+        unassignedSeats: 0,
         ticketQuantity: 0,
         seatShortfall: null,
         note: ONLINE_NOTE,
@@ -187,6 +194,7 @@ export class EventSeatingService {
       seatMap,
       rows,
       unassignedRows: unassignedRowCount(rows),
+      unassignedSeats: unassignedSeatCount(rows),
       ticketQuantity,
       seatShortfall: shortfall
         ? { totalSeats: seatMap.totalSeats, ticketQuantity }
@@ -195,12 +203,12 @@ export class EventSeatingService {
     };
   }
 
-  /** Each row of the map and the ticket type it sells; none without a map. */
+  /** Each row of the map and its seats' ticket types; none without a map. */
   private async rowsOf(
     organizationId: number,
     map: SeatMapRow | null,
   ): Promise<SeatRowSummary[]> {
     if (!map) return [];
-    return toSeatRows(await this.repo.rowTypeCounts(organizationId, map.id));
+    return toSeatRows(await this.repo.seatTypes(organizationId, map.id));
   }
 }

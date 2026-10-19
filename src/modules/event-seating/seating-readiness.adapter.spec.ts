@@ -3,6 +3,12 @@ import { EventSeatingRepository } from './event-seating.repository';
 import { TicketQuantityPort } from './ports/ticket-quantity.port';
 import { SeatingReadinessAdapter } from './seating-readiness.adapter';
 
+const seat = (
+  rowLabel: string,
+  seatNumber: string,
+  ticketTypeId: string | null,
+) => ({ rowLabel, seatNumber, ticketTypeId });
+
 describe('SeatingReadinessAdapter (US-EVT-05)', () => {
   let repo: jest.Mocked<EventSeatingRepository>;
   let tiers: jest.Mocked<TicketQuantityPort>;
@@ -11,10 +17,14 @@ describe('SeatingReadinessAdapter (US-EVT-05)', () => {
   beforeEach(() => {
     repo = {
       findMap: jest.fn().mockResolvedValue({ id: 5 }),
-      rowTypeCounts: jest.fn().mockResolvedValue([
-        { rowLabel: '1', ticketTypeId: 'vip', seats: 16 },
-        { rowLabel: '2', ticketTypeId: null, seats: 16 },
-      ]),
+      seatTypes: jest
+        .fn()
+        .mockResolvedValue([
+          seat('1', '1', 'vip'),
+          seat('1', '2', 'vip'),
+          seat('2', '1', 'vip'),
+          seat('2', '2', null),
+        ]),
     } as unknown as jest.Mocked<EventSeatingRepository>;
     tiers = {
       liveTiers: jest.fn().mockResolvedValue([
@@ -29,22 +39,22 @@ describe('SeatingReadinessAdapter (US-EVT-05)', () => {
     );
   });
 
-  it("reads the map's rows against the event's live ticket types", async () => {
-    await expect(adapter.seatRowsReadiness(1, 'e1')).resolves.toEqual({
-      rowsWithoutType: 1,
-      ticketTypesWithoutRows: ['Free'],
+  it("reads the map's seats against the event's live ticket types", async () => {
+    await expect(adapter.seatsReadiness(1, 'e1')).resolves.toEqual({
+      seatsWithoutType: 1,
+      ticketTypesWithoutSeats: ['Free'],
     });
-    expect(repo.rowTypeCounts).toHaveBeenCalledWith(1, 5);
+    expect(repo.seatTypes).toHaveBeenCalledWith(1, 5);
     expect(tiers.liveTiers).toHaveBeenCalledWith(1, 'e1');
   });
 
-  it('has no rows to read when there is no map yet', async () => {
+  it('has no seats to read when there is no map yet', async () => {
     repo.findMap.mockResolvedValue(null);
-    const readiness = await adapter.seatRowsReadiness(1, 'e1');
+    const readiness = await adapter.seatsReadiness(1, 'e1');
     expect(readiness).toEqual({
-      rowsWithoutType: 0,
-      ticketTypesWithoutRows: ['VIP', 'Free'],
+      seatsWithoutType: 0,
+      ticketTypesWithoutSeats: ['VIP', 'Free'],
     });
-    expect(repo.rowTypeCounts).not.toHaveBeenCalled();
+    expect(repo.seatTypes).not.toHaveBeenCalled();
   });
 });

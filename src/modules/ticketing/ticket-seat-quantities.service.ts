@@ -6,7 +6,7 @@ import { TicketSeatsPort } from './ports/ticket-seats.port';
 import { TicketingPolicy } from './ticketing.policy';
 
 /**
- * The seats each ticket type's rows hold, on a reserved event whose rows have
+ * The seats each ticket type holds, on a reserved event whose seats have
  * types (US-EVT-05) — null on any other event, whose quantities are typed.
  */
 export type SeatQuantities = ReadonlyMap<string, number> | null;
@@ -26,7 +26,7 @@ export class TicketSeatQuantitiesService {
   ) {}
 
   /**
-   * The seats each ticket type's rows hold when the event's seat map sets its
+   * The seats each ticket type holds when the event's seat map sets its
    * quantities, else null. Reads the event through Events, so it is also the
    * 404 for an event outside the caller's workspace.
    */
@@ -42,7 +42,7 @@ export class TicketSeatQuantitiesService {
   }
 
   /**
-   * Refuses (409) to remove a ticket type that still has seat rows, counted
+   * Refuses (409) to remove a ticket type that still has seats, counted
    * inside the removal's transaction under the type's lock (US-TKT-05).
    */
   async assertUnseatedIn(
@@ -55,6 +55,6 @@ export class TicketSeatQuantitiesService {
       organizationId,
       ticket.id,
     );
-    this.policy.assertNoSeatRows(ticket.name, seats);
+    this.policy.assertNoSeats(ticket.name, seats);
   }
 }

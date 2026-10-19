@@ -241,7 +241,7 @@ describe('TicketingPolicy', () => {
   });
 
   describe('assertSeatsCoverSold (US-EVT-05)', () => {
-    it('accepts rows holding at least the seats already sold', () => {
+    it('accepts seats at least as many as those already sold', () => {
       expect(
         thrown(() => policy.assertSeatsCoverSold('VIP', 10, 10)),
       ).toBeUndefined();
@@ -254,7 +254,7 @@ describe('TicketingPolicy', () => {
       const err = thrown(() => policy.assertSeatsCoverSold('Normal', 60, 48));
       expect(status(err)).toBe(409);
       expect(message(err)).toBe(
-        'Normal has sold 60 tickets, more than the 48 seats its rows now hold.',
+        'Normal has sold 60 tickets, more than the 48 seats it now holds.',
       );
     });
   });
@@ -289,16 +289,16 @@ describe('TicketingPolicy', () => {
     });
   });
 
-  describe('assertNoSeatRows (US-TKT-05)', () => {
-    it('lets a type with no seat rows go', () => {
-      expect(thrown(() => policy.assertNoSeatRows('Free', 0))).toBeUndefined();
+  describe('assertNoSeats (US-TKT-05)', () => {
+    it('lets a type with no seats go', () => {
+      expect(thrown(() => policy.assertNoSeats('Free', 0))).toBeUndefined();
     });
 
-    it('keeps a type that still has seat rows (409)', () => {
-      const err = thrown(() => policy.assertNoSeatRows('Free', 16));
+    it('keeps a type that still has seats (409)', () => {
+      const err = thrown(() => policy.assertNoSeats('Free', 16));
       expect(status(err)).toBe(409);
       expect(message(err)).toBe(
-        'Free still has seat rows. Give them to another ticket type first.',
+        'Free still has seats. Give them to another ticket type first.',
       );
     });
   });

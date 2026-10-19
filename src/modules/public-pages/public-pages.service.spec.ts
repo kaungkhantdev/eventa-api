@@ -179,12 +179,23 @@ describe('PublicPagesService (US-PAGE-01…06, 08)', () => {
     const typed = {
       seatsPerRow: 16,
       rows: [
-        { label: '1', ticketTypeId: 't1' },
-        { label: '2', ticketTypeId: 't2' },
+        {
+          label: '1',
+          ticketTypeId: 't1',
+          seatTicketTypes: Array<string>(16).fill('t1'),
+        },
+        {
+          label: '2',
+          ticketTypeId: null,
+          seatTicketTypes: [
+            ...Array<string>(5).fill('t2'),
+            ...Array<string>(11).fill('t1'),
+          ],
+        },
       ],
     };
 
-    it("shows a reserved event's rows and the ticket type each sells", async () => {
+    it("shows a reserved event's rows and each seat's ticket type, a split row included", async () => {
       load({ seatingMode: 'reserved' });
       seating.typedSeatMap.mockResolvedValue(typed);
       const page = await service.getPage(SLUG);

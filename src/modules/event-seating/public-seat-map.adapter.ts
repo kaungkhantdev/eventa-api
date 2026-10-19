@@ -8,7 +8,7 @@ import { EventSeatingRepository } from './event-seating.repository';
 
 /**
  * Seating's implementation of PublicPages' `PublicSeatMapPort` (US-PAGE-05):
- * how an event's seat rows are split between its ticket types, read from the
+ * how an event's seats are split between its ticket types, read from the
  * seats this module owns. The caller passes the event's own organization, so
  * an anonymous page can only read its own event's map.
  */
@@ -24,7 +24,7 @@ export class PublicSeatMapAdapter extends PublicSeatMapPort {
   ): Promise<PublicSeatMap | null> {
     const map = await this.repo.findMap(organizationId, eventId);
     if (!map) return null;
-    const counts = await this.repo.rowTypeCounts(organizationId, map.id);
-    return toPublicSeatMap(map.layout, toSeatRows(counts));
+    const seats = await this.repo.seatTypes(organizationId, map.id);
+    return toPublicSeatMap(map.layout, toSeatRows(seats));
   }
 }

@@ -18,6 +18,13 @@ const eventId = 'e1';
 const NOW = new Date('2026-06-01T00:00:00Z');
 const VIP = 'aaaaaaaa-0000-4000-8000-000000000001';
 const NORMAL = 'aaaaaaaa-0000-4000-8000-000000000002';
+const FREE = 'aaaaaaaa-0000-4000-8000-000000000003';
+
+const seat = (
+  rowLabel: string,
+  seatNumber: string,
+  ticketTypeId: string | null,
+) => ({ rowLabel, seatNumber, ticketTypeId });
 
 function eventDto(o: Partial<EventResponseDto> = {}): EventResponseDto {
   return {
@@ -108,7 +115,7 @@ describe('EventSeatingService', () => {
             }),
           ),
       ),
-      rowTypeCounts: jest.fn().mockResolvedValue([]),
+      seatTypes: jest.fn().mockResolvedValue([]),
       clearSeating: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<EventSeatingRepository>;
     events = {
@@ -157,6 +164,64 @@ describe('EventSeatingService', () => {
         .catch((e: unknown) => e);
       expect((err as DomainException).getStatus()).toBe(422);
       expect(repo.applyReserved).not.toHaveBeenCalled();
+    });
+
+    it('refuses rows and seats sent together (422) before saving', async () => {
+      const err = await service
+        .configureReserved(actor, eventId, {
+          name: 'Hall',
+          rows: 1,
+          seatsPerRow: 2,
+          rowTicketTypes: [VIP],
+          seatTicketTypes: [[VIP, VIP]],
+        })
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(422);
+      expect((err as DomainException).message).toBe(
+        'Send rowTicketTypes or seatTicketTypes, not both.',
+      );
+      expect(repo.applyReserved).not.toHaveBeenCalled();
+    });
+
+    it('refuses a seat list that is not one entry per seat (422) before saving', async () => {
+      const err = await service
+        .configureReserved(actor, eventId, {
+          name: 'Hall',
+          rows: 1,
+          seatsPerRow: 3,
+          seatTicketTypes: [[VIP, VIP]],
+        })
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(422);
+      expect(repo.applyReserved).not.toHaveBeenCalled();
+    });
+
+    it('saves each seat on the ticket type sent for it', async () => {
+      await service.configureReserved(actor, eventId, {
+        name: 'Hall',
+        rows: 1,
+        seatsPerRow: 3,
+        seatTicketTypes: [[FREE, NORMAL, NORMAL]],
+      });
+      const plan = planner()(
+        snapshot({
+          tiers: [
+            { id: NORMAL, name: 'Normal' },
+            { id: FREE, name: 'Free' },
+          ],
+        }),
+      );
+      expect(plan.added.map((s) => s.ticketTypeId)).toEqual([
+        FREE,
+        NORMAL,
+        NORMAL,
+      ]);
+      expect(plan.seatsByTier).toEqual(
+        new Map([
+          [NORMAL, 2],
+          [FREE, 1],
+        ]),
+      );
     });
 
     it('saves rows × seats with each row on its ticket type, then switches the mode', async () => {
@@ -214,7 +279,7 @@ describe('EventSeatingService', () => {
     it('keeps the mode when the save is refused', async () => {
       repo.applyReserved.mockRejectedValue(
         DomainException.conflict(
-          "Row 2 has booked or held seats, so its ticket type can't change.",
+          "Row 2 seat 1 is booked or held, so its ticket type can't change.",
         ),
       );
       const err = await service
@@ -229,23 +294,41 @@ describe('EventSeatingService', () => {
       expect(events.updateEvent).not.toHaveBeenCalled();
     });
 
-    it('answers with every row, its ticket type and seats, and the rows still untyped', async () => {
-      repo.rowTypeCounts.mockResolvedValue([
-        { rowLabel: '2', ticketTypeId: null, seats: 3 },
-        { rowLabel: '1', ticketTypeId: VIP, seats: 3 },
+    it("answers with every row, each seat's ticket type, and the rows and seats still untyped", async () => {
+      repo.seatTypes.mockResolvedValue([
+        seat('2', '1', FREE),
+        seat('2', '2', null),
+        seat('2', '3', null),
+        seat('1', '1', VIP),
+        seat('1', '2', VIP),
+        seat('1', '3', VIP),
       ]);
       const res = await service.configureReserved(actor, eventId, {
         name: 'Hall',
         rows: 2,
         seatsPerRow: 3,
-        rowTicketTypes: [VIP, null],
+        seatTicketTypes: [
+          [VIP, VIP, VIP],
+          [FREE, null, null],
+        ],
       });
-      expect(repo.rowTypeCounts).toHaveBeenCalledWith(1, 5);
+      expect(repo.seatTypes).toHaveBeenCalledWith(1, 5);
       expect(res.rows).toEqual([
-        { rowLabel: '1', ticketTypeId: VIP, seats: 3 },
-        { rowLabel: '2', ticketTypeId: null, seats: 3 },
+        {
+          rowLabel: '1',
+          ticketTypeId: VIP,
+          seats: 3,
+          seatTicketTypes: [VIP, VIP, VIP],
+        },
+        {
+          rowLabel: '2',
+          ticketTypeId: null,
+          seats: 3,
+          seatTicketTypes: [FREE, null, null],
+        },
       ]);
       expect(res.unassignedRows).toBe(1);
+      expect(res.unassignedSeats).toBe(2);
     });
   });
 
@@ -275,6 +358,7 @@ describe('EventSeatingService', () => {
       expect(res.capacity).toBe(250);
       expect(res.rows).toEqual([]);
       expect(res.unassignedRows).toBe(0);
+      expect(res.unassignedSeats).toBe(0);
     });
 
     it('refuses to switch away from reserved when seats are sold (422)', async () => {
@@ -303,13 +387,14 @@ describe('EventSeatingService', () => {
     it("reads each row's ticket type back in row order", async () => {
       events.getEvent.mockResolvedValue(eventDto({ seatingMode: 'reserved' }));
       repo.findMap.mockResolvedValue(seatMapRow());
-      repo.rowTypeCounts.mockResolvedValue([
-        { rowLabel: '10', ticketTypeId: NORMAL, seats: 3 },
-        { rowLabel: '2', ticketTypeId: VIP, seats: 3 },
+      repo.seatTypes.mockResolvedValue([
+        seat('10', '1', NORMAL),
+        seat('2', '1', VIP),
       ]);
       const res = await service.getSeating(actor, eventId);
       expect(res.rows.map((r) => r.rowLabel)).toEqual(['2', '10']);
       expect(res.unassignedRows).toBe(0);
+      expect(res.unassignedSeats).toBe(0);
     });
 
     it('offers no seating for an online event and explains the join link', async () => {
@@ -319,6 +404,7 @@ describe('EventSeatingService', () => {
       expect(res.seatMap).toBeNull();
       expect(res.rows).toEqual([]);
       expect(res.unassignedRows).toBe(0);
+      expect(res.unassignedSeats).toBe(0);
       expect(res.note).toMatch(/join link/i);
       expect(repo.findMap).not.toHaveBeenCalled();
     });

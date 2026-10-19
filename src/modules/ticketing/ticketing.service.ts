@@ -328,7 +328,7 @@ export class TicketingService {
       );
     }
     const seats = await this.seatQuantities.forEvent(actor, eventId);
-    this.policy.assertNoSeatRows(ticket.name, seats?.get(ticketId) ?? 0);
+    this.policy.assertNoSeats(ticket.name, seats?.get(ticketId) ?? 0);
     if (await this.checkout.hasActiveHolds(actor.organizationId, ticketId)) {
       throw DomainException.conflict(
         'Someone is checking out with this ticket type — pause it and try again shortly.',

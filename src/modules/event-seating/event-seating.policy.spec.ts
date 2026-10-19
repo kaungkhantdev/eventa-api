@@ -63,21 +63,93 @@ function refusal(run: () => unknown): DomainException {
 describe('EventSeatingPolicy', () => {
   const policy = new EventSeatingPolicy();
 
-  describe('assertOneTypePerRow', () => {
-    it('accepts no list at all — every row keeps its type', () => {
-      expect(() => policy.assertOneTypePerRow(3)).not.toThrow();
+  describe('assertTypeShape', () => {
+    it('accepts no list at all — every seat keeps its type', () => {
+      expect(() => policy.assertTypeShape(input({ rows: 3 }))).not.toThrow();
     });
 
     it('accepts exactly one entry per row', () => {
       expect(() =>
-        policy.assertOneTypePerRow(3, [VIP, null, NORMAL]),
+        policy.assertTypeShape(
+          input({ rows: 3, rowTicketTypes: [VIP, null, NORMAL] }),
+        ),
       ).not.toThrow();
     });
 
-    it('refuses a list whose length is not the row count (422)', () => {
-      const err = refusal(() => policy.assertOneTypePerRow(3, [VIP, NORMAL]));
+    it('accepts exactly one entry per seat of every row', () => {
+      expect(() =>
+        policy.assertTypeShape(
+          input({
+            rows: 2,
+            seatsPerRow: 3,
+            seatTicketTypes: [
+              [FREE, FREE, NORMAL],
+              [VIP, null, VIP],
+            ],
+          }),
+        ),
+      ).not.toThrow();
+    });
+
+    it('refuses rows and seats sent together (422)', () => {
+      const err = refusal(() =>
+        policy.assertTypeShape(
+          input({
+            rowTicketTypes: [VIP, VIP],
+            seatTicketTypes: [
+              [VIP, VIP],
+              [VIP, VIP],
+            ],
+          }),
+        ),
+      );
       expect(err.getStatus()).toBe(422);
-      expect(err.message).toMatch(/one ticket type per row/i);
+      expect(err.message).toBe(
+        'Send rowTicketTypes or seatTicketTypes, not both.',
+      );
+    });
+
+    it('refuses a row list whose length is not the row count (422)', () => {
+      const err = refusal(() =>
+        policy.assertTypeShape(
+          input({ rows: 3, rowTicketTypes: [VIP, NORMAL] }),
+        ),
+      );
+      expect(err.getStatus()).toBe(422);
+      expect(err.message).toBe(
+        'Send one ticket type per row: this map has 3 rows, but 2 were sent.',
+      );
+    });
+
+    it('refuses a seat list with a row too few or too many (422)', () => {
+      const err = refusal(() =>
+        policy.assertTypeShape(
+          input({ rows: 3, seatTicketTypes: [[VIP, VIP]] }),
+        ),
+      );
+      expect(err.getStatus()).toBe(422);
+      expect(err.message).toBe(
+        'Send one ticket type per row: this map has 3 rows, but 1 were sent.',
+      );
+    });
+
+    it('refuses a row of the seat list that is not one entry per seat (422, row named)', () => {
+      const err = refusal(() =>
+        policy.assertTypeShape(
+          input({
+            rows: 2,
+            seatsPerRow: 3,
+            seatTicketTypes: [
+              [VIP, VIP, VIP],
+              [VIP, VIP],
+            ],
+          }),
+        ),
+      );
+      expect(err.getStatus()).toBe(422);
+      expect(err.message).toBe(
+        'Send one ticket type per seat: row 2 has 3 seats, but 2 were sent.',
+      );
     });
   });
 
@@ -160,7 +232,7 @@ describe('EventSeatingPolicy', () => {
       expect(plan.seatsByTier?.get(VIP)).toBe(4);
     });
 
-    it("gives a longer row's new seats the row's type", () => {
+    it("gives a longer row's new seats no type when no list is sent", () => {
       const seats = existingGrid(1, 2, () => VIP);
       const plan = policy.planReserved(
         snapshot({ seats }),
@@ -168,8 +240,9 @@ describe('EventSeatingPolicy', () => {
         false,
       );
       expect(plan.added).toEqual([
-        { section: '', rowLabel: '1', seatNumber: '3', ticketTypeId: VIP },
+        { section: '', rowLabel: '1', seatNumber: '3', ticketTypeId: null },
       ]);
+      expect(plan.retyped).toEqual([]);
     });
 
     it('moves a whole free row to another type', () => {
@@ -191,7 +264,7 @@ describe('EventSeatingPolicy', () => {
       );
     });
 
-    it('refuses to retype a row with a booked or held seat (409, row named)', () => {
+    it('refuses to retype a booked or held seat with its row (409, seat named)', () => {
       const seats = existingGrid(2, 2, () => VIP);
       const err = refusal(() =>
         policy.planReserved(
@@ -202,22 +275,8 @@ describe('EventSeatingPolicy', () => {
       );
       expect(err.getStatus()).toBe(409);
       expect(err.message).toBe(
-        "Row 2 has booked or held seats, so its ticket type can't change.",
+        "Row 2 seat 2 is booked or held, so its ticket type can't change.",
       );
-    });
-
-    it("counts a booked seat the save also removes as the row's (409)", () => {
-      // Row 2's seat 2 (id 103) is booked; the row shrinks to 1 seat and moves.
-      const seats = existingGrid(2, 2, () => VIP);
-      const err = refusal(() =>
-        policy.planReserved(
-          snapshot({ seats, occupiedSeatIds: new Set([103]) }),
-          input({ seatsPerRow: 1, rowTicketTypes: [VIP, NORMAL] }),
-          false,
-        ),
-      );
-      expect(err.getStatus()).toBe(409);
-      expect(err.message).toMatch(/^Row 2 /);
     });
 
     it('lets a row with booked seats keep its type while others move', () => {
@@ -242,7 +301,9 @@ describe('EventSeatingPolicy', () => {
         ),
       );
       expect(err.getStatus()).toBe(409);
-      expect(err.message).toMatch(/^Row 1 /);
+      expect(err.message).toBe(
+        "Row 1 seat 2 is booked or held, so its ticket type can't change.",
+      );
     });
 
     it('clears every row back to no type, leaving the quantities alone', () => {
@@ -253,8 +314,7 @@ describe('EventSeatingPolicy', () => {
         false,
       );
       expect(plan.retyped).toEqual([
-        { ticketTypeId: null, seatIds: [100, 101] },
-        { ticketTypeId: null, seatIds: [102, 103] },
+        { ticketTypeId: null, seatIds: [100, 101, 102, 103] },
       ]);
       expect(plan.seatsByTier).toBeNull();
     });
@@ -291,6 +351,143 @@ describe('EventSeatingPolicy', () => {
       expect(plan.removedSeatIds).toEqual([104, 105]);
     });
 
+    describe('seat by seat (seatTicketTypes)', () => {
+      /** Row 1 VIP; row 2 seats 1–2 Free and seats 3–4 Normal. */
+      const mixed = (): (string | null)[][] => [
+        [VIP, VIP, VIP, VIP],
+        [FREE, FREE, NORMAL, NORMAL],
+      ];
+
+      it('lays out a new map with each seat on the type sent for it', () => {
+        const plan = policy.planReserved(
+          snapshot(),
+          input({ seatsPerRow: 4, seatTicketTypes: mixed() }),
+          false,
+        );
+        expect(
+          plan.added
+            .filter((s) => s.rowLabel === '2')
+            .map((s) => [s.seatNumber, s.ticketTypeId]),
+        ).toEqual([
+          ['1', FREE],
+          ['2', FREE],
+          ['3', NORMAL],
+          ['4', NORMAL],
+        ]);
+      });
+
+      it("counts each type's seats, a row split between types included", () => {
+        const plan = policy.planReserved(
+          snapshot(),
+          input({ seatsPerRow: 4, seatTicketTypes: mixed() }),
+          false,
+        );
+        expect(plan.seatsByTier).toEqual(
+          new Map([
+            [VIP, 4],
+            [NORMAL, 2],
+            [FREE, 2],
+          ]),
+        );
+      });
+
+      it('moves just the seats whose type changes, grouped by their new type', () => {
+        const seats = existingGrid(2, 4, () => NORMAL);
+        const plan = policy.planReserved(
+          snapshot({ seats }),
+          input({ seatsPerRow: 4, seatTicketTypes: mixed() }),
+          false,
+        );
+        expect(plan.retyped).toEqual([
+          { ticketTypeId: VIP, seatIds: [100, 101, 102, 103] },
+          { ticketTypeId: FREE, seatIds: [104, 105] },
+        ]);
+        expect(plan.added).toEqual([]);
+      });
+
+      it("refuses a seat whose type isn't one of this event's (422, row and seat named)", () => {
+        const sent = mixed();
+        sent[1][2] = 'bbbbbbbb-0000-4000-8000-000000000009';
+        const err = refusal(() =>
+          policy.planReserved(
+            snapshot(),
+            input({ seatsPerRow: 4, seatTicketTypes: sent }),
+            false,
+          ),
+        );
+        expect(err.getStatus()).toBe(422);
+        expect(err.message).toBe(
+          "Row 2 seat 3's ticket type isn't one of this event's ticket types.",
+        );
+      });
+
+      it('refuses a booked or held seat sent with another type (409, row and seat named)', () => {
+        // Row 2 seat 1 (id 104) is held under Normal.
+        const seats = existingGrid(2, 4, () => NORMAL);
+        const err = refusal(() =>
+          policy.planReserved(
+            snapshot({ seats, occupiedSeatIds: new Set([104]) }),
+            input({ seatsPerRow: 4, seatTicketTypes: mixed() }),
+            false,
+          ),
+        );
+        expect(err.getStatus()).toBe(409);
+        expect(err.message).toBe(
+          "Row 2 seat 1 is booked or held, so its ticket type can't change.",
+        );
+      });
+
+      it('lets the rest of a row move while its booked seat keeps its type', () => {
+        // Row 2 seat 3 (id 106) is booked under Normal and stays Normal.
+        const seats = existingGrid(2, 4, () => NORMAL);
+        const plan = policy.planReserved(
+          snapshot({ seats, occupiedSeatIds: new Set([106]) }),
+          input({ seatsPerRow: 4, seatTicketTypes: mixed() }),
+          false,
+        );
+        expect(plan.retyped).toContainEqual({
+          ticketTypeId: FREE,
+          seatIds: [104, 105],
+        });
+      });
+
+      it('lets a draft leave some seats of a row with no type', () => {
+        const sent = mixed();
+        sent[1][3] = null;
+        const plan = policy.planReserved(
+          snapshot(),
+          input({ seatsPerRow: 4, seatTicketTypes: sent }),
+          false,
+        );
+        expect(plan.seatsByTier?.get(NORMAL)).toBe(1);
+      });
+
+      it('refuses a published event a seat with no type (422, its row named)', () => {
+        const sent = mixed();
+        sent[1][3] = null;
+        const err = refusal(() =>
+          policy.planReserved(
+            snapshot({ seats: existingGrid(2, 4, () => VIP) }),
+            input({ seatsPerRow: 4, seatTicketTypes: sent }),
+            true,
+          ),
+        );
+        expect(err.getStatus()).toBe(422);
+        expect(err.message).toBe(
+          'Give every seat in row 2 a ticket type. Every seat of a published event needs one.',
+        );
+      });
+
+      it('takes the seats of a published event once every one has a type', () => {
+        const plan = policy.planReserved(
+          snapshot({ seats: existingGrid(2, 4, () => VIP) }),
+          input({ seatsPerRow: 4, seatTicketTypes: mixed() }),
+          true,
+        );
+        expect(plan.seatsByTier?.get(FREE)).toBe(2);
+      });
+    });
+
     describe('on a published event whose rows have ticket types', () => {
       const PUBLISHED = true;
 
@@ -305,7 +502,7 @@ describe('EventSeatingPolicy', () => {
         );
         expect(err.getStatus()).toBe(422);
         expect(err.message).toBe(
-          'Give row 3 a ticket type. Every row of a published event needs one.',
+          'Give every seat in row 3 a ticket type. Every seat of a published event needs one.',
         );
       });
 
@@ -318,7 +515,23 @@ describe('EventSeatingPolicy', () => {
           ),
         );
         expect(err.getStatus()).toBe(422);
-        expect(err.message).toMatch(/^Give row 1 a ticket type\./);
+        expect(err.message).toMatch(
+          /^Give every seat in row 1 a ticket type\./,
+        );
+      });
+
+      it("refuses a longer row's new seats, which no list gives a type (422)", () => {
+        const err = refusal(() =>
+          policy.planReserved(
+            snapshot({ seats: existingGrid(2, 2, () => VIP) }),
+            input({ seatsPerRow: 3 }),
+            PUBLISHED,
+          ),
+        );
+        expect(err.getStatus()).toBe(422);
+        expect(err.message).toMatch(
+          /^Give every seat in row 1 a ticket type\./,
+        );
       });
 
       it('takes a new row that is sent with a type', () => {
@@ -342,41 +555,47 @@ describe('EventSeatingPolicy', () => {
   });
 
   describe('readiness (US-EVT-05)', () => {
-    const row = (rowLabel: string, ticketTypeId: string | null) => ({
-      rowLabel,
-      ticketTypeId,
-      seats: 16,
-    });
+    /** `n` seats of one type. */
+    const seats = (n: number, ticketTypeId: string | null) =>
+      Array<string | null>(n).fill(ticketTypeId);
 
-    it('is ready when every row has a type and every type a row', () => {
+    it('is ready when every seat has a type and every type a seat', () => {
       expect(
         policy.readiness(
-          [row('1', VIP), row('2', NORMAL), row('3', FREE)],
+          [...seats(16, VIP), ...seats(16, NORMAL), ...seats(16, FREE)],
           TIERS,
         ),
-      ).toEqual({ rowsWithoutType: 0, ticketTypesWithoutRows: [] });
+      ).toEqual({ seatsWithoutType: 0, ticketTypesWithoutSeats: [] });
     });
 
-    it('counts the rows with no type, and names the types with no row in order', () => {
+    it('is ready with a row split between types, seat by seat', () => {
+      // Row 1 VIP; row 2 seats 1–5 Free, seats 6–16 Normal.
       expect(
         policy.readiness(
-          [row('1', VIP), row('2', null), row('3', null)],
+          [...seats(16, VIP), ...seats(5, FREE), ...seats(11, NORMAL)],
           TIERS,
         ),
+      ).toEqual({ seatsWithoutType: 0, ticketTypesWithoutSeats: [] });
+    });
+
+    it('counts the seats with no type, and names the types with no seat in order', () => {
+      expect(
+        policy.readiness([...seats(14, VIP), ...seats(2, null)], TIERS),
       ).toEqual({
-        rowsWithoutType: 2,
-        ticketTypesWithoutRows: ['Normal', 'Free'],
+        seatsWithoutType: 2,
+        ticketTypesWithoutSeats: ['Normal', 'Free'],
       });
     });
 
-    it('is just its rows while no row has a type yet (a legacy map)', () => {
-      expect(policy.readiness([row('1', null), row('2', null)], TIERS)).toEqual(
-        { rowsWithoutType: 2, ticketTypesWithoutRows: [] },
-      );
+    it('is just its seats while no seat has a type yet (a legacy map)', () => {
+      expect(policy.readiness(seats(32, null), TIERS)).toEqual({
+        seatsWithoutType: 32,
+        ticketTypesWithoutSeats: [],
+      });
     });
 
     it('names every type when there is no map yet', () => {
-      expect(policy.readiness([], TIERS).ticketTypesWithoutRows).toEqual([
+      expect(policy.readiness([], TIERS).ticketTypesWithoutSeats).toEqual([
         'VIP',
         'Normal',
         'Free',

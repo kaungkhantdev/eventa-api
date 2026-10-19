@@ -1,9 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import {
-  type SeatRowsReadiness,
+  type SeatsReadiness,
   SeatingReadinessPort,
 } from '../events/ports/seating-readiness.port';
-import { toSeatRows } from './event-seating.mapper';
 import { EventSeatingPolicy } from './event-seating.policy';
 import { EventSeatingRepository } from './event-seating.repository';
 import { TicketQuantityPort } from './ports/ticket-quantity.port';
@@ -23,15 +22,16 @@ export class SeatingReadinessAdapter extends SeatingReadinessPort {
     super();
   }
 
-  async seatRowsReadiness(
+  async seatsReadiness(
     organizationId: number,
     eventId: string,
-  ): Promise<SeatRowsReadiness> {
+  ): Promise<SeatsReadiness> {
     const map = await this.repo.findMap(organizationId, eventId);
-    const counts = map
-      ? await this.repo.rowTypeCounts(organizationId, map.id)
-      : [];
+    const seats = map ? await this.repo.seatTypes(organizationId, map.id) : [];
     const tiers = await this.tiers.liveTiers(organizationId, eventId);
-    return this.policy.readiness(toSeatRows(counts), tiers);
+    return this.policy.readiness(
+      seats.map((s) => s.ticketTypeId),
+      tiers,
+    );
   }
 }
