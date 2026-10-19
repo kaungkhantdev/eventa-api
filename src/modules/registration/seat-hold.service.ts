@@ -56,6 +56,7 @@ export class SeatHoldService {
     const result = await this.repo.holdSeats(
       actor.organizationId,
       input.eventId,
+      input.ticketTypeId,
       seatIds,
       this.expiryFrom(now),
       now,

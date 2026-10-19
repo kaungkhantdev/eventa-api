@@ -11,6 +11,8 @@ export interface SeatHoldActor {
 /** Reserve specific seats from an event's seat map (reserved seating). */
 export interface HoldSeatsInput {
   eventId: string;
+  /** The tier being bought — recorded on each hold (US-DISC-04). */
+  ticketTypeId: string;
   seatIds: number[];
   /** The pending order these holds back; omit for a cart-only hold. */
   orderId?: string;

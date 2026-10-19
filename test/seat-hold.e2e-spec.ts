@@ -78,6 +78,7 @@ describe('Seat-hold engine (US-TKT-03 reserve/hold, e2e)', () => {
       const res = await repo.holdSeats(
         orgId,
         eventId,
+        ticketTypeId,
         [seats[0], seats[1]],
         future(t),
         t,
@@ -94,6 +95,7 @@ describe('Seat-hold engine (US-TKT-03 reserve/hold, e2e)', () => {
       await repo.holdSeats(
         orgId,
         eventId,
+        ticketTypeId,
         [seats[0], seats[1]],
         future(),
         now(),
@@ -102,6 +104,7 @@ describe('Seat-hold engine (US-TKT-03 reserve/hold, e2e)', () => {
       const res = await repo.holdSeats(
         orgId,
         eventId,
+        ticketTypeId,
         [seats[1], seats[2]],
         future(),
         now(),
@@ -118,6 +121,7 @@ describe('Seat-hold engine (US-TKT-03 reserve/hold, e2e)', () => {
       const res = await repo.holdSeats(
         orgId,
         eventId,
+        ticketTypeId,
         [blockedSeat, foreignSeat, 999_999],
         future(),
         now(),
@@ -132,8 +136,8 @@ describe('Seat-hold engine (US-TKT-03 reserve/hold, e2e)', () => {
     it('lets exactly one of two racing holds win the same seat', async () => {
       const seat = seats[3];
       const [a, b] = await Promise.all([
-        repo.holdSeats(orgId, eventId, [seat], future(), now()),
-        repo.holdSeats(orgId, eventId, [seat], future(), now()),
+        repo.holdSeats(orgId, eventId, ticketTypeId, [seat], future(), now()),
+        repo.holdSeats(orgId, eventId, ticketTypeId, [seat], future(), now()),
       ]);
 
       expect([a.ok, b.ok].filter(Boolean)).toHaveLength(1);
@@ -148,7 +152,14 @@ describe('Seat-hold engine (US-TKT-03 reserve/hold, e2e)', () => {
         [orgId, eventId, seat],
       );
 
-      const res = await repo.holdSeats(orgId, eventId, [seat], future(), now());
+      const res = await repo.holdSeats(
+        orgId,
+        eventId,
+        ticketTypeId,
+        [seat],
+        future(),
+        now(),
+      );
 
       expect(res.ok).toBe(true);
       expect(await activeHoldsForSeat(seat)).toBe(1);
@@ -164,6 +175,7 @@ describe('Seat-hold engine (US-TKT-03 reserve/hold, e2e)', () => {
       const held = await repo.holdSeats(
         orgId,
         eventId,
+        ticketTypeId,
         [seat],
         future(),
         now(),
@@ -180,6 +192,7 @@ describe('Seat-hold engine (US-TKT-03 reserve/hold, e2e)', () => {
       const again = await repo.holdSeats(
         orgId,
         eventId,
+        ticketTypeId,
         [seat],
         future(),
         now(),
@@ -240,7 +253,7 @@ describe('Seat-hold engine (US-TKT-03 reserve/hold, e2e)', () => {
       await expect(
         service.holdSeats(
           { organizationId: orgId },
-          { eventId, seatIds: [1, 2, 3, 4, 5, 6, 7, 8, 9] },
+          { eventId, ticketTypeId, seatIds: [1, 2, 3, 4, 5, 6, 7, 8, 9] },
         ),
       ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
     });
@@ -248,12 +261,12 @@ describe('Seat-hold engine (US-TKT-03 reserve/hold, e2e)', () => {
     it('maps a taken seat to a 409 conflict', async () => {
       await service.holdSeats(
         { organizationId: orgId },
-        { eventId, seatIds: [seats[0]] },
+        { eventId, ticketTypeId, seatIds: [seats[0]] },
       );
       await expect(
         service.holdSeats(
           { organizationId: orgId },
-          { eventId, seatIds: [seats[0]] },
+          { eventId, ticketTypeId, seatIds: [seats[0]] },
         ),
       ).rejects.toMatchObject({ code: 'CONFLICT' });
     });
@@ -266,6 +279,7 @@ describe('Seat-hold engine (US-TKT-03 reserve/hold, e2e)', () => {
       const res = await repo.holdSeats(
         orgId,
         eventId,
+        ticketTypeId,
         [seats[0], seats[0]],
         future(),
         now(),
@@ -277,7 +291,14 @@ describe('Seat-hold engine (US-TKT-03 reserve/hold, e2e)', () => {
     });
 
     it('returns a clean conflict for an empty seat list (no 500)', async () => {
-      const res = await repo.holdSeats(orgId, eventId, [], future(), now());
+      const res = await repo.holdSeats(
+        orgId,
+        eventId,
+        ticketTypeId,
+        [],
+        future(),
+        now(),
+      );
       expect(res.ok).toBe(false);
       if (res.ok) return;
       expect(res.unavailableSeatIds).toEqual([]);
@@ -414,7 +435,11 @@ describe('Seat-hold engine (US-TKT-03 reserve/hold, e2e)', () => {
       const tier = await insertTier({ name: 'Seat-Paused', status: 'paused' });
       const seatId = await insertSeat(seatMapId, 'GATE1', 'available', tier);
       await expect(
-        service.holdSeats(actor(), { eventId, seatIds: [seatId] }),
+        service.holdSeats(actor(), {
+          eventId,
+          ticketTypeId: tier,
+          seatIds: [seatId],
+        }),
       ).rejects.toMatchObject({ code: 'CONFLICT' });
       expect(await activeHoldsForSeat(seatId)).toBe(0);
     });
@@ -424,9 +449,14 @@ describe('Seat-hold engine (US-TKT-03 reserve/hold, e2e)', () => {
       const seatId = await insertSeat(seatMapId, 'GATE2', 'available', tier);
       const holds = await service.holdSeats(actor(), {
         eventId,
+        ticketTypeId: tier,
         seatIds: [seatId],
       });
       expect(holds).toHaveLength(1);
+      // The hold records the tier being bought (US-DISC-04), so a checkout in
+      // progress is visible to it — retiring the tier waits (US-TKT-05).
+      expect(holds[0].ticketTypeId).toBe(tier);
+      expect(await activeHoldsForTier(tier)).toBe(1);
     });
   });
 

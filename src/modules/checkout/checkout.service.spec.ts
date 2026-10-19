@@ -280,7 +280,7 @@ describe('CheckoutService (US-DISC-04)', () => {
       expect(res.expiresAt).toBe('2026-06-01T00:10:00.000Z');
     });
 
-    it('holds the named seats for a reserved-seating event', async () => {
+    it('holds the named seats for a reserved-seating event, under the tier being bought', async () => {
       view.load.mockResolvedValue({
         event: event({ seatingMode: 'reserved' }),
       });
@@ -291,7 +291,7 @@ describe('CheckoutService (US-DISC-04)', () => {
       });
       expect(holds.holdSeats).toHaveBeenCalledWith(
         { organizationId: ORG },
-        { eventId: EVENT_ID, seatIds: [1, 2] },
+        { eventId: EVENT_ID, ticketTypeId: TIER_ID, seatIds: [1, 2] },
       );
       expect(res.holdIds).toEqual([21, 22]);
     });

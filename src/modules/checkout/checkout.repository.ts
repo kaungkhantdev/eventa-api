@@ -36,6 +36,7 @@ import {
   statusAfterRefund,
 } from './approval-rules';
 import type { OrderTotals } from './checkout-pricing';
+import { heldSeatsMatch } from './held-seat-rules';
 import { RedemptionLedgerPort } from './ports/redemption-ledger.port';
 
 /** Fallbacks if a workspace row somehow has none — the Thai statutory rate. */
@@ -384,7 +385,9 @@ export class CheckoutRepository {
    *      thing, so a double-tapped Confirm returns the first registration rather
    *      than placing a second.
    *   2. The buyer's holds are re-checked as still active — a lapsed hold means
-   *      the inventory went back on sale and this order cannot be honoured.
+   *      the inventory went back on sale and this order cannot be honoured —
+   *      and, for seats, as holding exactly the seats that were priced, each of
+   *      this order's ticket type (US-DISC-04).
    *   3. The ticket type is locked `FOR UPDATE` before `sold` moves, so two
    *      confirms cannot push it past its allocation.
    *   4. Seat assignments rely on `uq_seat_active`: if another buyer's order won
@@ -403,6 +406,7 @@ export class CheckoutRepository {
       if (existing) return { ...existing, replayed: true };
 
       await this.assertHoldsStillActive(tx, input);
+      await this.assertHeldSeatsMatch(tx, input);
       const attendeeId = await this.upsertAttendee(tx, input);
       const order = await this.insertOrder(
         tx,
@@ -1487,6 +1491,47 @@ export class CheckoutRepository {
     throw DomainException.conflict(
       'Your seats were released while you were checking out. Please choose again.',
     );
+  }
+
+  /**
+   * A reserved order is seated from its holds (a paid one when the money
+   * lands) but priced from the seats the request named, so the two must be the
+   * same seats, each of this order's ticket type — or a buyer could hold a VIP
+   * seat and pay the Normal price for it. Plain reads, no locks: a row with an
+   * active hold cannot change type (US-EVT-05), so neither answer can move.
+   */
+  private async assertHeldSeatsMatch(
+    tx: Tx,
+    input: PlaceOrderInput,
+  ): Promise<void> {
+    if (!input.seatIds || input.seatIds.length === 0) return;
+    const held = await tx
+      .select({ seatId: seatHolds.seatId })
+      .from(seatHolds)
+      .where(
+        and(
+          eq(seatHolds.organizationId, input.organizationId),
+          inArray(seatHolds.id, input.holdIds),
+          isNotNull(seatHolds.seatId),
+        ),
+      );
+    const priced = await tx
+      .select({ id: seats.id, ticketTypeId: seats.ticketTypeId })
+      .from(seats)
+      .where(
+        and(
+          eq(seats.organizationId, input.organizationId),
+          inArray(seats.id, input.seatIds),
+        ),
+      );
+    const match = heldSeatsMatch({
+      pricedSeatIds: input.seatIds,
+      heldSeatIds: held.flatMap((h) => (h.seatId === null ? [] : [h.seatId])),
+      seatTypes: new Map(priced.map((s) => [s.id, s.ticketTypeId])),
+      ticketTypeId: input.ticketTypeId,
+    });
+    if (match) return;
+    throw DomainException.conflict('Your seats changed. Please choose again.');
   }
 
   /** This buyer's entry for this ticket, if they are already in line. */

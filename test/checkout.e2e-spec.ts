@@ -38,7 +38,9 @@ interface View {
     canSelect: boolean;
     remaining: number | null;
   }[];
-  seatMap: { seats: { id: number; available: boolean }[] } | null;
+  seatMap: {
+    seats: { id: number; available: boolean; ticketTypeId: string | null }[];
+  } | null;
   notes: { seating: string | null; delivery: string | null };
   maxPerBooking: number;
   paymentRequired: boolean;
@@ -165,6 +167,11 @@ describe('Checkout (e2e — US-DISC-04)', () => {
       expect(v.seatMap?.seats.filter((s) => s.available)).toHaveLength(
         ids.seats.length,
       );
+      // Each seat says which ticket type it sells, so the map can grey out
+      // another type's rows (US-DISC-04).
+      expect(
+        v.seatMap?.seats.every((s) => s.ticketTypeId === ids.tiers.gala),
+      ).toBe(true);
     });
 
     it('is not available for an event that was never published', async () => {

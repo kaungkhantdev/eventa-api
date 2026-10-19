@@ -46,10 +46,12 @@ export class SeatHoldRepository {
    * (freeing the `uq_seat_hold_active` unique), then re-checks availability under
    * the lock before inserting. A seat is holdable only if it exists, belongs to
    * this event, is `available`, has no active hold, and has no live assignment.
+   * Each hold records the tier being bought, as a GA hold does (US-DISC-04).
    */
   async holdSeats(
     organizationId: number,
     eventId: string,
+    ticketTypeId: string,
     seatIds: number[],
     expiresAt: Date,
     now: Date,
@@ -99,6 +101,7 @@ export class SeatHoldRepository {
           ids.map((seatId): NewSeatHold => ({
             organizationId,
             eventId,
+            ticketTypeId,
             seatId,
             quantity: 1,
             status: ACTIVE,

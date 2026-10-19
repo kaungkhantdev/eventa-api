@@ -15,6 +15,7 @@ const ORG = { slug: 'confirm-e2e', name: 'Confirm E2E' };
 const FREE = 'cfm-free-meetup';
 const PAID = 'cfm-paid-summit';
 const GALA = 'cfm-gala-dinner';
+const SPLIT = 'cfm-split-gala';
 const BAHT = 100;
 
 interface Success<T> {
@@ -44,6 +45,7 @@ describe('Confirming a registration (e2e — US-DISC-06)', () => {
     events: Record<string, string>;
     tiers: Record<string, string>;
     seats: number[];
+    split: { vip: number[]; normal: number[] };
   };
   let keySeq = 0;
 
@@ -558,6 +560,89 @@ describe('Confirming a registration (e2e — US-DISC-06)', () => {
     });
   });
 
+  describe('seats split between ticket types (US-DISC-04)', () => {
+    const splitHold = (ticketTypeId: string, seatIds: number[]) =>
+      hold({ eventId: ids.events[SPLIT], ticketTypeId, seatIds });
+
+    const assignedSeats = async (): Promise<number> => {
+      const { rows } = await pool.query<{ n: string }>(
+        `SELECT count(*)::text AS n FROM seat_assignments WHERE organization_id = $1`,
+        [ids.orgId],
+      );
+      return Number(rows[0].n);
+    };
+
+    it('refuses to hold a VIP seat for the Normal price (422)', async () => {
+      const res = await request(server)
+        .post('/api/v1/public/checkout/hold')
+        .send({
+          eventId: ids.events[SPLIT],
+          ticketTypeId: ids.tiers.normal,
+          seatIds: [ids.split.vip[0]],
+        });
+      expect(res.status).toBe(422);
+      expect((res.body as { message: string }).message).toBe(
+        'Those seats belong to a different ticket type. Please choose again.',
+      );
+    });
+
+    it('refuses to confirm a held VIP seat as a Normal order (409) — nothing is placed', async () => {
+      const vipHold = await splitHold(ids.tiers.vip, [ids.split.vip[0]]);
+      const res = await confirm({
+        eventId: ids.events[SPLIT],
+        ticketTypeId: ids.tiers.normal,
+        seatIds: [ids.split.normal[0]],
+        holdIds: vipHold,
+        buyer,
+        idempotencyKey: nextKey(),
+      });
+      expect(res.status).toBe(409);
+      expect((res.body as { message: string }).message).toBe(
+        'Your seats changed. Please choose again.',
+      );
+      expect(await orderCount()).toBe(0);
+      expect(await assignedSeats()).toBe(0);
+    });
+
+    it('refuses holds that cover fewer seats than were priced (409)', async () => {
+      const oneHold = await splitHold(ids.tiers.normal, [ids.split.normal[0]]);
+      const res = await confirm({
+        eventId: ids.events[SPLIT],
+        ticketTypeId: ids.tiers.normal,
+        seatIds: ids.split.normal,
+        holdIds: oneHold,
+        buyer,
+        idempotencyKey: nextKey(),
+      });
+      expect(res.status).toBe(409);
+      expect(await orderCount()).toBe(0);
+    });
+
+    it('places a Normal order on its held Normal seats, the hold naming the tier', async () => {
+      const holdIds = await splitHold(ids.tiers.normal, ids.split.normal);
+      const { rows } = await pool.query<{ ticket_type_id: string }>(
+        `SELECT ticket_type_id FROM seat_holds WHERE id = ANY($1)`,
+        [holdIds],
+      );
+      expect(rows.map((r) => r.ticket_type_id)).toEqual([
+        ids.tiers.normal,
+        ids.tiers.normal,
+      ]);
+      const res = await confirm({
+        eventId: ids.events[SPLIT],
+        ticketTypeId: ids.tiers.normal,
+        seatIds: ids.split.normal,
+        holdIds,
+        buyer,
+        idempotencyKey: nextKey(),
+      });
+      expect(res.status).toBe(201);
+      const p = (res.body as Success<Placed>).data;
+      expect(p.status).toBe('pending');
+      expect(p.totalSatang).toBe(1_869 * BAHT); // ฿890 x2 + 5% fee
+    });
+  });
+
   describe('the selection is re-checked, never trusted', () => {
     it('refuses an order for an event that does not exist', async () => {
       const res = await confirm({
@@ -601,6 +686,7 @@ async function seed(pool: Pool): Promise<{
   events: Record<string, string>;
   tiers: Record<string, string>;
   seats: number[];
+  split: { vip: number[]; normal: number[] };
 }> {
   const org = await pool.query<{ id: string }>(
     `INSERT INTO organizations (name, slug, vat_rate, service_fee_rate)
@@ -640,7 +726,30 @@ async function seed(pool: Pool): Promise<{
     total: 20,
   });
   const seats = await insertSeats(pool, orgId, events[GALA], tiers.gala);
-  return { orgId, events, tiers, seats };
+
+  events[SPLIT] = await insertEvent(
+    pool,
+    orgId,
+    SPLIT,
+    'Split Gala',
+    'reserved',
+  );
+  tiers.vip = await insertTier(pool, orgId, events[SPLIT], {
+    name: 'VIP',
+    price: 2_500 * BAHT,
+    total: 2,
+  });
+  tiers.normal = await insertTier(pool, orgId, events[SPLIT], {
+    name: 'Normal',
+    price: 890 * BAHT,
+    total: 2,
+  });
+  // Row 1 sells VIP, row 2 Normal (US-EVT-05).
+  const split = {
+    vip: await insertSeats(pool, orgId, events[SPLIT], tiers.vip, '1', 2),
+    normal: await insertSeats(pool, orgId, events[SPLIT], tiers.normal, '2', 2),
+  };
+  return { orgId, events, tiers, seats, split };
 }
 
 async function insertEvent(
@@ -683,20 +792,24 @@ async function insertSeats(
   orgId: number,
   eventId: string,
   ticketTypeId: string,
+  rowLabel = 'A',
+  count = 4,
 ): Promise<number[]> {
   const map = await pool.query<{ id: string }>(
     `INSERT INTO seat_maps (organization_id, event_id, name, total_seats)
-     VALUES ($1,$2,'Main',4) RETURNING id`,
+     VALUES ($1,$2,'Main',4)
+     ON CONFLICT (event_id) DO UPDATE SET name = EXCLUDED.name
+     RETURNING id`,
     [orgId, eventId],
   );
   const mapId = Number(map.rows[0].id);
   const ids: number[] = [];
-  for (let n = 1; n <= 4; n += 1) {
+  for (let n = 1; n <= count; n += 1) {
     const row = await pool.query<{ id: string }>(
       `INSERT INTO seats (organization_id, seat_map_id, section, row_label,
                           seat_number, ticket_type_id, status)
-       VALUES ($1,$2,'Stalls','A',$3,$4,'available') RETURNING id`,
-      [orgId, mapId, String(n), ticketTypeId],
+       VALUES ($1,$2,'Stalls',$3,$4,$5,'available') RETURNING id`,
+      [orgId, mapId, rowLabel, String(n), ticketTypeId],
     );
     ids.push(Number(row.rows[0].id));
   }
