@@ -139,6 +139,22 @@ describe('Auth (e2e — envelope + passport)', () => {
     expect((res.body as SuccessBody<{ email: string }>).data.email).toBe(EMAIL);
   });
 
+  // The console's rail shows the workspace's own logo, read from /auth/me.
+  it("carries the workspace's logo on /auth/me", async () => {
+    const logo = 'https://cdn.eventa.test/org/logos/auth-e2e.png';
+    await pool.query(`UPDATE organizations SET logo_url = $1 WHERE id = $2`, [
+      logo,
+      orgId,
+    ]);
+    const { accessToken } = await loginData();
+    const res = await request(server)
+      .get('/api/v1/auth/me')
+      .set('Authorization', `Bearer ${accessToken}`);
+    const me = (res.body as SuccessBody<{ organization: { logoUrl: string } }>)
+      .data;
+    expect(me.organization.logoUrl).toBe(logo);
+  });
+
   it('exchanges a refresh token for a new access token', async () => {
     const { refreshToken } = await loginData();
     const res = await request(server)

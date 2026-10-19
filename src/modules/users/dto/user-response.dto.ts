@@ -8,6 +8,12 @@ export class OrganizationSummaryDto {
   @ApiProperty({ example: 'THB' }) currency!: string;
   @ApiProperty({ example: 'Asia/Bangkok' }) timezone!: string;
   @ApiProperty({ enum: ['en', 'th'] }) locale!: 'en' | 'th';
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: "The workspace's logo URL; null when it has none",
+  })
+  logoUrl!: string | null;
 }
 
 /** The authenticated user's profile — returned by /auth/login and /auth/me. */
@@ -44,6 +50,7 @@ export function toMeResponse(
       currency: org.currency,
       timezone: org.timezone,
       locale: org.locale,
+      logoUrl: org.logoUrl ?? null,
     },
     permissions,
   };
