@@ -43,6 +43,7 @@ export class PublicPagesRepository {
         timezone: events.timezone,
         isOnline: events.isOnline,
         onlineNote: events.onlineNote,
+        seatingMode: events.seatingMode,
         venueName: events.venueName,
         venueAddress: events.venueAddress,
         city: events.city,

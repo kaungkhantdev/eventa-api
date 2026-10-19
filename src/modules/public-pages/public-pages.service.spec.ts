@@ -1,4 +1,5 @@
 import type { Clock } from '../../common/time/clock';
+import { PublicSeatMapPort } from './ports/public-seat-map.port';
 import { PublicPagesRepository } from './public-pages.repository';
 import { PublicPagesService } from './public-pages.service';
 
@@ -19,6 +20,7 @@ const baseEvent = {
   timezone: 'Asia/Bangkok',
   isOnline: false,
   onlineNote: null,
+  seatingMode: 'ga',
   venueName: 'BITEC',
   venueAddress: '88 Bangna',
   city: 'Bangkok',
@@ -51,6 +53,7 @@ const ticket = (over: Record<string, unknown> = {}) => ({
 
 describe('PublicPagesService (US-PAGE-01…06, 08)', () => {
   let repo: jest.Mocked<PublicPagesRepository>;
+  let seating: jest.Mocked<PublicSeatMapPort>;
   let service: PublicPagesService;
 
   const load = (over: Record<string, unknown> = {}) =>
@@ -68,8 +71,11 @@ describe('PublicPagesService (US-PAGE-01…06, 08)', () => {
       tickets: jest.fn().mockResolvedValue([]),
       faqs: jest.fn().mockResolvedValue([]),
     } as unknown as jest.Mocked<PublicPagesRepository>;
+    seating = {
+      typedSeatMap: jest.fn().mockResolvedValue(null),
+    };
     const clock: Clock = { now: () => NOW };
-    service = new PublicPagesService(repo, clock, {
+    service = new PublicPagesService(repo, seating, clock, {
       getOrThrow: () => 'https://eventa.test',
     } as never);
     load();
@@ -166,6 +172,43 @@ describe('PublicPagesService (US-PAGE-01…06, 08)', () => {
       ] as never);
       const [t] = (await service.getPage(SLUG)).tickets;
       expect(t).toMatchObject({ isRecommended: true, badge: 'Most popular' });
+    });
+  });
+
+  describe('US-PAGE-05 — seat map split by ticket type (US-EVT-05)', () => {
+    const typed = {
+      seatsPerRow: 16,
+      rows: [
+        { label: '1', ticketTypeId: 't1' },
+        { label: '2', ticketTypeId: 't2' },
+      ],
+    };
+
+    it("shows a reserved event's rows and the ticket type each sells", async () => {
+      load({ seatingMode: 'reserved' });
+      seating.typedSeatMap.mockResolvedValue(typed);
+      const page = await service.getPage(SLUG);
+      expect(page.seatMap).toEqual(typed);
+      expect(seating.typedSeatMap).toHaveBeenCalledWith(1, 'e1');
+    });
+
+    it('has none when the rows have no ticket types', async () => {
+      load({ seatingMode: 'reserved' });
+      expect((await service.getPage(SLUG)).seatMap).toBeNull();
+    });
+
+    it('has none for general admission, without asking Seating', async () => {
+      const page = await service.getPage(SLUG);
+      expect(page.seatMap).toBeNull();
+      expect(seating.typedSeatMap).not.toHaveBeenCalled();
+    });
+
+    it('has none for an online event, even one with a map left over', async () => {
+      load({ seatingMode: 'reserved', isOnline: true });
+      seating.typedSeatMap.mockResolvedValue(typed);
+      const page = await service.getPage(SLUG);
+      expect(page.seatMap).toBeNull();
+      expect(seating.typedSeatMap).not.toHaveBeenCalled();
     });
   });
 

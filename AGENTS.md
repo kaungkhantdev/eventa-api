@@ -272,7 +272,7 @@ events↔event-seating — the publish gate asks Seating about seat rows, US-EVT
 event-seating's import of ticketing, since that reaches events — ticketing↔registration, ticketing↔checkout —
 which pulls discounts→ticketing into the cycle too, and payment-settings→ticketing now that checkout asks
 PaymentSettings which methods are on — invoices↔payments) — not to paper over a bad boundary. Ports in
-play — the cross-context reads worth knowing; there are 56 `*Port` abstract classes today and
+play — the cross-context reads worth knowing; there are 57 `*Port` abstract classes today and
 `grep -rn 'abstract class .*Port' src` is the inventory (the `reports`/`dashboard` read families and the
 payment-setup ports are not listed here):
 `TicketAvailabilityPort` ·
@@ -300,10 +300,11 @@ through Ticketing, in the seat map's transaction, US-EVT-05) · `SeatOccupancyPo
 Registration which seats are booked or held, in that transaction, so their row keeps its type) ·
 `SeatingReadinessPort` (the publish gate asks Seating whether every seat row has a ticket type and every
 type a row) · `TicketSeatsPort` (Ticketing asks Registration how many seats each tier's rows hold, so a
-seat-set quantity is read-only and a tier with rows can't be retired). Provider seams
-(infrastructure behind an abstract class, not cross-context reads): `SocialVerifierPort` (OAuth token
-verification) · `PaymentProviderPort` (the PSP adapter — PCI SAQ-A; also carries the payout settings link
-and payout retry) · `ObjectStoragePort` (S3 for profile photos).
+seat-set quantity is read-only and a tier with rows can't be retired) · `PublicSeatMapPort` (the
+public page asks Seating how a reserved room's rows are split between the ticket types, US-PAGE-05).
+Provider seams (infrastructure behind an abstract class, not cross-context reads): `SocialVerifierPort`
+(OAuth token verification) · `PaymentProviderPort` (the PSP adapter — PCI SAQ-A; also carries the
+payout settings link and payout retry) · `ObjectStoragePort` (S3 for profile photos).
 
 **5. Register it in `app.module.ts`** and write the module docstring: what it owns, what it depends on, and
 why any `forwardRef` exists.

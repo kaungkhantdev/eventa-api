@@ -3,6 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import { DomainException } from '../../common/errors/domain.exception';
 import { Clock } from '../../common/time/clock';
 import type { Env } from '../../config/env.validation';
+import {
+  type PublicSeatMap,
+  PublicSeatMapPort,
+} from './ports/public-seat-map.port';
 import { PublicPagesRepository } from './public-pages.repository';
 import type {
   PublicPage,
@@ -21,6 +25,8 @@ const DEFAULT_AGENDA_TITLE = 'Agenda';
 const DEFAULT_SPEAKERS_TITLE = 'Speakers';
 /** Tier states that are not purchasable. */
 const UNAVAILABLE_STATUSES = ['paused', 'soldout'];
+/** Only reserved seating has rows to split between the tickets (US-EVT-05). */
+const RESERVED_SEATING = 'reserved';
 
 /**
  * Assembles the anonymous public event page (US-PAGE-01…06, 08).
@@ -35,6 +41,7 @@ export class PublicPagesService {
 
   constructor(
     private readonly repo: PublicPagesRepository,
+    private readonly seating: PublicSeatMapPort,
     private readonly clock: Clock,
     config: ConfigService<Env, true>,
   ) {
@@ -46,13 +53,14 @@ export class PublicPagesService {
     if (!event) {
       throw DomainException.notFound("This event page isn't available.");
     }
-    const [highlights, agendaRows, speakers, ticketRows, faqs] =
+    const [highlights, agendaRows, speakers, ticketRows, faqs, seatMap] =
       await Promise.all([
         this.repo.highlights(event.id),
         this.repo.agenda(event.id),
         this.repo.speakers(event.id),
         this.repo.tickets(event.id),
         this.repo.faqs(event.id),
+        this.seatMapOf(event),
       ]);
 
     const registration = this.registrationState(event, ticketRows);
@@ -62,6 +70,7 @@ export class PublicPagesService {
       agenda: groupAgenda(agendaRows),
       speakers,
       tickets: ticketRows.map((t) => this.toPublicTicket(t, registration)),
+      seatMap,
       faqs,
       registration,
       sections: {
@@ -77,6 +86,23 @@ export class PublicPagesService {
         noIndex: false,
       },
     };
+  }
+
+  /**
+   * How the room's rows are split between the tickets (US-PAGE-05): only an
+   * in-person, reserved event has rows to show. An online event keeps no
+   * seating even if a map was laid out before it went online.
+   */
+  private seatMapOf(event: {
+    id: string;
+    organizationId: number;
+    isOnline: boolean;
+    seatingMode: string;
+  }): Promise<PublicSeatMap | null> {
+    if (event.isOnline || event.seatingMode !== RESERVED_SEATING) {
+      return Promise.resolve(null);
+    }
+    return this.seating.typedSeatMap(event.organizationId, event.id);
   }
 
   private toPublicEvent(

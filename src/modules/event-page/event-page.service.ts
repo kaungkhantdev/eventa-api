@@ -130,6 +130,8 @@ export class EventPageService {
       agenda: [],
       speakers: [],
       tickets: [],
+      // No tickets, so no rows to split between them (US-PAGE-05).
+      seatMap: null,
       faqs: [],
       registration: { open: false, reason: 'This is a preview.' },
       sections: {

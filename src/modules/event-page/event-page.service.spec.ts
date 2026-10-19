@@ -109,5 +109,11 @@ describe('EventPageService (US-PAGE-09/10)', () => {
       });
       expect(page.event.venueAddress).toBeNull();
     });
+
+    it('has no tickets, so no seat map to split between them (US-PAGE-05)', async () => {
+      const page = await service.preview(actor, { name: 'Draft' });
+      expect(page.tickets).toEqual([]);
+      expect(page.seatMap).toBeNull();
+    });
   });
 });

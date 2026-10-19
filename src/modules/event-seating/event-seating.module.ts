@@ -3,11 +3,13 @@ import { AccessModule } from '../access/access.module';
 import { TicketingModule } from '../ticketing/ticketing.module';
 import { EventsModule } from '../events/events.module';
 import { SeatingReadinessPort } from '../events/ports/seating-readiness.port';
+import { PublicSeatMapPort } from '../public-pages/ports/public-seat-map.port';
 import { RegistrationModule } from '../registration/registration.module';
 import { EventSeatingController } from './event-seating.controller';
 import { EventSeatingPolicy } from './event-seating.policy';
 import { EventSeatingRepository } from './event-seating.repository';
 import { EventSeatingService } from './event-seating.service';
+import { PublicSeatMapAdapter } from './public-seat-map.adapter';
 import { SeatingReadinessAdapter } from './seating-readiness.adapter';
 
 /**
@@ -27,6 +29,10 @@ import { SeatingReadinessAdapter } from './seating-readiness.adapter';
  * imported with `forwardRef` too — not because it depends on Seating, but
  * because it imports Events, which now imports this module, so the plain
  * import would still be loading when this decorator runs.
+ *
+ * It also binds PublicPages' `PublicSeatMapPort`: the public page shows how
+ * the rows are split between ticket types, and nothing else about the seats
+ * (US-PAGE-05).
  */
 @Module({
   imports: [
@@ -41,7 +47,8 @@ import { SeatingReadinessAdapter } from './seating-readiness.adapter';
     EventSeatingRepository,
     EventSeatingPolicy,
     { provide: SeatingReadinessPort, useClass: SeatingReadinessAdapter },
+    { provide: PublicSeatMapPort, useClass: PublicSeatMapAdapter },
   ],
-  exports: [EventSeatingService, SeatingReadinessPort],
+  exports: [EventSeatingService, SeatingReadinessPort, PublicSeatMapPort],
 })
 export class EventSeatingModule {}
