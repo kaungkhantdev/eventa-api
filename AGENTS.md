@@ -104,6 +104,10 @@ last stage: compiled JS, production dependencies only, `USER 1000`, read-only at
 Its header maps each factor to where it is kept. Keep the image needing no file to boot: config is the
 environment (`.dockerignore` keeps every `.env` out), and anything the code reads from disk at run time
 must be in `dist/` or copied by the `prod` stage (today: `dist/assets` fonts, `src/db/migrations`).
+The reverse holds too: every file `nest build` compiles ships, and runs with `node dist/...`, so dev
+scripts stay out of `dist/`. `tsconfig.build.json` excludes `src/db/seed.ts` (it recreates
+`admin@acme.test` with a published password), and `src/production-dependencies.spec.ts` fails on any
+compiled file that runs on load other than `main.ts` and `db/migrate.main.ts`.
 
 Swagger UI is at `/api/docs`, the spec at `/api/docs/json`; `openapi.json` is also written to the repo
 root on boot when `EMIT_OPENAPI=true` **and** `NODE_ENV` is not `production` (git-ignored —

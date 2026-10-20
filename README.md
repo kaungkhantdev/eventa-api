@@ -196,6 +196,10 @@ stopped run is safe — each migration commits on its own, so the next run resum
 The entry point is `src/db/migrate.main.ts`; `pnpm migrate` runs the same code from source
 (`scripts/migrate.ts` → `src/db/migration-runner.ts`).
 
+The seed is **not** in the production image: it recreates `admin@acme.test` with the password this
+README publishes, so it is development data only. `pnpm seed` runs it from source with `tsx` (the
+umbrella compose runs it from the dev stage), and `tsconfig.build.json` keeps it out of `dist/`.
+
 The image follows the twelve-factor app; the `Dockerfile` header says where each factor is kept. In
 short: one Dockerfile per repo; a pinned base image, Corepack-pinned pnpm, a frozen lockfile and
 production-only `node_modules`; config from the environment; backing services as URLs; build, then an

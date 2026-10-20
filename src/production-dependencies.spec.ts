@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { builtinModules } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import * as ts from 'typescript';
 
 /**
@@ -115,5 +115,54 @@ describe('the production image holds production dependencies only', () => {
     expect([...packagesReachedFrom('db/migrate.main.ts')]).toEqual(
       expect.arrayContaining(['drizzle-orm', 'pg', 'zod']),
     );
+  });
+});
+
+/**
+ * Everything `nest build` compiles ships: the prod stage copies all of dist/.
+ * A file that does something when loaded is a script anyone can run there
+ * with `node dist/...`, as the image's admin processes are run. The dev seeder
+ * is one: it wipes the `acme` tenant and recreates admin@acme.test with the
+ * password the README publishes, so in the image it is one command away from
+ * the production database. Only the production entry points may run on load;
+ * dev scripts run from source with tsx, and tsconfig.build.json leaves them out.
+ */
+
+/** The files tsconfig.build.json compiles, relative to src/, as tsc reads it. */
+function compiledByTheBuild(): string[] {
+  const configPath = join(REPO_ROOT, 'tsconfig.build.json');
+  const read = ts.readConfigFile(configPath, ts.sys.readFile);
+  if (read.error) {
+    const { messageText } = read.error;
+    throw new Error(ts.flattenDiagnosticMessageText(messageText, '\n'));
+  }
+  const { fileNames } = ts.parseJsonConfigFileContent(
+    read.config,
+    ts.sys,
+    REPO_ROOT,
+    undefined,
+    configPath,
+  );
+  return fileNames.map((file) => relative(SRC, file));
+}
+
+/** Whether loading the file runs code: a top-level statement like `void seed();`. */
+function runsWhenLoaded(file: string): boolean {
+  const source = ts.createSourceFile(
+    file,
+    readFileSync(join(SRC, file), 'utf8'),
+    ts.ScriptTarget.Latest,
+  );
+  return source.statements.some((statement) =>
+    ts.isExpressionStatement(statement),
+  );
+}
+
+describe('the production build compiles no dev script', () => {
+  // Also guards itself: a config this failed to read would compile nothing,
+  // and nothing is not the entry points.
+  it('only the production entry points run on load', () => {
+    const runnable = compiledByTheBuild().filter(runsWhenLoaded);
+    expect(runnable.sort()).toEqual([...PRODUCTION_ENTRIES].sort());
   });
 });
