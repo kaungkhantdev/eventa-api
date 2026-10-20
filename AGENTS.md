@@ -28,8 +28,8 @@ enumerate the finished epics and list what was "still to come", and it was wrong
 named payouts, VAT periods, check-in, the dashboard and messaging as unbuilt long after all five shipped.
 A reader who trusted it would have rebuilt working modules. So the inventory lives where it cannot drift:
 
-- **What exists** — `ls src/modules` (54 today), `ls src/db/migrations` (`0000`…`0071`), and the
-  committed `pgTable` definitions in `src/db/schema` (57 tables).
+- **What exists** — `ls src/modules` (55 today), `ls src/db/migrations` (`0000`…`0075`), and the
+  committed `pgTable` definitions in `src/db/schema` (58 tables).
 - **What is left** — the `US-*` backlog in
   [`../eventa-docs/01-requirements-and-features/functional-requirements.md`](../eventa-docs/01-requirements-and-features/functional-requirements.md),
   which is the only place a story's acceptance criteria live. Before building, find the story and quote
@@ -50,7 +50,7 @@ The build plan is **not in this repo** — it lives in the sibling SDLC docs at 
 these before adding anything:
 - [`../eventa-docs/05-development/development-guide.md`](../eventa-docs/05-development/development-guide.md) — how to build *this* repo (layout, conventions, the feature playbook). **Primary reference.**
 - [`../eventa-docs/04-architecture/software-architecture.md`](../eventa-docs/04-architecture/software-architecture.md) — the SAD (modular monolith, outbox, checkout consistency, ADRs).
-- [`../eventa-docs/04-architecture/entities.md`](../eventa-docs/04-architecture/entities.md) + `erd.md` — the data dictionary: **57 tables**, all of which exist today. Note the direction: those documents are **read back from the live schema**, so where a document and the database disagree the database wins and the *document* is corrected. **This repo owns the schema & migrations**, so the committed `pgTable` definitions are the inventory — and `entities.md` is where you learn *why* a table exists.
+- [`../eventa-docs/04-architecture/entities.md`](../eventa-docs/04-architecture/entities.md) + `erd.md` — the data dictionary: **58 tables**, all of which exist today. Note the direction: those documents are **read back from the live schema**, so where a document and the database disagree the database wins and the *document* is corrected. **This repo owns the schema & migrations**, so the committed `pgTable` definitions are the inventory — and `entities.md` is where you learn *why* a table exists.
 - [`../eventa-docs/01-requirements-and-features/functional-requirements.md`](../eventa-docs/01-requirements-and-features/functional-requirements.md) — the product backlog; a `US-*` story's acceptance criteria become your tests ([test cases](../eventa-docs/06-testing/test-cases.md)).
 
 Polyrepo siblings: `../eventa-web` (React front-end, reads this API's `openapi.json`), `../eventa-worker`
@@ -147,7 +147,7 @@ the development guide when implementing:
   (`event-categories.service.ts` → `EventCategoriesService`). Related modules share a **name prefix** so
   they sort together: `auth`, `auth-signup`, `auth-password` · `events`, `event-categories`,
   `event-program`, `event-seating`, `event-sharing`, `event-monitoring`, `event-duplication`.
-  **`ls src/modules` is the list** — 54 of them, and a prose copy here went stale by fourteen before
+  **`ls src/modules` is the list** — 55 of them, and a prose copy here went stale by fourteen before
   anybody noticed. What a listing cannot tell you is which name means what, so these are the ones worth
   knowing before you add a sibling next to them: `auth` (sign-in, tokens, sessions) and its prefix family
   (`auth-signup`, `auth-booking-signup` — an account from a booking, only via the link emailed to the
@@ -157,7 +157,11 @@ the development guide when implementing:
   (provider seam + webhooks) · the finance family (`invoices`, `tax-periods` — the monthly VAT ledger and
   PP30 filing, `payouts`) · `platform` (the transactional outbox, and only that — its docstring reserves
   idempotency, audit and jobs for later, so do not go looking for them there; `audit` is its own
-  module and order idempotency lives in `checkout`/`payments`).
+  module and order idempotency lives in `checkout`/`payments`) · `calendar-connection` (the workspace
+  Google Calendar, US-MTG-08: `GET /calendar-connection` for any console member, `POST
+  /calendar-connection/connect` and `/disconnect` with `setIntegrations`, and the public OAuth callback
+  `GET /public/calendar-connection/google/callback` — the one `@Res()` redirect in `src`, always a 302
+  back to Settings → Integrations; `meetings` owns the diary and eventa-worker sends the invites).
   Tree: `src/db/`, `src/modules/<name>/`, `src/common/` (`guards/`, `decorators/`, `interceptors/`,
   `filters/`, `http/`, `util/`, tenancy), plus a generated `openapi.json`.
 - **Cross-cutting code lives in `src/common/`, never in a domain module.** A guard, decorator, pipe or
@@ -272,7 +276,7 @@ events↔event-seating — the publish gate asks Seating about the seats' ticket
 event-seating's import of ticketing, since that reaches events — ticketing↔registration, ticketing↔checkout —
 which pulls discounts→ticketing into the cycle too, and payment-settings→ticketing now that checkout asks
 PaymentSettings which methods are on — invoices↔payments) — not to paper over a bad boundary. Ports in
-play — the cross-context reads worth knowing; there are 57 `*Port` abstract classes today and
+play — the cross-context reads worth knowing; there are 58 `*Port` abstract classes today and
 `grep -rn 'abstract class .*Port' src` is the inventory (the `reports`/`dashboard` read families and the
 payment-setup ports are not listed here):
 `TicketAvailabilityPort` ·
@@ -307,7 +311,9 @@ ticket type, row by row — `seatTicketTypes`, with the row's `ticketTypeId` nul
 US-PAGE-05).
 Provider seams (infrastructure behind an abstract class, not cross-context reads): `SocialVerifierPort`
 (OAuth token verification) · `PaymentProviderPort` (the PSP adapter — PCI SAQ-A; also carries the
-payout settings link and payout retry) · `ObjectStoragePort` (S3 for profile photos).
+payout settings link and payout retry) · `ObjectStoragePort` (S3 for profile photos) ·
+`GoogleOAuthPort` (the Google Calendar consent, code exchange and revoke — real, fake or off by
+`CALENDAR_PROVIDER`; the fake is refused in production).
 
 **5. Register it in `app.module.ts`** and write the module docstring: what it owns, what it depends on, and
 why any `forwardRef` exists.
