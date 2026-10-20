@@ -169,3 +169,53 @@ describe('the HTTP access log', () => {
     });
   });
 });
+
+/**
+ * Pretty logs follow what is installed, not NODE_ENV alone.
+ *
+ * pino-pretty is a devDependency, so the production image does not have it.
+ * Run that image with any other NODE_ENV — an overlay, or a development .env
+ * handed to `docker run` — and asking pino for a transport it cannot find
+ * throws while nestjs-pino builds the logger: the api never boots.
+ */
+describe('the log format', () => {
+  function transportFor(
+    nodeEnv: Env['NODE_ENV'],
+    findPrettyPrinter?: () => string | undefined,
+  ): { target: string } | undefined {
+    const config = {
+      get: (key: string) => (key === 'NODE_ENV' ? nodeEnv : 'info'),
+    } as unknown as ConfigService<Env, true>;
+    const pinoHttp = buildLoggerOptions(config, findPrettyPrinter).pinoHttp as {
+      transport?: { target: string };
+    };
+    return pinoHttp.transport;
+  }
+
+  const notInstalled = () => undefined;
+  const installedAt = () => '/checkout/node_modules/pino-pretty/index.js';
+
+  it('is JSON in development when pino-pretty is not installed (the production image)', () => {
+    expect(transportFor('development', notInstalled)).toBeUndefined();
+  });
+
+  it('is pretty in development when pino-pretty is installed (a checkout)', () => {
+    expect(transportFor('development', installedAt)).toEqual(
+      expect.objectContaining({
+        target: '/checkout/node_modules/pino-pretty/index.js',
+      }),
+    );
+  });
+
+  it('finds pino-pretty in this checkout, where it is a devDependency', () => {
+    expect(transportFor('development')?.target).toMatch(/pino-pretty/);
+  });
+
+  it('is JSON in production even where pino-pretty is installed', () => {
+    expect(transportFor('production', installedAt)).toBeUndefined();
+  });
+
+  it('is JSON in test even where pino-pretty is installed', () => {
+    expect(transportFor('test', installedAt)).toBeUndefined();
+  });
+});

@@ -105,15 +105,40 @@ function maskQuery(query: unknown): unknown {
 }
 
 /**
+ * Where pino-pretty is installed, or undefined where it is not.
+ *
+ * It is a devDependency: a checkout has it, the production image does not.
+ * NODE_ENV alone cannot say which of the two is running, because the image
+ * runs with whatever an environment sets, `development` included. Asked for a
+ * transport it cannot find, pino throws while nestjs-pino builds the logger,
+ * and the api never boots. So pretty output needs both a non-production
+ * NODE_ENV and the package itself; without it the api logs the same JSON it
+ * logs in production.
+ */
+function findPrettyPrinter(): string | undefined {
+  try {
+    return require.resolve('pino-pretty');
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * pino (nestjs-pino) options. Every HTTP log line carries `correlationId`
  * (set by CorrelationIdMiddleware onto the request); secrets are redacted,
- * query values are masked unless allowlisted; pretty output in dev, silent in
- * tests, structured JSON in production.
+ * query values are masked unless allowlisted; pretty output in development
+ * where pino-pretty is installed, silent in tests, structured JSON otherwise.
  */
-export function buildLoggerOptions(config: ConfigService<Env, true>): Params {
+export function buildLoggerOptions(
+  config: ConfigService<Env, true>,
+  prettyPrinter: () => string | undefined = findPrettyPrinter,
+): Params {
   const env = config.get('NODE_ENV', { infer: true });
   const isProd = env === 'production';
   const isTest = env === 'test';
+  // Resolved here, and handed to pino as a path: the copy found is the copy
+  // pino loads.
+  const pretty = !isProd && !isTest ? prettyPrinter() : undefined;
 
   return {
     pinoHttp: {
@@ -130,13 +155,12 @@ export function buildLoggerOptions(config: ConfigService<Env, true>): Params {
         ],
         remove: true,
       },
-      transport:
-        !isProd && !isTest
-          ? {
-              target: 'pino-pretty',
-              options: { singleLine: true, translateTime: 'SYS:standard' },
-            }
-          : undefined,
+      transport: pretty
+        ? {
+            target: pretty,
+            options: { singleLine: true, translateTime: 'SYS:standard' },
+          }
+        : undefined,
     },
   };
 }

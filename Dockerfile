@@ -126,9 +126,12 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 
 # ─── prod: the production image (last, so `docker build .` gives it) ─────────
 FROM base AS prod
-# Not only a label: outside production the logger loads pino-pretty, a
-# devDependency this image does not have, and the api writes openapi.json into
-# its working directory when EMIT_OPENAPI is set. Keep it production.
+# Not only a label: outside production the api writes openapi.json into its
+# working directory when EMIT_OPENAPI is set, which a read-only filesystem (VI)
+# refuses. Keep it production. Logs are JSON under any NODE_ENV: pretty output
+# needs pino-pretty, a devDependency this image does not have, and the logger
+# checks that it is installed before asking pino for it
+# (src/config/logger.config.ts).
 ENV NODE_ENV=production
 
 # Owned by root and read-only to the process: the release cannot change itself
