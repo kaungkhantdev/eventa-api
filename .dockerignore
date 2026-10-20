@@ -1,6 +1,7 @@
-# Build context for Dockerfile.dev. Dependencies are installed inside the image
-# (Linux binaries), never copied from the host (macOS binaries), and nothing
-# built on the host or secret goes into a layer.
+# Build context for the Dockerfile (both the production image and the dev
+# target). Dependencies are installed inside the image (Linux binaries), never
+# copied from the host (macOS binaries), and nothing built on the host or
+# secret goes into a layer.
 .git
 .github
 node_modules
@@ -14,9 +15,17 @@ openapi.json
 coverage
 .nyc_output
 
-# Secrets: compose hands .env to the container at run time instead.
+# Config is the environment, never a file in an image (twelve-factor III).
+# The app needs no .env to boot; compose and Kubernetes pass the variables.
 **/.env
 **/.env.*
+
+# Not read by the build or by `pnpm dev`; keeping them out keeps the context
+# small and the layer cache steady.
+Dockerfile
+.dockerignore
+docker-compose.yml
+*.md
 
 # Machine-local
 *.log

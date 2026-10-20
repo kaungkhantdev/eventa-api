@@ -98,6 +98,13 @@ pnpm seed              # seeds the `acme` tenant + admin@acme.test, idempotent (
 pnpm db:studio         # drizzle-kit studio — browse the local DB
 ```
 
+**Container image:** one `Dockerfile`, twelve-factor. `docker build .` gives the production image (the
+last stage: compiled JS, production dependencies only, `USER 1000`, read-only at run time, `CMD ["node",
+"dist/main"]`); `--target dev` gives the watch-mode image the umbrella `eventa/docker-compose.yml` runs.
+Its header maps each factor to where it is kept. Keep the image needing no file to boot: config is the
+environment (`.dockerignore` keeps every `.env` out), and anything the code reads from disk at run time
+must be in `dist/` or copied by the `prod` stage (today: `dist/assets` fonts, `src/db/migrations`).
+
 Swagger UI is at `/api/docs`, the spec at `/api/docs/json`; `openapi.json` is also written to the repo
 root on boot when `EMIT_OPENAPI=true` **and** `NODE_ENV` is not `production` (git-ignored —
 regenerated in CI, consumed by `eventa-web`).
