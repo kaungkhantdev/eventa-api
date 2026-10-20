@@ -131,4 +131,101 @@ describe('validateEnv', () => {
       expect(env.S3_PUBLIC_BASE_URL).toBe('https://cdn.eventa.co.th');
     });
   });
+  /**
+   * The workspace Google Calendar (US-MTG-04/08). Every variable is optional:
+   * a server with none of them boots, resolves to 'off', and says so on
+   * Settings → Integrations instead of failing a meeting save.
+   */
+  describe('Google Calendar (US-MTG-04/08)', () => {
+    const google = {
+      GOOGLE_CALENDAR_CLIENT_ID: 'client-id.apps.googleusercontent.com',
+      GOOGLE_CALENDAR_CLIENT_SECRET: 'client-secret',
+    };
+
+    it('boots with nothing configured', () => {
+      const env = validateEnv(base);
+      expect(env.CALENDAR_PROVIDER).toBeUndefined();
+      expect(env.GOOGLE_CALENDAR_CLIENT_ID).toBeUndefined();
+      expect(env.GOOGLE_CALENDAR_CLIENT_SECRET).toBeUndefined();
+      expect(env.GOOGLE_CALENDAR_REDIRECT_URI).toBeUndefined();
+    });
+
+    it.each(['off', 'fake', 'google'])('accepts CALENDAR_PROVIDER=%s', (v) => {
+      const env = validateEnv({ ...base, ...google, CALENDAR_PROVIDER: v });
+      expect(env.CALENDAR_PROVIDER).toBe(v);
+    });
+
+    it('refuses an unknown provider', () => {
+      expect(() =>
+        validateEnv({ ...base, CALENDAR_PROVIDER: 'outlook' }),
+      ).toThrow(/CALENDAR_PROVIDER/);
+    });
+
+    it('refuses google without the client id', () => {
+      expect(() =>
+        validateEnv({
+          ...base,
+          CALENDAR_PROVIDER: 'google',
+          GOOGLE_CALENDAR_CLIENT_SECRET: 'client-secret',
+        }),
+      ).toThrow(/GOOGLE_CALENDAR_CLIENT_ID/);
+    });
+
+    it('refuses google without the client secret', () => {
+      expect(() =>
+        validateEnv({
+          ...base,
+          CALENDAR_PROVIDER: 'google',
+          GOOGLE_CALENDAR_CLIENT_ID: 'client-id',
+        }),
+      ).toThrow(/GOOGLE_CALENDAR_CLIENT_SECRET/);
+    });
+
+    it('refuses an empty client id', () => {
+      expect(() =>
+        validateEnv({ ...base, GOOGLE_CALENDAR_CLIENT_ID: '' }),
+      ).toThrow(/GOOGLE_CALENDAR_CLIENT_ID/);
+    });
+
+    it('refuses a redirect URI that is not a URL', () => {
+      expect(() =>
+        validateEnv({ ...base, GOOGLE_CALENDAR_REDIRECT_URI: 'not a url' }),
+      ).toThrow(/GOOGLE_CALENDAR_REDIRECT_URI/);
+    });
+
+    it('sets no redirect default — the adapter derives it from PUBLIC_API_URL', () => {
+      expect(
+        validateEnv({ ...base, ...google }).GOOGLE_CALENDAR_REDIRECT_URI,
+      ).toBeUndefined();
+    });
+
+    it('refuses the fake in production, saying why', () => {
+      expect(() =>
+        validateEnv({
+          ...base,
+          NODE_ENV: 'production',
+          CALENDAR_PROVIDER: 'fake',
+        }),
+      ).toThrow(
+        'CALENDAR_PROVIDER=fake cannot run in production — no invite would ever reach Google.',
+      );
+    });
+
+    it('allows the fake outside production', () => {
+      expect(() =>
+        validateEnv({ ...base, NODE_ENV: 'test', CALENDAR_PROVIDER: 'fake' }),
+      ).not.toThrow();
+    });
+
+    it('allows google in production when both client values are set', () => {
+      expect(() =>
+        validateEnv({
+          ...base,
+          ...google,
+          NODE_ENV: 'production',
+          CALENDAR_PROVIDER: 'google',
+        }),
+      ).not.toThrow();
+    });
+  });
 });
