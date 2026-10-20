@@ -446,3 +446,15 @@ export const meetingSyncStatusEnum = pgEnum('meeting_sync_status', [
   /** No calendar is connected, so there is nothing to sync to yet. */
   'not_connected',
 ]);
+
+/**
+ * Where the workspace Google Calendar connection stands (US-MTG-08). No row
+ * at all also means disconnected. `expired` is set by eventa-worker when
+ * Google stops accepting the stored grant (revoked, or a Testing-mode token's
+ * 7 days are up): the Admin is asked to reconnect rather than sync failing
+ * silently.
+ */
+export const calendarConnectionStatusEnum = pgEnum(
+  'calendar_connection_status',
+  ['disconnected', 'connected', 'expired'],
+);

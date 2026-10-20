@@ -526,6 +526,13 @@
       "when": 1787500000024,
       "tag": "0074_document_seller_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1787500000025,
+      "tag": "0075_calendar_connections",
+      "breakpoints": true
     }
   ]
 }
