@@ -1,6 +1,5 @@
 import { type GoogleGrant, GoogleOAuthPort } from './ports/google-oauth.port';
-
-const NOT_CONFIGURED = 'Google Calendar is not configured on this server.';
+import { OFF_PROVIDER_NOT_CONFIGURED } from '../../common/constants/calendar-connection.constants';
 
 /**
  * No Google client on this server (US-MTG-08). `configured` is false, so the
@@ -11,14 +10,14 @@ export class OffGoogleOAuthAdapter extends GoogleOAuthPort {
   readonly configured = false;
 
   authorizeUrl(): string {
-    throw new Error(NOT_CONFIGURED);
+    throw new Error(OFF_PROVIDER_NOT_CONFIGURED);
   }
 
   exchangeCode(): Promise<GoogleGrant> {
-    return Promise.reject(new Error(NOT_CONFIGURED));
+    return Promise.reject(new Error(OFF_PROVIDER_NOT_CONFIGURED));
   }
 
   revoke(): Promise<void> {
-    return Promise.reject(new Error(NOT_CONFIGURED));
+    return Promise.reject(new Error(OFF_PROVIDER_NOT_CONFIGURED));
   }
 }

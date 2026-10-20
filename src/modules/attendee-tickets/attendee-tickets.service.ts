@@ -16,11 +16,13 @@ import type {
   TicketPassDto,
 } from './dto/my-events.dto';
 import { renderPassSvg } from './ticket-pass.svg';
+import {
+  TODAY,
+  TOMORROW,
+} from '../../common/constants/attendee-tickets.constants';
 
 /** A ticket in these states still admits; anything else no longer does. */
 const VALID_STATUSES: readonly IssuedTicketStatus[] = ['issued', 'checked_in'];
-const TODAY = 'Today';
-const TOMORROW = 'Tomorrow';
 
 /**
  * The attendee's own tickets (US-DISC-07/09): the Upcoming/Past split of My

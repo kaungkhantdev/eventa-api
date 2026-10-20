@@ -13,6 +13,11 @@ import {
   type AnnouncementListRow,
   type AnnouncementRow,
 } from './announcements.repository';
+import {
+  DEFAULT_LIMIT,
+  DEFAULT_PAGE,
+  NOT_FOUND,
+} from '../../common/constants/announcements.constants';
 
 /** What an organizer is broadcasting, once the caller has resolved the audience. */
 export interface SendAnnouncement {
@@ -32,10 +37,6 @@ export interface ScheduleAnnouncement {
   sentByUserId: string;
   sendAt: Date;
 }
-
-const DEFAULT_PAGE = 1;
-const DEFAULT_LIMIT = 20;
-const NOT_FOUND = 'Announcement not found.';
 
 /**
  * Broadcasts an organizer has sent to an event's attendees (US-MSG-04).

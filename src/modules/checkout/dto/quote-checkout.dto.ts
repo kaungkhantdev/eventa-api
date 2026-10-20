@@ -13,9 +13,10 @@ import {
   Min,
 } from 'class-validator';
 import { MAX_SEATS_PER_BOOKING } from '../../../common/booking/booking.limits';
-
-const MAX_CODE = 24;
-const MAX_EMAIL = 254;
+import {
+  MAX_CODE,
+  MAX_EMAIL,
+} from '../../../common/constants/checkout.constants';
 
 /**
  * A checkout selection. Exactly one ticket type, then EITHER a quantity (general

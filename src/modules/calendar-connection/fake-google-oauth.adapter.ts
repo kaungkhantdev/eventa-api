@@ -1,18 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { CALENDAR_SCOPES } from './calendar-provider';
 import {
   type GoogleGrant,
   GoogleOAuthError,
   GoogleOAuthPort,
 } from './ports/google-oauth.port';
-
-/** The only code this fake accepts — the one its consent URL hands out. */
-export const FAKE_AUTH_CODE = 'fake-auth-code';
-
-/** Prefix the worker's fake calendar recognises as a token it issued. */
-const FAKE_REFRESH_PREFIX = 'fake-refresh-';
-
-const FAKE_ACCOUNT = 'calendar@example.test';
+import {
+  CALENDAR_SCOPES,
+  FAKE_ACCOUNT,
+  FAKE_AUTH_CODE,
+  FAKE_REFRESH_PREFIX,
+} from '../../common/constants/calendar-connection.constants';
 
 /**
  * A Google consent that needs no Google (US-MTG-08): its "consent screen" is

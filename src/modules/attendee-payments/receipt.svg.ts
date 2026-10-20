@@ -1,12 +1,13 @@
 import { formatBaht } from '../../common/money/baht';
 import { escapeXml } from '../../common/xml/escape-xml';
 import type { ReceiptRow } from './attendee-payments.types';
-
-const WIDTH = 600;
-const HEIGHT = 760;
-const LEFT = 60;
-const RIGHT = WIDTH - 60;
-const PERCENT = 100;
+import {
+  HEIGHT,
+  LEFT,
+  PERCENT,
+  RIGHT,
+  WIDTH,
+} from '../../common/constants/attendee-payments.constants';
 
 /**
  * The downloadable VAT receipt (US-DISC-10): one self-contained SVG showing the

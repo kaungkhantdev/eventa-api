@@ -16,20 +16,14 @@ import { CheckoutPaymentMethodsPort } from './ports/checkout-payment-methods.por
 import { SeatMapPort } from './ports/seat-map.port';
 import { TicketCatalogPort } from './ports/ticket-catalog.port';
 import { canJoinWaitlist } from './waitlist-rules';
-
-const FREE_LABEL = 'Free';
-const ONSALE = 'onsale';
-/** An allocation of 0 means unlimited — mirrors `TicketingPolicy`. */
-const UNLIMITED = 0;
-const GA_SEATING_NOTE = 'Seating is first-come, first-served.';
-const ONLINE_DELIVERY_NOTE =
-  'A join link will be emailed to you before the event starts.';
-/**
- * Said before anybody pays (US-REG-02): the money is taken now, the ticket
- * comes with the organizer's approval, and a "no" gives the money back.
- */
-const APPROVAL_NOTE =
-  "The organizer reviews each registration before confirming it. If yours isn't approved, any payment is refunded in full.";
+import {
+  APPROVAL_NOTE,
+  FREE_LABEL,
+  GA_SEATING_NOTE,
+  ONLINE_DELIVERY_NOTE,
+  ONSALE,
+  UNLIMITED,
+} from '../../common/constants/checkout.constants';
 
 /**
  * Assembles what a buyer sees when checkout opens (US-DISC-04), and loads the

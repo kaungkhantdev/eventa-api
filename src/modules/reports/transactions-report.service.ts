@@ -1,15 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { Clock } from '../../common/time/clock';
-import {
-  DEFAULT_REPORT_LIMIT,
-  type ReportFilterQueryDto,
-} from './dto/report-filter.query.dto';
+import { type ReportFilterQueryDto } from './dto/report-filter.query.dto';
 import {
   TransactionLedgerPort,
   type LedgerEntry,
   type LedgerTotals,
 } from './ports/transaction-ledger.port';
 import { resolveReportPeriod, type ReportPeriod } from './reports-period';
+import {
+  DEFAULT_REPORT_LIMIT,
+  PERCENT,
+} from '../../common/constants/reports.constants';
 
 /**
  * The transaction ledger (US-RPT-06).
@@ -35,8 +36,6 @@ export interface TransactionsReportView {
   matchedEntries: number;
   totals: TransactionTotalsView;
 }
-
-const PERCENT = 100;
 
 @Injectable()
 export class TransactionsReportService {

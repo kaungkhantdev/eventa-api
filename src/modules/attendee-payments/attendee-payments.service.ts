@@ -11,12 +11,13 @@ import type {
   TransactionDto,
 } from './dto/payment-history.dto';
 import { renderReceiptSvg } from './receipt.svg';
-
-const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 100;
-const FIRST_PAGE = 1;
-const SATANG_PER_BAHT = 100;
-const CSV_HEADER = 'date,reference,event,method,status,amount_baht,vat_baht';
+import {
+  CSV_HEADER,
+  DEFAULT_LIMIT,
+  FIRST_PAGE,
+  MAX_LIMIT,
+  SATANG_PER_BAHT,
+} from '../../common/constants/attendee-payments.constants';
 
 /**
  * The attendee's payment history (US-DISC-10): summary tiles, the paged

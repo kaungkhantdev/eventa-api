@@ -1,13 +1,15 @@
 import { HttpStatus } from '@nestjs/common';
 import { DomainException } from '../../common/errors/domain.exception';
 import {
+  assertSchedulable,
+  unchangeableBecause,
+} from './announcement-schedule';
+import {
   ALREADY_CANCELLED,
   ALREADY_SENT,
   TOO_FAR,
   TOO_SOON,
-  assertSchedulable,
-  unchangeableBecause,
-} from './announcement-schedule';
+} from '../../common/constants/announcements.constants';
 
 const NOW = new Date('2026-08-01T02:00:00.000Z');
 const MINUTE = 60_000;

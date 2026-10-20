@@ -1,8 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { ArrayMaxSize, IsArray, IsUUID } from 'class-validator';
-
-/** A guest can only hold so many hearts in one session before it is abuse. */
-const MAX_GUEST_SAVES = 100;
+import { MAX_GUEST_SAVES } from '../../../common/constants/saved-events.constants';
 
 /** The in-session saves a guest brings with them at sign-in (US-DISC-03). */
 export class MergeSavedEventsDto {

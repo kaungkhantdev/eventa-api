@@ -12,6 +12,12 @@ import type {
   RefundRow,
 } from './payments.repository';
 import { PaymentsRepository } from './payments.repository';
+import {
+  FINISHED_ELSEWHERE,
+  NOT_PAID,
+  NO_GATEWAY_REF,
+  REFUND_ALREADY_ISSUED,
+} from '../../common/constants/payments.constants';
 
 export interface RefundPaymentRequest {
   paymentId: string;
@@ -44,14 +50,6 @@ export type RefundCompletion =
   | 'already_final'
   | 'amount_mismatch'
   | 'failed_after_settled';
-
-const NOT_PAID =
-  'Only a completed payment can be refunded — this one never cleared.';
-const ALREADY_REFUNDED = 'This payment has already been refunded.';
-const NO_GATEWAY_REF =
-  'This payment has no provider reference, so it cannot be refunded automatically.';
-const FINISHED_ELSEWHERE =
-  'This refund was finished by another request — reload to see where it stands.';
 
 /**
  * Thrown inside the refund transaction when its guarded write matched nothing,
@@ -152,7 +150,7 @@ export class RefundsService {
     );
     if (!payment) throw DomainException.notFound('Payment not found.');
     if (payment.status === 'refunded') {
-      throw DomainException.conflict(ALREADY_REFUNDED);
+      throw DomainException.conflict(REFUND_ALREADY_ISSUED);
     }
     if (payment.status !== 'paid') throw DomainException.conflict(NOT_PAID);
     if (!payment.gatewayRef) throw DomainException.conflict(NO_GATEWAY_REF);

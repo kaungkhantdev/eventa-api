@@ -1,10 +1,13 @@
 import { DomainException } from '../../common/errors/domain.exception';
-import { MAX_NPS_SCORE, MIN_NPS_SCORE } from './nps-rules';
 import type { SurveyQuestionType } from './survey-rules';
-
-/** The scale a rating question is answered on. */
-export const MIN_RATING = 1;
-export const MAX_RATING = 5;
+import {
+  MAX_NPS_SCORE,
+  MAX_RATING,
+  MIN_NPS_SCORE,
+  MIN_RATING,
+  PERCENT,
+  PRECISION,
+} from '../../common/constants/surveys.constants';
 
 export interface AnsweredQuestion {
   id: number;
@@ -156,9 +159,6 @@ export interface RatingSummary {
   distribution: Record<number, number>;
 }
 
-/** One decimal place: the difference between 4.27 and 4.3 is noise. */
-const PRECISION = 10;
-
 export function summarise(ratings: number[]): RatingSummary {
   const distribution: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   for (const rating of ratings) distribution[rating] += 1;
@@ -172,8 +172,6 @@ export function summarise(ratings: number[]): RatingSummary {
     distribution,
   };
 }
-
-const PERCENT = 100;
 
 /** Who the post-event thank-you reached, and how many of THEM answered. */
 export interface Reach {

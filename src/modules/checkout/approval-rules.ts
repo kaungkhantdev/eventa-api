@@ -82,11 +82,3 @@ export function statusAfterRefund(
 ): 'rejected' | 'cancelled' {
   return status === 'rejected' ? 'rejected' : 'cancelled';
 }
-
-/**
- * The expiry a reserved seat's hold takes while its registration waits for a
- * decision. A decision, not a clock, ends this hold — and every availability
- * query already reads `expires_at`, so a date no clock reaches keeps the seat
- * off sale without teaching any of them a new rule.
- */
-export const DECISION_HOLD_EXPIRY = new Date('9999-12-31T23:59:59Z');

@@ -31,7 +31,6 @@ import type { BillableOrder } from '../invoices/ports/invoice-order.port';
 import { OutboxPort, type OutboxEventInput } from '../platform/outbox.port';
 import { rejectionRefunds } from '../registrations/registration-decision';
 import {
-  DECISION_HOLD_EXPIRY,
   isAwaitingApproval,
   isOnCheckoutClock,
   statusAfterRefund,
@@ -40,10 +39,18 @@ import { exceedsAllocation } from './allocation-rules';
 import type { OrderTotals } from './checkout-pricing';
 import { heldSeatsMatch, seatSellsUnder } from './held-seat-rules';
 import { RedemptionLedgerPort } from './ports/redemption-ledger.port';
-
-/** Fallbacks if a workspace row somehow has none — the Thai statutory rate. */
-const DEFAULT_VAT_RATE = 0.07;
-const DEFAULT_SERVICE_FEE_RATE = 0.05;
+import {
+  ACTIVE_HOLD,
+  AWAITING_DECISION,
+  DECIDED_ELSEWHERE,
+  DECISION_HOLD_EXPIRY,
+  DEFAULT_SERVICE_FEE_RATE,
+  DEFAULT_VAT_RATE,
+  LIVE_TICKET_STATUSES,
+  PAID_WHILE_DECIDING,
+  REFUND_REASON,
+  WAITLIST_ENTRY_COLUMNS,
+} from '../../common/constants/checkout.constants';
 
 /** The two rates that turn a ticket subtotal into what the attendee pays. */
 export interface OrgRates {
@@ -173,14 +180,6 @@ const WAITLISTED: OrderState = {
   paymentStatus: 'pending',
 };
 
-/** How a waitlist entry is read, wherever it is read from. */
-const WAITLIST_ENTRY_COLUMNS = {
-  order: orders,
-  ticketTypeId: orderItems.ticketTypeId,
-  ticketTypeName: ticketTypes.name,
-  quantity: orderItems.quantity,
-};
-
 /** What was placed — `replayed` when an identical request already did this. */
 export interface PlacedOrder {
   order: OrderRow;
@@ -301,21 +300,6 @@ interface SettlementContext {
 }
 
 /**
- * Why money that arrived is going back, as the CODE `payment.refund_required`
- * carries. eventa-worker words each one for the buyer in their own language
- * (`REASONS` in its refund-notice.ts) — an English sentence here landed inside
- * the Thai email. Keep the two lists in step.
- */
-const REFUND_REASON = {
-  tierRemoved: 'tier_removed',
-  soldOut: 'soldout',
-  seatsTaken: 'seats_unavailable',
-  seatMismatch: 'seat_mismatch',
-  seatsReleased: 'seats_released',
-  orderClosed: 'order_closed',
-} as const;
-
-/**
  * The same four refusals, for whoever is about to read them. A buyer's is a
  * refund reason code the worker words for them; an organizer is told, in a
  * sentence, what to do next.
@@ -356,18 +340,6 @@ function settlementBlocker(
   if (!context.seatTypesMatch) return said.seatMismatch;
   return null;
 }
-
-/** The two states awaiting a decision — approvable, and rejectable. */
-const AWAITING_DECISION = ['pending', 'waitlisted'] as const;
-const DECIDED_ELSEWHERE =
-  'This registration was decided by someone else — refresh to see where it stands.';
-/** A payment landed between the organizer reading the list and clicking. */
-const PAID_WHILE_DECIDING =
-  'This registration was paid for while you were deciding — refresh to see where it stands.';
-
-const ACTIVE_HOLD = 'active';
-/** A ticket that still admits someone — the set a refund takes back. */
-const LIVE_TICKET_STATUSES = ['issued', 'checked_in'] as const;
 
 /**
  * Data access for the checkout, including THE money-path transaction

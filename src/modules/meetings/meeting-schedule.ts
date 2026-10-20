@@ -1,16 +1,13 @@
 import { DomainException } from '../../common/errors/domain.exception';
 import { BANGKOK_OFFSET_MS, DAY_MS } from '../../common/time/bangkok';
 import type { MeetingMode } from './meeting-bucket';
-
-/** Short enough for "Sync", long enough to rule out a stray keystroke. */
-export const MIN_TITLE = 3;
-/** What a phone meeting shows where a venue would be (US-MTG-03). */
-export const PHONE_LOCATION = 'Phone call';
-
-export const TITLE_REQUIRED = `Give the meeting a title of at least ${MIN_TITLE} characters.`;
-export const DATE_PAST =
-  'That date has already passed — choose today or later.';
-export const END_BEFORE_START = 'The end time must be after the start time.';
+import {
+  DATE_PAST,
+  END_BEFORE_START,
+  MIN_TITLE,
+  PHONE_LOCATION,
+  TITLE_REQUIRED,
+} from '../../common/constants/meetings.constants';
 
 export interface SchedulableMeeting {
   title: string;

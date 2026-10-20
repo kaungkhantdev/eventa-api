@@ -20,7 +20,6 @@ import {
 } from './ports/order-payment.port';
 import {
   PaymentProviderPort,
-  REFUND_WEBHOOK_TYPES,
   type RefundWebhookType,
   type StartedPayment,
   type VerifiedWebhook,
@@ -31,18 +30,15 @@ import {
   type ProviderRefundReport,
   type RefundCompletion,
 } from './refunds.service';
+import {
+  NO_MERCHANT_ACCOUNT,
+  REFUND_WEBHOOK_TYPES,
+} from '../../common/constants/payments.constants';
 
 /** The webhook's whole reply — the provider only wants to know we have it. */
 export interface WebhookAck {
   received: boolean;
 }
-
-/**
- * Written for the buyer, who cannot fix this and did nothing wrong: it names
- * the organizer's setup rather than implying the attempt was at fault.
- */
-const NO_MERCHANT_ACCOUNT =
-  'This event cannot take payment yet — the organizer has not finished connecting their payment account.';
 
 /** Written for the buyer: the organizer turned this way to pay off (US-SET-09). */
 const methodOff = (method: string): string =>

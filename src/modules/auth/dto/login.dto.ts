@@ -1,5 +1,4 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { PASSWORD_MAX_LENGTH } from '../../auth-password/auth-password.policy';
 import {
   IsBoolean,
   IsEmail,
@@ -10,6 +9,7 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { PASSWORD_MAX_LENGTH } from '../../../common/constants/auth-password.constants';
 
 export class LoginDto {
   @ApiProperty({ example: 'admin@acme.test' })

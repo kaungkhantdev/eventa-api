@@ -18,45 +18,22 @@ import {
   type StartedPayment,
   type VerifiedWebhook,
 } from '../ports/payment-provider.port';
-
-const MS_PER_SECOND = 1000;
-const THB = 'thb';
-/** Stripe's documented Thai limits: ฿10 minimum, 8 digits maximum. */
-const MIN_THB_SATANG = 1_000;
-const MAX_THB_SATANG = 99_999_999;
-
-/**
- * A card statement descriptor is Latin-only and the whole line (prefix + `* ` +
- * suffix) must fit 22 characters, so the suffix gets what is left.
- */
-const MAX_SUFFIX_LENGTH = 12;
-const MIN_SUFFIX_LENGTH = 5;
-const NON_LATIN = /[^A-Za-z0-9 ]/g;
-
-/**
- * Where a workspace manages its own bank account, payout schedule, tax forms
- * and statements (US-FIN-05): its own Stripe dashboard. Test mode lives under
- * `/test`, and a key says which mode it belongs to (`sk_test_…`, `rk_live_…`).
- */
-const STRIPE_DASHBOARD = 'https://dashboard.stripe.com';
-const TEST_MODE_PATH = '/test';
-const PAYOUT_SETTINGS_PATH = '/settings/payouts';
-const TEST_MODE_KEY = /^(sk|rk)_test_/;
-
-/** Stripe's code for "the buyer never completed it in time" (PromptPay lapse). */
-const ATTEMPT_EXPIRED = 'payment_intent_payment_attempt_expired';
-
-/**
- * Refund statuses that mean "live at Stripe, not settled yet". A PromptPay
- * refund STARTS in `requires_action` — Stripe's documented flow for refunds
- * that require action — while it emails the buyer for a bank account, then
- * moves to `pending` and on to `succeeded`. Reading `requires_action` as failed
- * would leave the buyer with the money back AND valid tickets.
- */
-const REFUND_IN_FLIGHT: ReadonlySet<string> = new Set([
-  'pending',
-  'requires_action',
-]);
+import {
+  ATTEMPT_EXPIRED,
+  MAX_SUFFIX_LENGTH,
+  MAX_THB_SATANG,
+  MIN_SUFFIX_LENGTH,
+  MIN_THB_SATANG,
+  MS_PER_SECOND,
+  NON_LATIN,
+  PAYOUT_SETTINGS_PATH,
+  REFUND_IN_FLIGHT,
+  STRIPE_DASHBOARD,
+  TEST_MODE_KEY,
+  TEST_MODE_PATH,
+  THB,
+  WEBHOOK_VERIFIER,
+} from '../../../common/constants/payments.constants';
 
 /**
  * The refund states a webhook finishes a pending refund on. Anything else —
@@ -73,15 +50,6 @@ export type StripeClientFactory = (secretKey: string) => Stripe;
 
 export const defaultStripeClient: StripeClientFactory = (secretKey) =>
   new Stripe(secretKey, { apiVersion: STRIPE_API_VERSION, typescript: true });
-
-/**
- * Signature checking is pure HMAC over the raw bytes — it never calls Stripe and
- * never uses an API key. One throwaway client exists only to reach that method;
- * the placeholder is never sent anywhere.
- */
-const WEBHOOK_VERIFIER = new Stripe('sk_signature_check_only', {
-  apiVersion: STRIPE_API_VERSION,
-});
 
 /**
  * Verification needs no key, only the endpoint's signing secret — so it is a

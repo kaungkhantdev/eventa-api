@@ -5,7 +5,7 @@ import {
   PASSWORD_MIN_LENGTH,
   PASSWORD_PATTERN,
   PASSWORD_RULE_MESSAGE,
-} from '../auth-password.policy';
+} from '../../../common/constants/auth-password.constants';
 
 /** Body for changing a password while signed in (US-ACC-05 / US-SET-02). */
 export class ChangePasswordDto {

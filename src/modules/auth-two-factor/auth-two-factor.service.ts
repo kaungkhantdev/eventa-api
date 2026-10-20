@@ -13,11 +13,11 @@ import { OutboxPort } from '../platform/outbox.port';
 import { ProfileService } from '../users/profile.service';
 import { AuthTwoFactorRepository } from './auth-two-factor.repository';
 import { twoFactorDisabledEvent } from './events/two-factor-disabled.event';
-
-/** The story's number: eight one-time codes, shown once. */
-const RECOVERY_CODE_COUNT = 8;
-const RECOVERY_CODE_BYTES = 5; // → 10 hex chars, formatted as XXXXX-XXXXX
-const ISSUER = 'Eventa';
+import {
+  ISSUER,
+  RECOVERY_CODE_BYTES,
+  RECOVERY_CODE_COUNT,
+} from '../../common/constants/auth-two-factor.constants';
 
 export interface EnrolmentStart {
   otpauthUri: string;

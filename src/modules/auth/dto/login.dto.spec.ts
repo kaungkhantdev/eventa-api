@@ -1,7 +1,7 @@
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
-import { PASSWORD_MIN_LENGTH } from '../../auth-password/auth-password.policy';
 import { LoginDto } from './login.dto';
+import { PASSWORD_MIN_LENGTH } from '../../../common/constants/auth-password.constants';
 
 const fieldsRefused = (body: Record<string, unknown>): string[] =>
   validateSync(plainToInstance(LoginDto, body)).map((e) => e.property);

@@ -20,12 +20,13 @@ import type {
   SeatRow,
   SeatRowSummary,
 } from './event-seating.types';
+import {
+  ONLINE_NOTE,
+  SOLD,
+} from '../../common/constants/event-seating.constants';
 
 const RESERVED: SeatingMode = 'reserved';
 const GENERAL: SeatingMode = 'ga';
-const SOLD = 'sold';
-const ONLINE_NOTE =
-  'Online events have no seating — a join link is emailed after registration.';
 
 /**
  * Configure an event's seating: general-admission headcount or a reserved map,

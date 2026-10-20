@@ -1,9 +1,11 @@
 import {
-  CONTACT_AUDIT_TITLE,
-  CONTACT_AUDIT_TYPE,
   contactAuditMeta,
   contactAuditSubject,
 } from './attendee-contact.audit';
+import {
+  CONTACT_AUDIT_TITLE,
+  CONTACT_AUDIT_TYPE,
+} from '../../common/constants/attendee-directory.constants';
 
 describe('the contact-edit audit entry (US-REG-08 AC1 + AC5)', () => {
   it('uses the story’s own phrase as the title, unparameterised', () => {

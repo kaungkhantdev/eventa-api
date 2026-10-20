@@ -15,10 +15,12 @@ import {
 } from 'class-validator';
 import { sessionTypeEnum } from '../../../db/schema';
 import type { SessionType } from '../sessions.types';
+import {
+  MAX_DAY,
+  TIME,
+} from '../../../common/constants/event-program.constants';
 
 const TYPES: readonly SessionType[] = sessionTypeEnum.enumValues;
-const TIME = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
-const MAX_DAY = 60;
 
 export class CreateSessionDto {
   @ApiProperty({

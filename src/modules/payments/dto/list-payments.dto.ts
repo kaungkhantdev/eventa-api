@@ -10,13 +10,13 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { paymentMethodEnum, paymentStatusEnum } from '../../../db/schema';
-
-const STATUSES = paymentStatusEnum.enumValues;
-/** The three the story puts in scope for the ledger filter. */
-const METHODS = ['Card', 'PromptPay', 'Bank transfer'] as const;
-const MAX_LIMIT = 100;
-const MAX_SEARCH = 120;
+import { paymentMethodEnum } from '../../../db/schema';
+import {
+  MAX_LIMIT,
+  MAX_SEARCH,
+  METHODS,
+  STATUSES,
+} from '../../../common/constants/payments.constants';
 
 /** Filters for the finance ledger (US-FIN-01). */
 export class ListPaymentsDto {

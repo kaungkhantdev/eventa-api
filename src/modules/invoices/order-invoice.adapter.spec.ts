@@ -1,9 +1,7 @@
 import type { Tx } from '../../db/tenant';
 import type { InvoicesRepository } from './invoices.repository';
-import {
-  OrderInvoiceAdapter,
-  REFUND_VOID_REASON,
-} from './order-invoice.adapter';
+import { OrderInvoiceAdapter } from './order-invoice.adapter';
+import { REFUND_VOID_REASON } from '../../common/constants/invoices.constants';
 
 const ORG = 7;
 const ORDER_ID = 'o-1';

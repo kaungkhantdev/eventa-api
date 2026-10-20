@@ -1,12 +1,8 @@
 import type { eventStatusEnum } from '../../db/schema';
-
-const MINUTES = 60_000;
-const HOURS = 60 * MINUTES;
-
-/** Doors open two hours ahead, so an early queue can be admitted. */
-export const CHECKIN_OPENS_BEFORE_START_MS = 2 * HOURS;
-/** Latecomers are still admitted for an hour after the event ends. */
-export const CHECKIN_GRACE_AFTER_END_MS = 1 * HOURS;
+import {
+  CHECKIN_GRACE_AFTER_END_MS,
+  CHECKIN_OPENS_BEFORE_START_MS,
+} from '../../common/constants/check-in.constants';
 
 type EventStatus = (typeof eventStatusEnum.enumValues)[number];
 

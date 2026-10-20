@@ -11,28 +11,16 @@ import type {
 } from './payments.repository';
 import { PaymentsRepository } from './payments.repository';
 import type { LedgerEntryDto } from './dto/list-payments.dto';
-
-const DEFAULT_PAGE = 1;
-const DEFAULT_LIMIT = 20;
-/** A hard ceiling on one export, so a huge workspace cannot exhaust memory. */
-const EXPORT_LIMIT = 10_000;
-const NOTHING_TO_EXPORT =
-  'There is nothing to export — no payments match these filters.';
-const EXPORT_HEADER = [
-  'date',
-  'transaction',
-  'payer',
-  'event',
-  'method',
-  'status',
-  'amount_baht',
-  'currency',
-];
-
-/** Why an action is unavailable, in the words the story asks for. */
-const NO_COMPLETED_CHARGE = 'No completed charge yet.';
-const NOT_ELIGIBLE = 'This attempt failed, so it is not eligible for refund.';
-const ALREADY_REFUNDED = 'This payment was already refunded.';
+import {
+  ALREADY_REFUNDED,
+  DEFAULT_LIMIT,
+  DEFAULT_PAGE,
+  EXPORT_HEADER,
+  EXPORT_LIMIT,
+  NOTHING_TO_EXPORT,
+  NOT_ELIGIBLE,
+  NO_COMPLETED_CHARGE,
+} from '../../common/constants/payments.constants';
 
 export interface Ledger {
   page: Paginated<LedgerEntryDto>;

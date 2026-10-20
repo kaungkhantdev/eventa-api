@@ -10,11 +10,11 @@ import type {
 } from './discover.types';
 import type { EventCardDto } from './dto/event-card.dto';
 import { EventAttendancePort } from './ports/event-attendance.port';
-
-/** A card grid, not a table — a dozen fills a first screen without a scroll. */
-const DEFAULT_LIMIT = 12;
-const MAX_LIMIT = 48;
-const FIRST_PAGE = 1;
+import {
+  DEFAULT_LIMIT,
+  FIRST_PAGE,
+  MAX_LIMIT,
+} from '../../common/constants/discover.constants';
 
 /**
  * The anonymous Discover grid (US-DISC-01) with its keyword and category filters

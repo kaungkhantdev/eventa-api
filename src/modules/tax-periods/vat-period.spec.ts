@@ -1,12 +1,14 @@
 import {
-  MONTHS_IN_YEAR,
-  VAT_FILING_DAY,
   isLateFiling,
   monthLabel,
   periodDueDate,
   periodStatus,
   vatOnSales,
 } from './vat-period';
+import {
+  MONTHS_IN_YEAR,
+  VAT_FILING_DAY,
+} from '../../common/constants/tax-periods.constants';
 
 describe('VAT periods (US-FIN-11, US-FIN-12)', () => {
   describe('periodDueDate', () => {

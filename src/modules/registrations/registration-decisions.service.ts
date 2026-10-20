@@ -15,39 +15,27 @@ import {
 import { RegistrationRefundPort } from './ports/registration-refund.port';
 import {
   type DeciderAccess,
-  REJECT_NEEDS_REFUND_PERMISSION,
   type Verdict,
   canApprove,
   canOffer,
   canReject,
   rejectionRefunds,
 } from './registration-decision';
+import {
+  FINISH_FROM_PAYMENTS,
+  GONE,
+  NEEDS_CONFIRMATION,
+  NO_SEAT_FREE,
+  REFUND_DID_NOT_GO_THROUGH,
+  REFUND_INTERRUPTED,
+  REJECT_NEEDS_REFUND_PERMISSION,
+  UNAVAILABLE,
+} from '../../common/constants/registrations.constants';
 
 export interface RejectRegistrationCommand {
   confirm: boolean;
   reason: string | null;
 }
-
-const NEEDS_CONFIRMATION =
-  'Rejecting a registration is permanent. Send `confirm=true` to go ahead.';
-const GONE = "This registration isn't available.";
-/** The blocker had no message of its own — a race we could not name. */
-const UNAVAILABLE = 'This registration can no longer be approved.';
-/** US-REG-04: "promotion is refused and I'm told to free capacity first". */
-export const NO_SEAT_FREE =
-  'No seat is free on this ticket — raise its capacity, or wait for one to free up.';
-
-/** The provider's own words follow the colon — they are written for a person. */
-const REFUND_DID_NOT_GO_THROUGH =
-  'The registration was rejected, but its refund did not go through:';
-const FINISH_FROM_PAYMENTS = 'Issue the refund from Payments.';
-/**
- * In place of the words of a failure that was not a refusal — a timeout, an
- * error nothing mapped — whose text is internals, not something to show. A
- * retried rejection asks the provider again under the same key.
- */
-const REFUND_INTERRUPTED =
-  'it was interrupted before it could be confirmed. Reject it again to retry the refund, or issue it from Payments.';
 
 /**
  * The organizer's decision on a sign-up (US-REG-02).

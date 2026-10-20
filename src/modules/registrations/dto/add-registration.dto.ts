@@ -13,12 +13,12 @@ import {
   Min,
 } from 'class-validator';
 import { MAX_SEATS_PER_BOOKING } from '../../../common/booking/booking.limits';
-
-const MAX_NAME = 120;
-const MAX_EMAIL = 254;
-const MAX_PHONE = 24;
-/** US-REG-03's own wording, so the panel asks rather than quoting a validator. */
-const SEATS_PER_BOOKING = `Choose between 1 and ${MAX_SEATS_PER_BOOKING} seats per booking.`;
+import {
+  MAX_EMAIL,
+  MAX_NAME,
+  MAX_PHONE,
+  SEATS_PER_BOOKING,
+} from '../../../common/constants/registrations.constants';
 
 /**
  * A walk-up or phone booking the organizer is entering (US-REG-03). Carries NO

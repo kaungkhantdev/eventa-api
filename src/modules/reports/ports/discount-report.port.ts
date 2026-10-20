@@ -1,3 +1,4 @@
+import { DISCOUNT_STANDINGS } from '../../../common/constants/reports.constants';
 /**
  * What Reports needs to know about promotion payback (US-RPT-10), without
  * reading the promotions tables.
@@ -9,13 +10,6 @@
 /** A code's shape, as the organizer set it up. */
 export type DiscountKind = 'percent' | 'fixed';
 
-/** Where a code is in its life, as Discounts already settles it. */
-export const DISCOUNT_STANDINGS = [
-  'active',
-  'scheduled',
-  'expired',
-  'disabled',
-] as const;
 export type DiscountStanding = (typeof DISCOUNT_STANDINGS)[number];
 
 /** One code's payback. Raw figures only; the shares are the service's. */

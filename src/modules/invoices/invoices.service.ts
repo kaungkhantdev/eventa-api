@@ -8,14 +8,12 @@ import { toInvoiceDetail } from './invoices.mapper';
 import { InvoicesRepository } from './invoices.repository';
 import { InvoiceOrderPort } from './ports/invoice-order.port';
 import { InvoicePaymentPort } from './ports/invoice-payment.port';
-
-const NO_AMOUNT =
-  'This order has nothing to bill — an invoice needs a positive amount.';
-const NO_BUYER_EMAIL =
-  'This order has no buyer email, so the invoice has nobody to bill.';
-const VOID_PAID =
-  'A paid invoice cannot be voided — refund its payment instead, which voids it.';
-const ALREADY_VOID = 'This invoice is already void.';
+import {
+  ALREADY_VOID,
+  NO_AMOUNT,
+  NO_BUYER_EMAIL,
+  VOID_PAID,
+} from '../../common/constants/invoices.constants';
 
 /**
  * Issuing and voiding tax invoices (US-FIN-07, US-FIN-10).

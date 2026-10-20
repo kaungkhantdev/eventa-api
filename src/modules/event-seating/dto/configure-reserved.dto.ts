@@ -12,9 +12,10 @@ import {
   ValidateBy,
   type ValidationOptions,
 } from 'class-validator';
-
-const MAX_ROWS = 100;
-const MAX_SEATS_PER_ROW = 100;
+import {
+  MAX_ROWS,
+  MAX_SEATS_PER_ROW,
+} from '../../../common/constants/event-seating.constants';
 
 /** A ticket type id, or null for none. */
 const isTypeOrNone = (v: unknown): boolean =>

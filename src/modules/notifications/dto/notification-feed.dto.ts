@@ -1,6 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { FEED_BUCKETS, type FeedBucket } from '../notification-grouping';
-import { FEED_KINDS, type FeedKind } from '../ports/notification-feed.types';
+import { type FeedBucket } from '../notification-grouping';
+import { type FeedKind } from '../ports/notification-feed.types';
+import {
+  FEED_BUCKETS,
+  FEED_KINDS,
+} from '../../../common/constants/notifications.constants';
 
 /**
  * One thing that happened (US-MSG-03).

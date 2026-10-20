@@ -7,12 +7,7 @@ import { SkipResponseEnvelope } from '../../common/decorators/skip-envelope.deco
 import type { Env } from '../../config/env.validation';
 import { CalendarConnectFlowService } from './calendar-connect-flow.service';
 import { settingsReturnUrl } from './calendar-return-url';
-
-/** The 302 must not be cached, nor leak this URL's query onward. */
-const REDIRECT_HEADERS = {
-  'Cache-Control': 'no-store',
-  'Referrer-Policy': 'no-referrer',
-};
+import { REDIRECT_HEADERS } from '../../common/constants/calendar-connection.constants';
 
 /**
  * Where Google's consent screen sends the browser back (US-MTG-08).

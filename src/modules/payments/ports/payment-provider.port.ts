@@ -1,4 +1,5 @@
 import { paymentMethodEnum } from '../../../db/schema';
+import { REFUND_WEBHOOK_TYPES } from '../../../common/constants/payments.constants';
 
 /** The methods an attendee may choose at checkout (US-DISC-05). */
 export type PaymentMethodChoice = Extract<
@@ -109,14 +110,6 @@ export interface RetriedPayout {
   failureReason: string | null;
 }
 
-/**
- * A refund that did not settle when it was issued, reported later: it went
- * through, or it failed (or was cancelled) and the money never went back.
- */
-export const REFUND_WEBHOOK_TYPES = [
-  'refund_succeeded',
-  'refund_failed',
-] as const;
 export type RefundWebhookType = (typeof REFUND_WEBHOOK_TYPES)[number];
 
 /** What a verified provider callback turned out to mean. */

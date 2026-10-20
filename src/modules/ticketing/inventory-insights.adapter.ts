@@ -7,17 +7,12 @@ import {
   InventoryInsightsPort,
   type SellingFastTier,
 } from '../dashboard/ports/operations-insights.port';
-
-/**
- * A tier is "selling fast" once this percentage of its allocation is gone.
- * Named here, in Ticketing, because Ticketing owns what running low means — the
- * dashboard only renders the count it is given (US-DASH-06/11).
- */
-const LOW_STOCK_PERCENT = 80;
-const FULL = 100;
-/** An allocation of 0 means unlimited — mirrors `TicketingPolicy`. */
-const UNLIMITED = 0;
-const ON_SALE = 'onsale';
+import {
+  FULL,
+  LOW_STOCK_PERCENT,
+  ON_SALE,
+  UNLIMITED,
+} from '../../common/constants/ticketing.constants';
 
 /**
  * Ticketing's implementation of the Dashboard-owned inventory port, so the

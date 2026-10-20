@@ -9,10 +9,10 @@ import type {
   AccountRow,
   UpcomingPaidOrderRow,
 } from './account-deletion.types';
-
-/** Only a confirmed AND settled order is money the deleter forfeits. */
-const CONFIRMED = 'confirmed';
-const PAID = 'paid';
+import {
+  CONFIRMED,
+  PAID,
+} from '../../common/constants/account-deletion.constants';
 
 /**
  * Data access for account deletion (US-DISC-14). Writes stay inside the

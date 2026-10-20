@@ -11,7 +11,7 @@ import {
   PASSWORD_MIN_LENGTH,
   PASSWORD_PATTERN,
   PASSWORD_RULE_MESSAGE,
-} from '../auth-password.policy';
+} from '../../../common/constants/auth-password.constants';
 
 /** Body for setting a new password from a reset link (US-ACC-04). */
 export class ResetPasswordDto {

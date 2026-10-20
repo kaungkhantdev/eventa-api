@@ -21,19 +21,19 @@ import {
   meetingSyncStatusEnum,
   meetingTypeEnum,
 } from '../../../db/schema';
-import { MEETING_BUCKETS } from '../meeting-bucket';
-import { MAX_LIMIT } from '../meetings-query.service';
-import { MIN_TITLE } from '../meeting-schedule';
-
-const MAX_TITLE = 200;
-const MAX_PERSON = 120;
-const MAX_ROLE = 120;
-const MAX_EMAIL = 254;
-const MAX_NOTES = 2000;
-const MAX_REASON = 500;
-/** `HH:MM`, 24-hour — the wall clock an organizer types. */
-const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
-const TIME_MESSAGE = 'Use a 24-hour time like 09:30.';
+import {
+  MAX_EMAIL,
+  MAX_LIMIT,
+  MAX_NOTES,
+  MAX_PERSON,
+  MAX_REASON,
+  MAX_ROLE,
+  MAX_TITLE,
+  MEETING_BUCKETS,
+  MIN_TITLE,
+  TIME_MESSAGE,
+  TIME_PATTERN,
+} from '../../../common/constants/meetings.constants';
 
 export class ListMeetingsDto {
   @ApiPropertyOptional({ minimum: 1 })

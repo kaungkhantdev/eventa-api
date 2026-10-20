@@ -3,10 +3,10 @@ import { DomainException } from '../../common/errors/domain.exception';
 import { EventsService } from '../events/events.service';
 import type { EventActor } from '../events/events.types';
 import { EventPageContentRepository } from './event-page-content.repository';
-
-/** Keeps a page readable; beyond this it is a document, not a highlight list. */
-const MAX_HIGHLIGHTS = 12;
-const MAX_FAQS = 30;
+import {
+  MAX_FAQS,
+  MAX_HIGHLIGHTS,
+} from '../../common/constants/event-page-content.constants';
 
 export interface HighlightView {
   text: string;

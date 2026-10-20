@@ -3,11 +3,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { attendees, auditEvents, orders } from '../../db/schema';
 import { withTenant, type Tx } from '../../db/tenant';
-import {
-  CONTACT_AUDIT_TYPE,
-  CONTACT_AUDIT_TITLE,
-  contactAuditMeta,
-} from './attendee-contact.audit';
+import { contactAuditMeta } from './attendee-contact.audit';
 import type {
   AttendeeContactRow,
   AttendeeRow,
@@ -17,9 +13,11 @@ import type {
   SaveContactInput,
   SegmentCounts,
 } from './attendee-directory.types';
-
-/** An attendee is "new" if this workspace first saw them within 30 days. */
-const NEW_WINDOW_DAYS = 30;
+import {
+  CONTACT_AUDIT_TITLE,
+  CONTACT_AUDIT_TYPE,
+  NEW_WINDOW_DAYS,
+} from '../../common/constants/attendee-directory.constants';
 
 /**
  * Data access for the attendee directory (US-REG-05).

@@ -1,11 +1,12 @@
 import { escapeXml } from '../../common/xml/escape-xml';
 import type { TicketPassDto } from './dto/my-events.dto';
-
-const WIDTH = 600;
-const HEIGHT = 940;
-const QR_SIZE = 440;
-const QR_X = (WIDTH - QR_SIZE) / 2;
-const QR_Y = 320;
+import {
+  HEIGHT,
+  QR_SIZE,
+  QR_X,
+  QR_Y,
+  WIDTH,
+} from '../../common/constants/attendee-tickets.constants';
 
 /**
  * The printable entry pass (US-DISC-07): one self-contained SVG carrying the

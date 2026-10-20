@@ -1,5 +1,6 @@
 import { bangkokDay } from '../../common/time/bangkok';
 import type { FeedItem } from './ports/notification-feed.types';
+import { FEED_BUCKETS } from '../../common/constants/notifications.constants';
 
 /**
  * The feed, grouped by recency (US-MSG-03).
@@ -12,13 +13,6 @@ import type { FeedItem } from './ports/notification-feed.types';
  * older two sit behind "Show older activity".
  */
 
-export const FEED_BUCKETS = [
-  'today',
-  'yesterday',
-  'earlierThisWeek',
-  'lastWeek',
-  'earlier',
-] as const;
 export type FeedBucket = (typeof FEED_BUCKETS)[number];
 
 /** The buckets that render expanded. */

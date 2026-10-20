@@ -8,19 +8,11 @@ import type {
   CalendarConnectionRow,
   PendingState,
 } from './calendar-connection.types';
-
-/** How long a started connect may wait for Google's callback. */
-const STATE_TTL = sql`now() + interval '10 minutes'`;
-
-const NOW = sql`now()`;
-
-/** Clearing the pending connect — on its first matching use, or a disconnect. */
-const NO_PENDING_STATE = {
-  oauthStateHash: null,
-  oauthStateUserId: null,
-  oauthVerifierCipher: null,
-  oauthStateExpiresAt: null,
-} as const;
+import {
+  NOW,
+  NO_PENDING_STATE,
+  STATE_TTL,
+} from '../../common/constants/calendar-connection.constants';
 
 export interface BeginConnectInput {
   /** sha256 hex of the nonce — the nonce itself is never stored. */

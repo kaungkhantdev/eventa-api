@@ -14,10 +14,10 @@ import type {
   MyRegistrationRow,
   TicketPassRow,
 } from './attendee-tickets.types';
-
-const CONFIRMED = 'confirmed';
-/** A personal portal, not an export: one person's purchases are bounded. */
-const MAX_REGISTRATIONS = 200;
+import {
+  CONFIRMED,
+  MAX_REGISTRATIONS,
+} from '../../common/constants/attendee-tickets.constants';
 
 /**
  * The attendee-portal read model (US-DISC-07/09), in the mould of

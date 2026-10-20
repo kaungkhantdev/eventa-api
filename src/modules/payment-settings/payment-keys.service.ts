@@ -16,9 +16,7 @@ import {
   PaymentProviderPort,
   type VerifyResult,
 } from './ports/payment-provider.port';
-
-/** Long enough that a webhook URL cannot be found by guessing. */
-const WEBHOOK_TOKEN_BYTES = 18;
+import { WEBHOOK_TOKEN_BYTES } from '../../common/constants/payment-settings.constants';
 
 /** What a workspace submits from the API keys card. */
 export interface SaveKeysInput {

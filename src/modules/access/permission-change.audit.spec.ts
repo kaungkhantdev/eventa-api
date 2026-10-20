@@ -1,9 +1,9 @@
 import {
-  PERM_AUDIT_TYPE,
   memberRoleChangeAudit,
   roleCreatedAudit,
   rolePermissionsAudit,
 } from './permission-change.audit';
+import { PERM_AUDIT_TYPE } from '../../common/constants/access.constants';
 
 /*
  * US-SET-05: "Given a teammate's role was changed, when I open the audit log,

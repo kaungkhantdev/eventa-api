@@ -14,19 +14,16 @@ import type {
   PublicTicket,
   RegistrationState,
 } from './public-pages.types';
-
-/** Below this many remaining, the tier shows an urgency line (US-PAGE-05). */
-const LOW_STOCK_THRESHOLD = 10;
-/** Used when the organizer set no accent colour, or set an unusable one. */
-const DEFAULT_ACCENT = '#2563EB';
-const ACCENT_PATTERN = /^#[0-9a-f]{6}$/i;
-const DEFAULT_TEMPLATE = 'aurora';
-const DEFAULT_AGENDA_TITLE = 'Agenda';
-const DEFAULT_SPEAKERS_TITLE = 'Speakers';
-/** Tier states that are not purchasable. */
-const UNAVAILABLE_STATUSES = ['paused', 'soldout'];
-/** Only reserved seating has rows to split between the tickets (US-EVT-05). */
-const RESERVED_SEATING = 'reserved';
+import {
+  ACCENT_PATTERN,
+  DEFAULT_ACCENT,
+  DEFAULT_AGENDA_TITLE,
+  DEFAULT_SPEAKERS_TITLE,
+  DEFAULT_TEMPLATE,
+  LOW_STOCK_THRESHOLD,
+  RESERVED_SEATING,
+  UNAVAILABLE_STATUSES,
+} from '../../common/constants/public-pages.constants';
 
 /**
  * Assembles the anonymous public event page (US-PAGE-01…06, 08).

@@ -1,10 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
-  LEDGER_OUTCOMES,
   type LedgerKind,
   type LedgerOutcome,
 } from '../ports/transaction-ledger.port';
 import { ReportPeriodDto } from './report-common.dto';
+import { LEDGER_OUTCOMES } from '../../../common/constants/reports.constants';
 
 /** One entry in the ledger (US-RPT-06). */
 export class TransactionRowDto {

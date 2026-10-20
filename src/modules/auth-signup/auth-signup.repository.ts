@@ -18,16 +18,12 @@ import {
   PERMISSION_CATALOG,
 } from '../access/workspace-defaults';
 import type { Persona } from '../auth/auth.types';
-
-const ADMIN_PERSONA = 'admin';
-const ATTENDEE_PERSONA = 'attendee';
-/**
- * Signed up, email not yet proven — NOT `Invited`. Nobody invited someone who
- * filled in the sign-up form themselves, and an organizer reading the members
- * list should not be told otherwise.
- */
-const PENDING_STATUS = 'Unconfirmed';
-const ACTIVE_STATUS = 'Active';
+import {
+  ACTIVE_STATUS,
+  ADMIN_PERSONA,
+  ATTENDEE_PERSONA,
+  PENDING_STATUS,
+} from '../../common/constants/auth-signup.constants';
 
 /** Just enough to sign a fresh token and address the email to a person. */
 export interface PendingVerification {

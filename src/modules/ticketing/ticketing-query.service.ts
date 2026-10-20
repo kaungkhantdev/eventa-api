@@ -11,9 +11,10 @@ import type {
   TicketRow,
   TicketStatusCounts,
 } from './ticketing.types';
-
-const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 100;
+import {
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+} from '../../common/constants/ticketing.constants';
 
 /**
  * The read side of Ticketing: one searchable, filterable view of every tier the

@@ -21,6 +21,7 @@ import { LoginThrottleService } from './login-throttle.service';
 import { PasswordService } from '../auth-password/auth-password.service';
 import { SignupService } from '../auth-signup/auth-signup.service';
 import { TokenService } from './token.service';
+import { MAX_LOGIN_CANDIDATES } from '../../common/constants/auth.constants';
 
 export interface LoginInput {
   email: string;
@@ -62,13 +63,6 @@ export interface WorkspaceChoice {
 }
 
 export type LoginOutcome = LoginResult | TwoFactorChallenge | WorkspaceChoice;
-
-/**
- * How many accounts on one address are checked before sign-in asks which
- * workspace instead. Each one costs an argon2 verification, which is expensive
- * on purpose, so the work an anonymous caller can provoke stays bounded.
- */
-const MAX_LOGIN_CANDIDATES = 10;
 
 export interface AcceptInviteResult {
   userId: string;

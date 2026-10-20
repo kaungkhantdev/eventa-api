@@ -9,12 +9,11 @@ import {
   Min,
   MaxLength,
 } from 'class-validator';
-
-// The same limits the walk-up booking form uses (`AddRegistrationDto`), which
-// are the ones `attendees` is documented with: a name is 1–120 characters.
-const MAX_NAME = 120;
-const MAX_EMAIL = 254;
-const MAX_PHONE = 24;
+import {
+  MAX_EMAIL,
+  MAX_NAME,
+  MAX_PHONE,
+} from '../../../common/constants/attendee-directory.constants';
 
 /**
  * Correct an attendee's contact details (US-REG-08). A PATCH: send only the

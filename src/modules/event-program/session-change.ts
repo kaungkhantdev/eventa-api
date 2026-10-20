@@ -1,13 +1,7 @@
-/**
- * The only fields whose change is worth telling an attendee about (US-PROG-03):
- * when it happens and where. A retitled or re-described session is still the
- * same session at the same time in the same room, and mailing everyone who
- * bookmarked it for that would train them to ignore the ones that matter.
- */
-const MATERIAL_FIELDS = ['day', 'startTime', 'endTime', 'room'] as const;
-
-/** Events whose schedule someone is actually watching. */
-export const LIVE_EVENT_STATUSES = ['upcoming', 'live'] as const;
+import {
+  LIVE_EVENT_STATUSES,
+  MATERIAL_FIELDS,
+} from '../../common/constants/event-program.constants';
 
 /** The slice of a session a material-change test looks at. */
 export type SessionSnapshot = Record<string, unknown>;

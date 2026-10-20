@@ -6,6 +6,10 @@ import { LoginThrottleService } from '../auth/login-throttle.service';
 import { TokenService } from '../auth/token.service';
 import { UsersRepository } from '../users/users.repository';
 import { AuthTwoFactorService } from './auth-two-factor.service';
+import {
+  BAD_CODE_MESSAGE,
+  EXPIRED_MESSAGE,
+} from '../../common/constants/auth-two-factor.constants';
 
 export interface CompleteTwoFactorInput {
   challengeToken: string;
@@ -16,11 +20,6 @@ export interface CompleteTwoFactorInput {
 
 /** The throttle realm for code guessing — per account, not per address. */
 const throttleId = (userId: string) => `twofa|${userId}`;
-
-const EXPIRED_MESSAGE =
-  'Your sign-in challenge expired — please sign in again.';
-const BAD_CODE_MESSAGE =
-  "That code didn't work. Try the next one, or a recovery code.";
 
 /**
  * The second step of a two-factor sign-in (US-ACC-05 / US-DISC-12): the

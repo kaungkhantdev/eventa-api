@@ -1,12 +1,5 @@
 import type { OutboxEventInput } from '../../platform/outbox.port';
-
-/**
- * One contract, three intents. The worker's calendar handler needs to create,
- * update or withdraw the same invite, and routing them separately would let a
- * `cancelled` overtake the `rescheduled` it supersedes — the outbox preserves
- * order per aggregate, and only within one routing key.
- */
-export const MEETING_SYNC_REQUESTED = 'meeting.sync_requested';
+import { MEETING_SYNC_REQUESTED } from '../../../common/constants/meetings.constants';
 
 export type MeetingSyncIntent = 'create' | 'update' | 'cancel';
 

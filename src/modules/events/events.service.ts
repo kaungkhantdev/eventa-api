@@ -27,9 +27,15 @@ import type {
   Visibility,
 } from './events.types';
 import { slugify } from '../../common/util/slugify';
-
-/** Slug used when a name carries no latin alphanumerics (e.g. a Thai-only name). */
-const EVENT_SLUG_FALLBACK = 'event';
+import {
+  EVENT_SLUG_FALLBACK,
+  FOREIGN_KEY_VIOLATION,
+  HAS_REGISTRATIONS,
+  PUBLISH_REQUIREMENTS,
+  RESERVED_SEATING,
+  SEATING_GAP,
+  UNTYPED_SEATS,
+} from '../../common/constants/events.constants';
 
 const DRAFT_STATUS: EventStatus = 'draft';
 const PUBLISHED_STATUS: EventStatus = 'upcoming';
@@ -37,27 +43,9 @@ const CANCELLED_STATUS: EventStatus = 'cancelled';
 const COMPLETED_STATUS: EventStatus = 'completed';
 const PRIVATE_VISIBILITY: Visibility = 'private';
 
-/** Why an event with registrations or payment history is never hard-deleted. */
-const HAS_REGISTRATIONS =
-  "This event has registrations and can't be deleted. Cancel it instead to refund and notify attendees.";
-/** Postgres SQLSTATE for a delete that would orphan rows still referring to it. */
-const FOREIGN_KEY_VIOLATION = '23503';
-
-/** Human phrase per publish requirement, listed back when one is missing. */
-const PUBLISH_REQUIREMENTS = {
-  title: 'a title',
-  description: 'a description',
-  schedule: 'a start date & time',
-  location: 'a venue or an online link',
-  tickets: 'at least one ticket type',
-} as const;
 type PublishRequirement = keyof typeof PUBLISH_REQUIREMENTS;
 
-/** The reserved-seating refusal's key among the publish gaps (US-EVT-05). */
-const SEATING_GAP = 'seating' as const;
 type PublishGap = PublishRequirement | typeof SEATING_GAP;
-const RESERVED_SEATING = 'reserved';
-const UNTYPED_SEATS = 'Give every seat a ticket type before publishing.';
 const seatlessTicketType = (name: string) =>
   `${name} has no seats. Give it some seats or remove it.`;
 

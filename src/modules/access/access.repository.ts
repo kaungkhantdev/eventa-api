@@ -27,20 +27,11 @@ import type {
 import type { PermAuditRecord } from './permission-change.audit';
 import { roleGrantStates } from './role-grants';
 import type { RoleGrantRow } from './role-grants';
-
-const ACTIVE_STATUS = 'Active' as const;
-/** The role that must never be left without a holder. */
-export const ADMIN_ROLE = 'Admin' as const;
-
-const MEMBER_COLUMNS = {
-  id: memberships.id,
-  userId: memberships.userId,
-  name: users.name,
-  email: users.email,
-  roleId: memberships.roleId,
-  role: roles.name,
-  status: memberships.status,
-};
+import {
+  ACTIVE_STATUS,
+  ADMIN_ROLE,
+  MEMBER_COLUMNS,
+} from '../../common/constants/access.constants';
 
 /** Data access for RBAC management (roles ⇄ permissions). Roles are tenant-scoped. */
 @Injectable()

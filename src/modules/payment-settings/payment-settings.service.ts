@@ -11,11 +11,11 @@ import type {
   PaymentSettingsRow,
   UpdatePreferencesInput,
 } from './payment-settings.types';
-
-/** Stripe's hard limit on what fits a card statement line. */
-const MAX_DESCRIPTOR = 22;
-const DESCRIPTOR_PATTERN = /^[A-Za-z0-9 .,'-]*$/;
-const CURRENCY_PATTERN = /^[A-Z]{3}$/;
+import {
+  CURRENCY_PATTERN,
+  DESCRIPTOR_PATTERN,
+  MAX_DESCRIPTOR,
+} from '../../common/constants/payment-settings.constants';
 
 /**
  * A workspace's checkout and receipt preferences (US-SET-10).

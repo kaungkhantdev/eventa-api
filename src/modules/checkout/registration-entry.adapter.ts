@@ -7,9 +7,7 @@ import {
 } from '../registrations/ports/registration-entry.port';
 import { CheckoutService } from './checkout.service';
 import { CheckoutOrderService } from './checkout-order.service';
-
-/** What a free registration's amount reads as, rather than "฿0.00". */
-const FREE_LABEL = 'Free';
+import { FREE_LABEL } from '../../common/constants/checkout.constants';
 
 /**
  * Checkout's implementation of the Registrations-owned entry port (US-REG-03).

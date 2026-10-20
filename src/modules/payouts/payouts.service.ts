@@ -11,14 +11,12 @@ import { PayoutsRepository } from './payouts.repository';
 import type { Balances, PayoutFilters, PayoutRow } from './payouts.types';
 import { PayoutAccountPort } from './ports/payout-account.port';
 import { SettledFundsPort } from './ports/settled-funds.port';
-
-export const DEFAULT_LIMIT = 20;
-export const MAX_LIMIT = 100;
-
-const NOT_FAILED =
-  'Only a failed payout can be retried — this one has not failed.';
-const NOT_CONNECTED =
-  'Connect a payout account before moving money to your bank.';
+import {
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+  NOT_CONNECTED,
+  NOT_FAILED,
+} from '../../common/constants/payouts.constants';
 
 export interface PayoutSettingsLink {
   connected: boolean;

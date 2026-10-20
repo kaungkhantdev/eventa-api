@@ -1,7 +1,6 @@
 import { vatInclusiveBreakdown } from '../../common/money/vat';
 import type { DiscountSnapshot } from './discounts.types';
-
-const PERCENT_DIVISOR = 100;
+import { PERCENT_DIVISOR } from '../../common/constants/discounts.constants';
 
 /** What a code is worth against a given order, with VAT restated on the result. */
 export interface DiscountQuote {

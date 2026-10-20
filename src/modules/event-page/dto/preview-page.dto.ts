@@ -9,9 +9,7 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator';
-import { templateIdEnum } from '../../../db/schema';
-
-const TEMPLATES = templateIdEnum.enumValues;
+import { TEMPLATES } from '../../../common/constants/event-page.constants';
 
 /**
  * Unsaved values to render (US-PAGE-09). Everything is optional — an organizer

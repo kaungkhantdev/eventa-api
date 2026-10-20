@@ -1,21 +1,12 @@
 import { DomainException } from '../../common/errors/domain.exception';
 import type { PaymentMode } from './payment-settings.types';
-
-/**
- * Stripe encodes the mode in the key itself: `sk_test_…` against `sk_live_…`.
- * Restricted keys (`rk_`) do the same and are a legitimate thing to paste.
- */
-const KEY_SHAPE = /^(?<kind>pk|sk|rk)_(?<mode>test|live)_[A-Za-z0-9]+$/;
-
-/** How much of a stored secret the screen may show: enough to tell keys apart. */
-const VISIBLE_TAIL = 4;
-const MASK = '•'.repeat(VISIBLE_TAIL);
-
-/** `pk_` is designed to be public; the other two authorise real money. */
-const SECRET_KINDS = ['sk', 'rk'];
-
-/** Stripe's shape for an endpoint's signing secret. */
-const WEBHOOK_SECRET_SHAPE = /^whsec_[A-Za-z0-9]+$/;
+import {
+  KEY_SHAPE,
+  MASK,
+  SECRET_KINDS,
+  VISIBLE_TAIL,
+  WEBHOOK_SECRET_SHAPE,
+} from '../../common/constants/payment-settings.constants';
 
 export function modeOfKey(key: string): PaymentMode | null {
   const mode = KEY_SHAPE.exec(key.trim())?.groups?.mode;

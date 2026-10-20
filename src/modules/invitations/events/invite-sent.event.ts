@@ -1,7 +1,8 @@
 import type { OutboxEventInput } from '../../platform/outbox.port';
-
-export const INVITE_SENT_ROUTING_KEY = 'invitation.sent';
-const VERSION = 1;
+import {
+  INVITE_SENT_ROUTING_KEY,
+  VERSION,
+} from '../../../common/constants/invitations.constants';
 
 export interface InviteSentPayload extends Record<string, unknown> {
   version: number;

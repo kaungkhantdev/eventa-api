@@ -1,10 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { messageChannelEnum } from '../../../db/schema';
 import {
-  TEMPLATE_DELIVERY,
   type MessageChannel,
   type TemplateDelivery,
 } from '../message-template-catalog';
+import { TEMPLATE_DELIVERY } from '../../../common/constants/message-templates.constants';
 
 /** What an organizer has written, per language. Null means "use Eventa's". */
 export class TemplateWordingDto {

@@ -8,9 +8,10 @@ import {
   MinLength,
   ValidateIf,
 } from 'class-validator';
-
-const MAX_NAME = 200;
-const MAX_DESCRIPTOR = 22;
+import {
+  MAX_DESCRIPTOR,
+  MAX_NAME,
+} from '../../../common/constants/organization.constants';
 
 /** Legal identity + branding an Admin may change (US-SET-07). */
 export class UpdateOrganizationDto {

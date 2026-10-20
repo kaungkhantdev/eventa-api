@@ -1,6 +1,6 @@
 import type { ConfigService } from '@nestjs/config';
-import { Permission } from '../../common/decorators/require-permissions.decorator';
 import type { Env } from '../../config/env.validation';
+import { CALENDAR_CALLBACK_PATH } from '../../common/constants/calendar-connection.constants';
 
 /** Which Google OAuth implementation this server runs (US-MTG-08). */
 export type CalendarProviderName = 'off' | 'fake' | 'google';
@@ -13,34 +13,6 @@ type CalendarEnv = Partial<
     | 'GOOGLE_CALENDAR_CLIENT_SECRET'
   >
 >;
-
-/**
- * Write meeting events, and nothing else of the calendar: least privilege.
- * Reading the guest's free/busy or other calendars is not something any story
- * asks for, so the consent screen never offers it.
- */
-export const CALENDAR_EVENTS_SCOPE =
-  'https://www.googleapis.com/auth/calendar.events';
-
-/** `openid email` only to learn WHICH account granted access, for the card. */
-export const CALENDAR_SCOPES: readonly string[] = [
-  'openid',
-  'email',
-  CALENDAR_EVENTS_SCOPE,
-];
-
-/**
- * Where Google sends the browser back, matching `setGlobalPrefix('api/v1')` in
- * `main.ts` and the route on `CalendarOAuthCallbackController`. Named once
- * here because the owner registers the full URI in Google Cloud by hand: if it
- * drifts from the mapped route, Google refuses the consent with
- * `redirect_uri_mismatch` and nothing on our side says why.
- */
-export const CALENDAR_CALLBACK_PATH =
-  '/api/v1/public/calendar-connection/google/callback';
-
-/** Connecting and disconnecting is Manage integrations — Admin by default. */
-export const MANAGE_INTEGRATIONS = Permission.setIntegrations;
 
 /**
  * The provider in effect. An explicit `CALENDAR_PROVIDER` wins; otherwise a

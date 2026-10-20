@@ -4,6 +4,7 @@ import type {
   LinkedProvider,
   ResetAccount,
 } from './auth-password.repository';
+import { NO_PASSWORD_NO_PROVIDER } from '../../common/constants/auth-password.constants';
 
 /** An account a reset link can actually help: it signs in, with a password. */
 export type ResettableAccount = ResetAccount & { passwordHash: string };
@@ -51,10 +52,6 @@ const PROVIDER_LABEL: Record<LinkedProvider, string> = {
   apple: 'Apple',
   linkedin: 'LinkedIn',
 };
-
-/** An active account with no password and no provider left linked to it. */
-const NO_PASSWORD_NO_PROVIDER =
-  'That account has no password to reset — it signs in through a social provider. Use that sign-in instead.';
 
 export type ResetDecision =
   { send: readonly ResettableAccount[] } | { refuse: string };

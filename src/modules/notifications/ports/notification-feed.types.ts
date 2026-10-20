@@ -1,3 +1,4 @@
+import { FEED_KINDS } from '../../../common/constants/notifications.constants';
 /**
  * What one thing that happened looks like, whichever module it came from
  * (US-MSG-03).
@@ -8,20 +9,6 @@
  * product.
  */
 
-/**
- * The four kinds the feed can derive today, named as the workspace's existing
- * `notification_kind` vocabulary so a feed item and a notification PREFERENCE
- * mean the same word by the same name.
- *
- * `alert` is a payment that was declined — the demo kit's own classification,
- * and the only one of the four that asks the organizer to do something.
- */
-export const FEED_KINDS = [
-  'registration',
-  'payment',
-  'payout',
-  'alert',
-] as const;
 export type FeedKind = (typeof FEED_KINDS)[number];
 
 /**

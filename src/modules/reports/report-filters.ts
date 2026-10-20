@@ -1,6 +1,10 @@
 import { displayCell } from '../../common/export/display';
 import type { FilterLine } from '../../common/export/tabular';
-import { MAX_SPAN_DAYS, type ReportPeriod } from './reports-period';
+import { type ReportPeriod } from './reports-period';
+import {
+  LAST_INSTANT,
+  MAX_SPAN_DAYS,
+} from '../../common/constants/reports.constants';
 
 /**
  * The filters the reader had applied, as the file says them back (US-RPT-11).
@@ -13,9 +17,6 @@ import { MAX_SPAN_DAYS, type ReportPeriod } from './reports-period';
  * trimmed, and a file quoting the window that was asked for rather than the one
  * that was used would be reconciled against the wrong dates.
  */
-
-/** One millisecond inside the last day, since `period.to` is exclusive. */
-const LAST_INSTANT = 1;
 
 export interface ReportFilterDescription {
   eventId?: string;

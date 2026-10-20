@@ -1,8 +1,5 @@
-import {
-  LIVE_EVENT_STATUSES,
-  isMaterialChange,
-  shouldNotify,
-} from './session-change';
+import { isMaterialChange, shouldNotify } from './session-change';
+import { LIVE_EVENT_STATUSES } from '../../common/constants/event-program.constants';
 
 const before = {
   day: 'Day 1',

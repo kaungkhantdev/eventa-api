@@ -6,12 +6,12 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
-import { permissionKeyEnum } from '../../../db/schema';
 import type { PermissionKey } from '../../../common/decorators/require-permissions.decorator';
-
-const KEYS = permissionKeyEnum.enumValues;
-const MAX_NAME = 40;
-const MAX_DESCRIPTION = 200;
+import {
+  KEYS,
+  MAX_DESCRIPTION,
+  MAX_NAME,
+} from '../../../common/constants/access.constants';
 
 /** Create a custom role, e.g. "Volunteer" (US-SET-13). */
 export class CreateRoleDto {

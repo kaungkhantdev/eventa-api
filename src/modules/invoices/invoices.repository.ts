@@ -1,19 +1,28 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { type SQL, and, desc, eq, ilike, like, ne, or, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
-import { auditEvents, events, invoices, orders } from '../../db/schema';
+import {
+  auditEvents,
+  events,
+  invoices,
+  orders,
+  organizations,
+} from '../../db/schema';
 import { withTenant, type Tx } from '../../db/tenant';
-import { organizations } from '../../db/schema';
 import { stampedSeller } from '../../db/seller-identity';
 import {
-  INVOICE_NUMBER_PREFIX,
-  INVOICE_SEQUENCE_WIDTH,
   type InvoiceCounts,
   type InvoiceDocumentRow,
   type InvoiceFilters,
   type InvoiceRow,
   type InvoiceStatus,
 } from './invoices.types';
+import {
+  AUDIT_TYPE,
+  DEFAULT_VAT_RATE,
+  INVOICE_NUMBER_PREFIX,
+  INVOICE_SEQUENCE_WIDTH,
+} from '../../common/constants/invoices.constants';
 
 /** Everything issuing one invoice writes (US-FIN-07). */
 export interface IssueInvoiceInput {
@@ -53,9 +62,6 @@ export interface OrderRefundedInput extends VoidInvoiceInput {
   organizationId: number;
   orderId: string;
 }
-
-const AUDIT_TYPE = 'invoice' as const;
-const DEFAULT_VAT_RATE = 0.07;
 
 /**
  * Data access for tax invoices. Two things here are load-bearing:

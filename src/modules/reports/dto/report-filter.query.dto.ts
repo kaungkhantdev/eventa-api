@@ -11,11 +11,15 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { type ReportRange } from '../reports-period';
 import {
+  DAY,
+  DAY_MESSAGE,
+  DEFAULT_REPORT_LIMIT,
+  MAX_REPORT_LIMIT,
   MAX_SPAN_DAYS,
   REPORT_RANGES,
-  type ReportRange,
-} from '../reports-period';
+} from '../../../common/constants/reports.constants';
 
 /**
  * The one filter every report takes (US-RPT-02).
@@ -29,12 +33,6 @@ import {
  * within the cap, are decisions with defined behaviour (a message, a trim) which
  * belong with the rest of the window logic rather than in a decorator.
  */
-
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
-const DAY_MESSAGE = 'must be a calendar day, as YYYY-MM-DD';
-
-export const DEFAULT_REPORT_LIMIT = 20;
-export const MAX_REPORT_LIMIT = 100;
 
 export class ReportFilterQueryDto {
   @ApiPropertyOptional({

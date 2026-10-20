@@ -17,9 +17,10 @@ import {
 } from './dto/registrations-page.dto';
 import type { RegistrationsQueryDto } from './dto/registrations.query.dto';
 import type { AttendeesQueryDto } from './dto/attendees.query.dto';
-
-const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 100;
+import {
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+} from '../../common/constants/event-monitoring.constants';
 
 /**
  * The event-workspace Monitor (US-EVT-14): Overview headline numbers, the

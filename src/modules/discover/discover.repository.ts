@@ -19,29 +19,11 @@ import type {
   DiscoverSearch,
   TierInventory,
 } from './discover.types';
-
-/** Statuses whose event is live to the public — a draft or cancelled one is not. */
-const LIVE_STATUSES = ['planned', 'upcoming', 'live'] as const;
-/** Only a public event belongs in the grid; unlisted and private do not. */
-const PUBLIC_VISIBILITY = 'public';
-
-/** The one projection behind every card, so the grid and a saved list agree. */
-const EVENT_CARD_COLUMNS = {
-  id: events.id,
-  slug: events.slug,
-  name: events.name,
-  description: events.description,
-  type: events.type,
-  categoryName: categories.name,
-  startAt: events.startAt,
-  endAt: events.endAt,
-  timezone: events.timezone,
-  isOnline: events.isOnline,
-  venueName: events.venueName,
-  city: events.city,
-  coverImage: events.coverImage,
-  organizerName: events.organizerName,
-};
+import {
+  EVENT_CARD_COLUMNS,
+  LIVE_STATUSES,
+  PUBLIC_VISIBILITY,
+} from '../../common/constants/discover.constants';
 
 /**
  * Reads for the ANONYMOUS Discover grid (US-DISC-01/02). Deliberately not

@@ -6,9 +6,7 @@ import {
   IsString,
   MaxLength,
 } from 'class-validator';
-import { socialProviderEnum } from '../../../db/schema';
-
-const PROVIDERS = socialProviderEnum.enumValues;
+import { PROVIDERS } from '../../../common/constants/auth-social.constants';
 
 /** The provider's id token, posted by the browser after its consent screen. */
 export class SocialSignInDto {

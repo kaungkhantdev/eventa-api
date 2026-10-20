@@ -12,13 +12,12 @@ import {
 import { MeetingEventPort } from './ports/meeting-event.port';
 import { MeetingsRepository } from './meetings.repository';
 import type { MeetingPatch, MeetingRow, NewMeeting } from './meetings.types';
-
-const GONE = "That meeting isn't available.";
-const ALREADY_CANCELLED =
-  'This meeting was cancelled and can no longer be edited.';
-const CHANGED_UNDERNEATH =
-  'Someone else changed this meeting — reload it and try again.';
-const NO_SUCH_EVENT = "That event isn't in this workspace.";
+import {
+  ALREADY_CANCELLED,
+  CHANGED_UNDERNEATH,
+  GONE,
+  NO_SUCH_EVENT,
+} from '../../common/constants/meetings.constants';
 
 export interface ScheduleMeetingCommand {
   title: string;

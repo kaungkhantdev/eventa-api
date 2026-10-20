@@ -17,12 +17,10 @@ import {
   type LiveSurvey,
   type ResponseRow,
 } from './responses.repository';
+import { MAX_RESPONSES } from '../../common/constants/surveys.constants';
 
 /** The ratings, completion, and the NPS — all over the same answers. */
 export type FeedbackFigures = FeedbackSummary & { nps: NpsSummary };
-
-/** A personal list, not an export — one event's feedback is bounded. */
-const MAX_RESPONSES = 500;
 
 export interface MySurvey {
   survey: LiveSurvey | null;

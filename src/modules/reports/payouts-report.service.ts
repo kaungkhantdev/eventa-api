@@ -1,15 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { Clock } from '../../common/time/clock';
-import {
-  DEFAULT_REPORT_LIMIT,
-  type ReportFilterQueryDto,
-} from './dto/report-filter.query.dto';
+import { type ReportFilterQueryDto } from './dto/report-filter.query.dto';
 import {
   PayoutReportPort,
   type PayoutReportRow,
   type PayoutReportTotals,
 } from './ports/payout-report.port';
 import { resolveReportPeriod, type ReportPeriod } from './reports-period';
+import { DEFAULT_REPORT_LIMIT } from '../../common/constants/reports.constants';
 
 /**
  * Payouts and settlement (US-RPT-07).

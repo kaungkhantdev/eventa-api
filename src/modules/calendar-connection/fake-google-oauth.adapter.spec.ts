@@ -1,10 +1,10 @@
-import { CALENDAR_SCOPES } from './calendar-provider';
-import {
-  FAKE_AUTH_CODE,
-  FakeGoogleOAuthAdapter,
-} from './fake-google-oauth.adapter';
+import { FakeGoogleOAuthAdapter } from './fake-google-oauth.adapter';
 import { OffGoogleOAuthAdapter } from './off-google-oauth.adapter';
 import { GoogleOAuthError, GoogleOAuthPort } from './ports/google-oauth.port';
+import {
+  CALENDAR_SCOPES,
+  FAKE_AUTH_CODE,
+} from '../../common/constants/calendar-connection.constants';
 
 const REDIRECT =
   'http://localhost:3190/api/v1/public/calendar-connection/google/callback';

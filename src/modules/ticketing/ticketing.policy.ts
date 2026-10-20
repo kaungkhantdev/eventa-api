@@ -5,11 +5,10 @@ import {
 } from '../../common/booking/booking.limits';
 import { DomainException } from '../../common/errors/domain.exception';
 import type { TicketStatus } from './ticketing.types';
-
-/** An allocation of 0 means "unlimited" — never sold out, no per-order ceiling. */
-const UNLIMITED = 0;
-/** The seating mode whose seat map can set the quantities (US-EVT-05). */
-const RESERVED = 'reserved';
+import {
+  RESERVED,
+  UNLIMITED,
+} from '../../common/constants/ticketing.constants';
 
 /** The fields that are frozen once a tier has sold a single seat (US-TKT-02). */
 interface LockedAfterSales {

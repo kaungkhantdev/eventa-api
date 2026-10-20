@@ -11,10 +11,11 @@ import type {
   RegistrationsResult,
   StatsPage,
 } from '../events/ports/event-stats.port';
-
-const CONFIRMED = 'confirmed';
-const PAID = 'paid';
-const LIVE_TICKET_STATUSES = ['issued', 'checked_in'] as const;
+import {
+  CONFIRMED,
+  LIVE_TICKET_STATUSES,
+  PAID,
+} from '../../common/constants/registration-stats.constants';
 
 /** Read-model queries for the event-workspace Monitor (US-EVT-14). Tenant-scoped. */
 @Injectable()

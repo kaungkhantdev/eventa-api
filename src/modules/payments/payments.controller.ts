@@ -18,9 +18,7 @@ import { ApiData } from '../../common/http/api-data.decorator';
 import { PayOrderDto } from './dto/pay-order.dto';
 import { PaymentIntentDto } from './dto/payment-intent.dto';
 import { PaymentsService, type WebhookAck } from './payments.service';
-
-/** The header Stripe signs its callbacks with; the fake uses it too. */
-const SIGNATURE_HEADER = 'stripe-signature';
+import { SIGNATURE_HEADER } from '../../common/constants/payments.constants';
 
 /**
  * Paying for an order (US-DISC-05). `pay` is `@Public` like the rest of

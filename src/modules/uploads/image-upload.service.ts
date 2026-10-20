@@ -7,9 +7,14 @@ import { ObjectStoragePort } from '../profile-photo/ports/object-storage.port';
 import {
   ALLOWED_CONTENT_TYPES,
   ALLOWED_IMAGE_TYPES,
-  MAGIC_BYTES_TO_READ,
   looksLike,
 } from '../profile-photo/profile-photo.types';
+import {
+  MISSING,
+  NOT_REALLY_AN_IMAGE,
+  NOT_YOURS,
+} from '../../common/constants/uploads.constants';
+import { MAGIC_BYTES_TO_READ } from '../../common/constants/profile-photo.constants';
 
 /**
  * Uploading an image, for anything that owns one.
@@ -56,9 +61,6 @@ export interface IssuedUpload {
 
 const NOT_AN_IMAGE = (noun: string): string =>
   `A ${noun} must be one of: ${ALLOWED_CONTENT_TYPES.join(', ')}.`;
-const NOT_REALLY_AN_IMAGE = 'That file is not the image type it claims to be.';
-const NOT_YOURS = 'That upload does not belong to you.';
-const MISSING = 'No upload was found — send the file to the URL, then confirm.';
 
 @Injectable()
 export class ImageUploadService {

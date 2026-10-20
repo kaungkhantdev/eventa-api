@@ -1,10 +1,9 @@
 import type { SeatingMode, TierStatus } from './checkout.types';
-
-export const WAITLIST_CLOSED = 'This event does not have a waitlist.';
-export const WAITLIST_TICKETS_LEFT =
-  'Tickets are still available — book one instead of joining the waitlist.';
-export const WAITLIST_RESERVED_SEATING =
-  'The waitlist is for general-admission tickets; this event seats people by seat.';
+import {
+  WAITLIST_CLOSED,
+  WAITLIST_RESERVED_SEATING,
+  WAITLIST_TICKETS_LEFT,
+} from '../../common/constants/checkout.constants';
 
 const SOLD_OUT: TierStatus = 'soldout';
 const GENERAL_ADMISSION: SeatingMode = 'ga';

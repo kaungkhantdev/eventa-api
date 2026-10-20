@@ -14,9 +14,7 @@ import {
   roleCreatedAudit,
   rolePermissionsAudit,
 } from './permission-change.audit';
-
-/** Without this key nobody can administer the workspace's people. */
-const MANAGE_USERS: PermissionKey = 'setUsers';
+import { MANAGE_USERS } from '../../common/constants/access.constants';
 
 /** RBAC role administration: the permission catalog and grant/revoke on a role. */
 @Injectable()

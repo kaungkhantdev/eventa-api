@@ -1,8 +1,5 @@
 import type { OutboxEventInput } from '../../platform/outbox.port';
-
-/** Routing key for the "here is your confirmation code" text (consumed by eventa-worker). */
-export const IDENTITY_PHONE_VERIFICATION_REQUESTED =
-  'identity.phone_verification_requested';
+import { IDENTITY_PHONE_VERIFICATION_REQUESTED } from '../../../common/constants/users.constants';
 
 export interface PhoneVerificationRequestedInput {
   organizationId: number;

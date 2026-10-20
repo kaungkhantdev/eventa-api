@@ -1,8 +1,8 @@
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { auditTypeEnum } from '../../../db/schema';
-import { AUDIT_SUBJECT_TYPES } from '../audit-subject';
 import { ListAuditQueryDto } from './list-audit.query.dto';
+import { AUDIT_SUBJECT_TYPES } from '../../../common/constants/audit.constants';
 
 const refused = (query: Record<string, unknown>): string[] =>
   validateSync(plainToInstance(ListAuditQueryDto, query)).map(

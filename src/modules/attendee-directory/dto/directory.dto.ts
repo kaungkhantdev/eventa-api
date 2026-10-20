@@ -11,10 +11,11 @@ import {
 } from 'class-validator';
 import { attendeeTagEnum } from '../../../db/schema';
 import type { AttendeeTag, Segment, SortBy } from '../attendee-directory.types';
-
-export const DEFAULT_LIMIT = 25;
-export const MAX_LIMIT = 100;
-const MAX_SEARCH = 120;
+import {
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+  MAX_SEARCH,
+} from '../../../common/constants/attendee-directory.constants';
 
 const SEGMENTS: readonly Segment[] = ['all', 'new', 'checked_in', 'vip'];
 const SORTS: readonly SortBy[] = ['recent', 'name', 'events', 'tickets'];

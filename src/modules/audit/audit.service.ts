@@ -11,9 +11,10 @@ import {
   toSubjectFilter,
 } from './audit-subject';
 import { AuditEntryDto, toAuditEntry } from './dto/audit-entry.dto';
-
-const DEFAULT_LIMIT = 50;
-const MAX_LIMIT = 200;
+import {
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+} from '../../common/constants/audit.constants';
 
 export interface ListAuditQuery {
   page?: number;

@@ -12,13 +12,11 @@ import type {
   UpdateOrganizationInput,
   OrganizationSummary,
 } from './organization.types';
-
-/** A Thai VAT registration number is exactly 13 digits. */
-const THAI_TAX_ID = /^\d{13}$/;
-/** Only http(s) — never a `javascript:`/`data:` URL on a branded surface. */
-const HTTP_URL = /^https?:\/\/[^\s]+$/i;
-
-const NAME_TAKEN_MESSAGE = 'That workspace name is already taken. Try another.';
+import {
+  HTTP_URL,
+  NAME_TAKEN_MESSAGE,
+  THAI_TAX_ID,
+} from '../../common/constants/organization.constants';
 
 /** Fields an Admin may change; anything else in the payload is ignored. */
 const UPDATABLE_KEYS = [

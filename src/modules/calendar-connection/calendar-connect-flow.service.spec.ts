@@ -11,13 +11,13 @@ import type {
   SaveConnectedInput,
 } from './calendar-connection.repository';
 import type { PendingState } from './calendar-connection.types';
-import { CALENDAR_SCOPES } from './calendar-provider';
 import { formatState, sha256hex } from './calendar-state';
 import {
   type GoogleGrant,
   GoogleOAuthError,
   GoogleOAuthPort,
 } from './ports/google-oauth.port';
+import { CALENDAR_SCOPES } from '../../common/constants/calendar-connection.constants';
 
 const KEY = Buffer.alloc(32, 9).toString('base64');
 const ORG = 7;

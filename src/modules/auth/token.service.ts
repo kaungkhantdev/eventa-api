@@ -13,20 +13,15 @@ import type {
   RefreshTokenClaims,
   TwoFactorChallengeClaims,
 } from './auth.types';
-
-/** Workspace invites are valid for 7 days. */
-const INVITE_TTL_SECONDS = 7 * 24 * 60 * 60;
-/** An email-confirmation link is valid for 24 hours. */
-const EMAIL_VERIFICATION_TTL_SECONDS = 24 * 60 * 60;
-/** An email-change confirmation link is valid for 24 hours. */
-const EMAIL_CHANGE_TTL_SECONDS = 24 * 60 * 60;
-/** A password-reset link is valid for 1 hour. */
-const PASSWORD_RESET_TTL_SECONDS = 60 * 60;
-/** The window between a correct password and its 2FA code (US-ACC-05). */
-const TWO_FACTOR_CHALLENGE_TTL_SECONDS = 5 * 60;
-/** A booking's create-your-account link is valid for 7 days (US-DISC-15). */
-const BOOKING_CLAIM_TTL_SECONDS = 7 * 24 * 60 * 60;
-const BOOKING_CLAIM_TYPE = 'booking_claim';
+import {
+  BOOKING_CLAIM_TTL_SECONDS,
+  BOOKING_CLAIM_TYPE,
+  EMAIL_CHANGE_TTL_SECONDS,
+  EMAIL_VERIFICATION_TTL_SECONDS,
+  INVITE_TTL_SECONDS,
+  PASSWORD_RESET_TTL_SECONDS,
+  TWO_FACTOR_CHALLENGE_TTL_SECONDS,
+} from '../../common/constants/auth.constants';
 
 export interface TokenSubject {
   userId: string;

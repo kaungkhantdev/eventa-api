@@ -12,7 +12,6 @@ process.env.VERIFY_RESEND_COOLDOWN_SECONDS = '1';
 // `resend-throttle.service.spec.ts`, where a window can be made to lapse
 // without the suite waiting out a real one.
 process.env.VERIFY_CODE_MAX_PER_WINDOW = '50';
-
 import type { Server } from 'node:http';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -21,8 +20,9 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
-import { IDENTITY_PHONE_VERIFICATION_REQUESTED } from '../src/modules/users/events/phone-verification-requested.event';
+
 import { listenOnLoopback } from './support/loopback';
+import { IDENTITY_PHONE_VERIFICATION_REQUESTED } from '../src/common/constants/users.constants';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'phone-e2e', name: 'Phone E2E' };

@@ -21,6 +21,7 @@ import {
 } from './report-tables';
 import type { TransactionsReportView } from './transactions-report.service';
 import type { PayoutsReportView } from './payouts-report.service';
+import { SATANG_PER_BAHT } from '../../common/constants/reports.constants';
 
 /**
  * A report's typed table, written the way a SPREADSHEET reads (US-RPT-11).
@@ -46,8 +47,6 @@ export interface CsvTable {
   headers: string[];
   rows: string[][];
 }
-
-const SATANG_PER_BAHT = 100;
 
 /** Integer satang → a plain decimal a spreadsheet will treat as a number. */
 function baht(satang: number): string {

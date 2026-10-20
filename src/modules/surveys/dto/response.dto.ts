@@ -11,9 +11,13 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { MAX_NPS_SCORE, MIN_NPS_SCORE } from '../nps-rules';
-import { MAX_RATING, MIN_RATING } from '../response-rules';
 import { SurveyQuestionDto } from './survey.dto';
+import {
+  MAX_NPS_SCORE,
+  MAX_RATING,
+  MIN_NPS_SCORE,
+  MIN_RATING,
+} from '../../../common/constants/surveys.constants';
 
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;

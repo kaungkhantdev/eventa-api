@@ -12,10 +12,11 @@ import {
 } from 'class-validator';
 import { invoiceStatusEnum } from '../../../db/schema';
 import type { InvoiceStatus } from '../invoices.types';
-
-export const DEFAULT_LIMIT = 20;
-export const MAX_LIMIT = 100;
-const MAX_SEARCH = 120;
+import {
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+  MAX_SEARCH,
+} from '../../../common/constants/invoices.constants';
 
 /** Narrow the invoice ledger (US-FIN-06). */
 export class ListInvoicesDto {

@@ -1,13 +1,13 @@
 import { formatBaht } from '../../common/money/baht';
 import { escapeXml } from '../../common/xml/escape-xml';
 import type { InvoiceDocumentRow } from './invoices.types';
-
-/** A4 portrait at 72dpi, so it prints as exactly one page. */
-const WIDTH = 595;
-const HEIGHT = 842;
-const LEFT = 56;
-const RIGHT = WIDTH - 56;
-const PERCENT = 100;
+import {
+  HEIGHT,
+  LEFT,
+  PERCENT,
+  RIGHT,
+  WIDTH,
+} from '../../common/constants/invoices.constants';
 
 /**
  * The printable tax invoice (US-FIN-08): one self-contained A4 SVG carrying the

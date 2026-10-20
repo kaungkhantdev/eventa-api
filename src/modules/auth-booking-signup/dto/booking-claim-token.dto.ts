@@ -1,11 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsString, MaxLength } from 'class-validator';
-
-/**
- * Far longer than any token this API signs, short enough that nobody can make
- * the verifier chew on a megabyte.
- */
-const CLAIM_TOKEN_MAX_LENGTH = 2048;
+import { CLAIM_TOKEN_MAX_LENGTH } from '../../../common/constants/auth-booking-signup.constants';
 
 /**
  * The emailed claim link's token (US-DISC-15), always in the request BODY so

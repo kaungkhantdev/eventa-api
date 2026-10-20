@@ -1,10 +1,10 @@
+import { resolveCalendarProvider } from './calendar-provider';
 import {
   CALENDAR_CALLBACK_PATH,
   CALENDAR_EVENTS_SCOPE,
   CALENDAR_SCOPES,
   MANAGE_INTEGRATIONS,
-  resolveCalendarProvider,
-} from './calendar-provider';
+} from '../../common/constants/calendar-connection.constants';
 
 describe('resolveCalendarProvider (US-MTG-08)', () => {
   const both = {

@@ -4,7 +4,6 @@ import { Clock } from '../../common/time/clock';
 import { PermissionsService } from '../access/permissions.service';
 import type { AuthContext } from '../auth/auth.types';
 import type { EventsReportQueryDto } from './dto/events-report.query.dto';
-import { DEFAULT_REPORT_LIMIT } from './dto/report-filter.query.dto';
 import {
   EventPerformancePort,
   type EventLifecycle,
@@ -12,6 +11,10 @@ import {
 } from './ports/event-performance.port';
 import { IncomeReportPort } from './ports/income-report.port';
 import { resolveReportPeriod, type ReportPeriod } from './reports-period';
+import {
+  DEFAULT_REPORT_LIMIT,
+  PERCENT,
+} from '../../common/constants/reports.constants';
 
 /**
  * Events ranked by registrations (US-RPT-04).
@@ -48,7 +51,6 @@ export interface EventsReportView {
   matchedEvents: number;
 }
 
-const PERCENT = 100;
 /** An event still to come has had no chance to be attended. */
 const NOT_YET_HELD: EventLifecycle = 'upcoming';
 

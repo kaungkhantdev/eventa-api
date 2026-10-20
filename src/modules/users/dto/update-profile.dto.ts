@@ -9,9 +9,7 @@ import {
   MinLength,
   ValidateIf,
 } from 'class-validator';
-import { localeEnum } from '../../../db/schema';
-
-const LOCALES = localeEnum.enumValues;
+import { LOCALES } from '../../../common/constants/users.constants';
 
 /** Fields a member may change on their own profile (US-SET-01). */
 export class UpdateProfileDto {

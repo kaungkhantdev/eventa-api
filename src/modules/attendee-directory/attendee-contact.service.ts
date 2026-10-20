@@ -9,53 +9,27 @@ import type { AuthContext } from '../auth/auth.types';
 import { toAttendeeEntry } from './attendee-directory.mapper';
 import { AttendeeDirectoryRepository } from './attendee-directory.repository';
 import {
-  CONTACT_FIELDS,
   type AttendeeContactRow,
   type AttendeeRow,
   type ContactChanges,
   type ContactField,
 } from './attendee-directory.types';
 import type { AttendeeEntryDto } from './dto/directory.dto';
+import {
+  BLANK_NAME,
+  CONTACT_FIELDS,
+  EMAIL_IN_USE,
+  EMAIL_IN_USE_BY_REMOVED,
+  MOVED_ELSEWHERE,
+  NOT_FOUND,
+  NOTHING_TO_CHANGE,
+} from '../../common/constants/attendee-directory.constants';
 
 /** What an organizer may correct; `version` guards the write, it is not a field. */
 export interface UpdateAttendeeContactInput extends ContactChanges {
   /** The version the form was opened on, when the client tracks it. */
   version?: number;
 }
-
-const NOT_FOUND = 'That attendee is not in this workspace.';
-
-const NOTHING_TO_CHANGE = 'Send a name, email or phone number to change.';
-
-const BLANK_NAME = 'Enter the attendee’s name.';
-
-const MOVED_ELSEWHERE =
-  'This attendee changed while you had the form open. Reload and try again.';
-
-/**
- * The merge prompt (AC3).
- *
- * Deliberately free of the other record's address and name. A 4xx `message` is
- * logged as a warning by the global exception filter, so naming the person here
- * would write somebody's email into the application log on every collision —
- * and the console does not need it: it already holds the address the organizer
- * typed, and `GET /attendees?search=<address>` returns the record that owns it.
- */
-const EMAIL_IN_USE =
-  'That email address already belongs to another attendee in this workspace. ' +
-  'Merge the two records instead of overwriting — a second record on the same ' +
-  'address would split one person’s registrations in two. Search the directory ' +
-  'for the address to open the record that holds it.';
-
-/**
- * The same refusal where the holder was removed. "Merge the two" is the wrong
- * instruction for a record nobody can open, so the remedy named is different.
- */
-const EMAIL_IN_USE_BY_REMOVED =
-  'That email address is still held by an attendee record that was removed ' +
-  'from this workspace, so it cannot be reused yet. Merge the two records ' +
-  'rather than taking the address, or the removed record’s history will be ' +
-  'attached to this person.';
 
 /**
  * Keeping an attendee's contact details current (US-REG-08).

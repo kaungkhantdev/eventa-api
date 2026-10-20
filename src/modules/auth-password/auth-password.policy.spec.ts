@@ -4,7 +4,7 @@ import { AcceptInviteDto } from '../auth/dto/accept-invite.dto';
 import { RegisterDto } from '../auth-signup/dto/register.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
-import { PASSWORD_MIN_LENGTH } from './auth-password.policy';
+import { PASSWORD_MIN_LENGTH } from '../../common/constants/auth-password.constants';
 
 /** Every place a password is CHOSEN, and the field each one chooses it in. */
 const SURFACES: [string, ClassConstructor<object>, string][] = [

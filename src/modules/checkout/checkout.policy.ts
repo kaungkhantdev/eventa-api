@@ -8,11 +8,10 @@ import type {
   SelectionInput,
 } from './checkout.types';
 import { seatSellsUnder } from './held-seat-rules';
-
-const OTHER_TICKET_TYPE =
-  'Those seats belong to a different ticket type. Please choose again.';
-const NOT_ON_SALE =
-  "Those seats aren't on sale. Please choose different seats.";
+import {
+  NOT_ON_SALE,
+  OTHER_TICKET_TYPE,
+} from '../../common/constants/checkout.constants';
 
 /**
  * The rules a checkout selection must satisfy before any money or inventory is

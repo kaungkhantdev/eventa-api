@@ -25,6 +25,7 @@ import type {
   UpdateTicketInput,
 } from './ticketing.types';
 import { safeError } from '../../common/errors/safe-error';
+import { WAITLIST_OFFER_FAILED } from '../../common/constants/ticketing.constants';
 
 const UPDATABLE_KEYS: (keyof NewTicketValues & keyof UpdateTicketInput)[] = [
   'name',
@@ -38,8 +39,6 @@ const UPDATABLE_KEYS: (keyof NewTicketValues & keyof UpdateTicketInput)[] = [
   'salesEndAt',
 ];
 
-const WAITLIST_OFFER_FAILED =
-  'Raised a ticket allocation, but offering the new places to its waitlist failed';
 /** No new places, so nothing was offered and nothing went wrong. */
 const NOTHING_TO_OFFER: WaitlistOfferOutcome = {
   offered: 0,

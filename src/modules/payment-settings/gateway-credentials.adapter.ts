@@ -5,7 +5,7 @@ import {
 } from '../payments/ports/gateway-credentials.port';
 import { PaymentKeysService } from './payment-keys.service';
 import { PaymentSettingsRepository } from './payment-settings.repository';
-import { PAYMENT_MODES } from './payment-settings.types';
+import { PAYMENT_MODES } from '../../common/constants/payment-settings.constants';
 
 /**
  * PaymentSettings' implementation of Payments' `GatewayCredentialsPort`.

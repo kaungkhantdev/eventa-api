@@ -22,10 +22,9 @@ import {
 import { withTenant, type Tx } from '../../db/tenant';
 import type { CheckoutSeat } from '../checkout/checkout.types';
 import type { HoldQuantityResult, HoldSeatsResult } from './seat-hold.types';
+import { ACTIVE } from '../../common/constants/registration.constants';
 
 type NewSeatHold = typeof seatHolds.$inferInsert;
-
-const ACTIVE = 'active' as const;
 
 /**
  * Data access for the checkout seat-hold engine. These methods run the money-path

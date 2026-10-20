@@ -29,14 +29,11 @@ import { BookingClaimPreviewDto } from './dto/booking-claim-preview.dto';
 import { BookingClaimTokenDto } from './dto/booking-claim-token.dto';
 import { BookingLinkSentDto } from './dto/booking-link-sent.dto';
 import { ClaimBookingAccountDto } from './dto/claim-booking-account.dto';
-
-const BEARER = 'Bearer';
-const UNKNOWN_DEVICE = 'Unknown device';
-const DEAD_LINK_RESPONSE = {
-  description:
-    'The link is malformed, expired, not a claim link, no longer matches its booking, or was used by an account that is now gone (code CLAIM_LINK_INVALID) — or the body failed validation',
-  type: ApiErrorDto,
-};
+import {
+  BEARER,
+  DEAD_LINK_RESPONSE,
+  UNKNOWN_DEVICE,
+} from '../../common/constants/auth-booking-signup.constants';
 
 /**
  * Create my account from my confirmation (US-DISC-15). Every route is

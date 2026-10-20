@@ -1,8 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
-
-const MAX_LIMIT = 48;
+import { MAX_LIMIT } from '../../../common/constants/saved-events.constants';
 
 /** Paging for the attendee's saved list (US-DISC-03). */
 export class ListSavedEventsDto {

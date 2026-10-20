@@ -1,20 +1,15 @@
 import type { orderStatusEnum, paymentStatusEnum } from '../../db/schema';
+import {
+  ALREADY_REJECTED,
+  APPROVE_BLOCKED_UNPAID,
+  NOT_AWAITING,
+  OFFER_NOT_WAITLISTED,
+  REJECT_BLOCKED_PAID,
+  REJECT_NEEDS_REFUND_PERMISSION,
+} from '../../common/constants/registrations.constants';
 
 type OrderStatus = (typeof orderStatusEnum.enumValues)[number];
 type PaymentStatus = (typeof paymentStatusEnum.enumValues)[number];
-
-export const APPROVE_BLOCKED_UNPAID =
-  "Payment isn't complete yet, so this registration can't be approved.";
-export const REJECT_BLOCKED_PAID =
-  'Money has been captured for this registration — cancel and refund it instead of rejecting.';
-export const REJECT_NEEDS_REFUND_PERMISSION =
-  'Rejecting this registration refunds its payment, and refunds need the refund permission — ask an Admin.';
-const ALREADY_REJECTED =
-  'This registration was rejected, and a rejection cannot be undone.';
-const NOT_AWAITING =
-  'Only a pending or waitlisted registration can be decided.';
-export const OFFER_NOT_WAITLISTED =
-  'Only someone on the waitlist can be offered a seat.';
 
 /** The slice of a registration a decision turns on. */
 export interface DecidableRegistration {

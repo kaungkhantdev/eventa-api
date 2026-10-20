@@ -7,9 +7,7 @@ import { EventsService } from '../events/events.service';
 import type { EventActor } from '../events/events.types';
 import { TicketingService } from '../ticketing/ticketing.service';
 import { TicketShareDto } from './dto/ticket-share.dto';
-
-const NOT_PUBLISHED_WARNING =
-  "This event isn't published yet — publish it first, or the link and QR won't open for anyone.";
+import { NOT_PUBLISHED_WARNING } from '../../common/constants/ticket-sharing.constants';
 
 /**
  * A shareable registration link and matching QR for one ticket type (US-TKT-06),

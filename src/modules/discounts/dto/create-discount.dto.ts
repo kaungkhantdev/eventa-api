@@ -13,10 +13,12 @@ import {
 } from 'class-validator';
 import { discountTypeEnum } from '../../../db/schema';
 import type { DiscountType } from '../discounts.types';
+import {
+  CODE_MAX,
+  CODE_MIN,
+} from '../../../common/constants/discounts.constants';
 
 const TYPES: readonly DiscountType[] = discountTypeEnum.enumValues;
-const CODE_MIN = 3;
-const CODE_MAX = 24;
 
 export class CreateDiscountDto {
   @ApiProperty({ example: 'PROMO42', minLength: CODE_MIN, maxLength: CODE_MAX })

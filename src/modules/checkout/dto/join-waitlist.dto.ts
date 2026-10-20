@@ -12,9 +12,10 @@ import {
 } from 'class-validator';
 import { MAX_SEATS_PER_BOOKING } from '../../../common/booking/booking.limits';
 import { BuyerDto } from './confirm-order.dto';
-
-const MIN_IDEMPOTENCY_KEY = 8;
-const MAX_IDEMPOTENCY_KEY = 128;
+import {
+  MAX_IDEMPOTENCY_KEY,
+  MIN_IDEMPOTENCY_KEY,
+} from '../../../common/constants/checkout.constants';
 
 /**
  * Join a sold-out ticket's waitlist (US-REG-04). Carries no amounts: the entry

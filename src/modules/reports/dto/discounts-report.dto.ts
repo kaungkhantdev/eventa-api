@@ -1,9 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  DISCOUNT_STANDINGS,
-  type DiscountStanding,
-} from '../ports/discount-report.port';
+import { type DiscountStanding } from '../ports/discount-report.port';
 import { ReportPeriodDto } from './report-common.dto';
+import { DISCOUNT_STANDINGS } from '../../../common/constants/reports.constants';
 
 /** One code's payback (US-RPT-10). */
 export class DiscountPerformanceRowDto {

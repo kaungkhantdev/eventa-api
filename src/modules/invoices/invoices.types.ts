@@ -3,10 +3,6 @@ import { invoiceStatusEnum } from '../../db/schema';
 /** Derived from the Drizzle enum so the two can never drift apart. */
 export type InvoiceStatus = (typeof invoiceStatusEnum.enumValues)[number];
 
-/** `INV-2026-0001` — sequential per workspace per year, never reused. */
-export const INVOICE_NUMBER_PREFIX = 'INV';
-export const INVOICE_SEQUENCE_WIDTH = 4;
-
 /** The invoice as the ledger and the document both need it. */
 export interface InvoiceRow {
   id: number;

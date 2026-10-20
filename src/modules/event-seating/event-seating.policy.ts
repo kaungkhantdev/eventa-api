@@ -11,8 +11,7 @@ import type {
   SeatRetype,
   SeatRow,
 } from './event-seating.types';
-
-const SOLD = 'sold';
+import { SOLD } from '../../common/constants/event-seating.constants';
 
 /**
  * Every seat of the grid once the save lands, row by row and seat by seat,

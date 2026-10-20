@@ -1,17 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import type { PeriodChange } from '../../common/analytics/period-change';
 import { Clock } from '../../common/time/clock';
-import {
-  DEFAULT_REPORT_LIMIT,
-  type ReportFilterQueryDto,
-} from './dto/report-filter.query.dto';
+import { type ReportFilterQueryDto } from './dto/report-filter.query.dto';
 import {
   RegistrationReportPort,
   type RegistrationSplit,
   type RegistrationTotals,
 } from './ports/registration-report.port';
-import { changeBetween, LOWER_IS_BETTER } from './report-change';
+import { changeBetween } from './report-change';
 import { resolveReportPeriod, type ReportPeriod } from './reports-period';
+import {
+  DEFAULT_REPORT_LIMIT,
+  LOWER_IS_BETTER,
+} from '../../common/constants/reports.constants';
 
 /**
  * Registrations by event and state (US-RPT-08).

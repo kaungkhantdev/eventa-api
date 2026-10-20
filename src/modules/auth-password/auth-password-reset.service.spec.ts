@@ -13,9 +13,9 @@ import type {
 import type { PasswordService } from './auth-password.service';
 import type { TokenService } from '../auth/token.service';
 import type { LoginThrottleService } from '../auth/login-throttle.service';
-import { IDENTITY_PASSWORD_RESET_REQUESTED } from './events/password-reset-requested.event';
 import { outboxDouble } from '../../../test/support/outbox-double';
 import { refusalOf } from '../../../test/support/refusal';
+import { IDENTITY_PASSWORD_RESET_REQUESTED } from '../../common/constants/auth-password.constants';
 
 /**
  * The message a refusal carried. Typed, unlike `expect.stringMatching` inside

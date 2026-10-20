@@ -29,8 +29,7 @@ import {
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { LoginResponseDto, RefreshResponseDto } from './dto/token-response.dto';
-
-const BEARER = 'Bearer';
+import { BEARER } from '../../common/constants/auth.constants';
 
 /** Sign-in, token refresh, session end, and the caller's own profile. */
 @ApiTags('auth')

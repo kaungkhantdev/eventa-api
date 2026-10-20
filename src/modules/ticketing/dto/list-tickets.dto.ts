@@ -12,10 +12,12 @@ import {
 } from 'class-validator';
 import { ticketStatusEnum } from '../../../db/schema';
 import type { TicketStatus } from '../ticketing.types';
+import {
+  MAX_LIMIT,
+  MAX_SEARCH,
+} from '../../../common/constants/ticketing.constants';
 
 const STATUSES: readonly TicketStatus[] = ticketStatusEnum.enumValues;
-const MAX_LIMIT = 100;
-const MAX_SEARCH = 120;
 
 /** Filters for the cross-event ticket inventory (US-TKT-04). */
 export class ListTicketsDto {

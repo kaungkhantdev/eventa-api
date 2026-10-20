@@ -162,8 +162,8 @@ the development guide when implementing:
   /calendar-connection/connect` and `/disconnect` with `setIntegrations`, and the public OAuth callback
   `GET /public/calendar-connection/google/callback` — the one `@Res()` redirect in `src`, always a 302
   back to Settings → Integrations; `meetings` owns the diary and eventa-worker sends the invites).
-  Tree: `src/db/`, `src/modules/<name>/`, `src/common/` (`guards/`, `decorators/`, `interceptors/`,
-  `filters/`, `http/`, `util/`, tenancy), plus a generated `openapi.json`.
+  Tree: `src/db/`, `src/modules/<name>/`, `src/common/` (`constants/`, `guards/`, `decorators/`,
+  `interceptors/`, `filters/`, `http/`, `util/`, tenancy), plus a generated `openapi.json`.
 - **Cross-cutting code lives in `src/common/`, never in a domain module.** A guard, decorator, pipe or
   helper used by more than one module belongs in `common/guards/`, `common/decorators/`, `common/util/`
   etc. — so a controller never imports from an unrelated domain module just to annotate a route
@@ -325,10 +325,13 @@ flow. **The e2e suite is what proves the DI graph resolves — a green `tsc` doe
 - **Business rules live in a policy / domain service / validator** — never scattered in controllers or inlined.
 - **Custom, meaningful exceptions** — throw `DomainException` (factories `.notFound()`/`.forbidden()`/
   `.conflict()`/`.validation()`) with a stable `ErrorCode`; never leak internals.
-- **Enums over magic strings** (`pgEnum`, `ErrorCode`); **constants over magic numbers** (module-level `const`).
+- **Enums over magic strings** (`pgEnum`, `ErrorCode`); **constants over magic numbers**, kept in
+  `src/common/constants/<module>.constants.ts` (one file per module, e.g. `account-deletion.constants.ts`
+  holds that module's messages, limits and routing keys). A constant that needs its module's own types or
+  functions stays beside them in the module — `common` never imports from `src/modules`.
 - **No hard-coding** — never inline a literal that has a canonical home. Magic strings → enums (`pgEnum`,
-  `ErrorCode`, `Persona`); magic numbers / limits / timeouts → module-level `const` (`DEFAULT_LIMIT`,
-  `MAX_LIMIT`); env, hosts, ports, URLs, secrets, credentials, feature flags → `ConfigService` (zod `Env`),
+  `ErrorCode`, `Persona`); magic numbers / limits / timeouts / user-facing messages → a named constant in
+  `src/common/constants/<module>.constants.ts` (`DEFAULT_LIMIT`, `MAX_LIMIT`); env, hosts, ports, URLs, secrets, credentials, feature flags → `ConfigService` (zod `Env`),
   **never** a string literal or `process.env` in app code; money & tax rates (VAT 7%, service fee) and
   quotas (per-booking seat cap) → the org-settings row or a named constant, never sprinkled literals.
   **Derive from the single source of truth**: Swagger `enum` lists and DTO validators read the Drizzle

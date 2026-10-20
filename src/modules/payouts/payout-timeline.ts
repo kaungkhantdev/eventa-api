@@ -1,8 +1,13 @@
 import type { PayoutStatus } from './payouts.types';
-
-const MASK = '••••';
-const VISIBLE_DIGITS = 4;
-const NO_ACCOUNT = 'No bank account';
+import {
+  ARRIVAL_NOTE,
+  FAILED_NOTE,
+  MASK,
+  NO_ACCOUNT,
+  PAID_NOTE,
+  REQUESTED_NOTE,
+  VISIBLE_DIGITS,
+} from '../../common/constants/payouts.constants';
 
 /** The three steps a transfer walks through, in order. */
 export type TimelineStep = 'requested' | 'processing' | 'paid';
@@ -13,12 +18,6 @@ export interface TimelineEntry {
   /** Plain language — what the organizer should expect, not jargon. */
   note: string | null;
 }
-
-const ARRIVAL_NOTE = 'Funds usually arrive within 1–3 business days.';
-const FAILED_NOTE =
-  'The transfer could not be completed — check the bank details and retry.';
-const REQUESTED_NOTE = 'Eventa has scheduled this payout to your bank.';
-const PAID_NOTE = 'The money has landed in your account.';
 
 /**
  * Show only the last four digits of a destination account (US-FIN-03,

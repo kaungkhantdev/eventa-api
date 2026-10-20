@@ -18,10 +18,10 @@ import {
   type StoredObject,
 } from '../ports/object-storage.port';
 import { safeError } from '../../../common/errors/safe-error';
-
-/** S3's error name when the key simply is not there. */
-const NOT_FOUND = 'NotFound';
-const NOT_FOUND_STATUS = 404;
+import {
+  NOT_FOUND,
+  NOT_FOUND_STATUS,
+} from '../../../common/constants/profile-photo.constants';
 
 /**
  * Amazon S3 behind `ObjectStoragePort`. Two SDK behaviours are corrected here,

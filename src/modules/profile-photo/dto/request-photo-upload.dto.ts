@@ -1,9 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsIn, IsInt, IsString, MaxLength, Min } from 'class-validator';
 import { ALLOWED_CONTENT_TYPES } from '../profile-photo.types';
-
-/** Keys are issued by the server, but they still arrive as input on confirm. */
-const MAX_KEY_LENGTH = 200;
+import { MAX_KEY_LENGTH } from '../../../common/constants/profile-photo.constants';
 
 /** Ask for an upload URL (US-DISC-11). The bytes go straight to storage. */
 export class RequestPhotoUploadDto {

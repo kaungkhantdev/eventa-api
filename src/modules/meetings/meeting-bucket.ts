@@ -1,13 +1,6 @@
 import { BANGKOK_OFFSET_MS, DAY_MS } from '../../common/time/bangkok';
+import { MEETING_BUCKETS } from '../../common/constants/meetings.constants';
 
-/**
- * Which group a meeting falls into (US-MTG-01). DERIVED, never stored: a stored
- * bucket is wrong from the moment the Bangkok day turns, and would need a
- * nightly job to stay honest. The catalogue lists `meetings.bucket` as a
- * column; this is the same decision taken for invoice ageing and session
- * colour — compute what changes with the clock.
- */
-export const MEETING_BUCKETS = ['today', 'upcoming', 'past'] as const;
 export type MeetingBucket = (typeof MEETING_BUCKETS)[number];
 
 export type MeetingMode = 'Video' | 'In person' | 'Phone';

@@ -1,4 +1,5 @@
-import { ALL_CAUGHT_UP, buildAlerts } from './alerts';
+import { buildAlerts } from './alerts';
+import { ALL_CAUGHT_UP } from '../../common/constants/dashboard.constants';
 
 const counts = (o: Record<string, number> = {}) => ({
   pendingApprovals: 0,

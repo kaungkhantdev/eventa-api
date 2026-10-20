@@ -15,8 +15,7 @@ import { ApiData } from '../../common/http/api-data.decorator';
 import { LoginResponseDto } from '../auth/dto/token-response.dto';
 import { TwoFactorSignInDto } from './dto/two-factor-signin.dto';
 import { TwoFactorSignInService } from './two-factor-signin.service';
-
-const BEARER = 'Bearer';
+import { BEARER } from '../../common/constants/auth-two-factor.constants';
 
 /**
  * Step two of a two-factor sign-in (US-ACC-05 / US-DISC-12). `@Public` because

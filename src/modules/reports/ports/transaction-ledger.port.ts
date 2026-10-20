@@ -1,3 +1,4 @@
+import { LEDGER_OUTCOMES } from '../../../common/constants/reports.constants';
 /**
  * What Reports needs to show a transaction ledger (US-RPT-06), without reading
  * the payments tables.
@@ -11,18 +12,6 @@
 /** Which side of the ledger an entry is. */
 export type LedgerKind = 'payment' | 'refund';
 
-/**
- * How an entry ended up.
- *
- * `refunded` belongs to a PAYMENT that has been reversed, not to the refund
- * itself — the refund's own outcome is `succeeded`, `pending` or `failed`.
- */
-export const LEDGER_OUTCOMES = [
-  'succeeded',
-  'pending',
-  'refunded',
-  'failed',
-] as const;
 export type LedgerOutcome = (typeof LEDGER_OUTCOMES)[number];
 
 export interface LedgerEntry {

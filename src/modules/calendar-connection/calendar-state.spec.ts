@@ -1,10 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
-import {
-  STATE_PATTERN,
-  formatState,
-  parseState,
-  sha256hex,
-} from './calendar-state';
+import { formatState, parseState, sha256hex } from './calendar-state';
+import { STATE_PATTERN } from '../../common/constants/calendar-connection.constants';
 
 const NONCE = randomBytes(32).toString('base64url');
 

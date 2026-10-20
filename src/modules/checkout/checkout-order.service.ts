@@ -17,6 +17,7 @@ import { ticketsUrlFor } from './ticket-links';
 import type { ConfirmOrderDto } from './dto/confirm-order.dto';
 import type { GuestOrderDto } from './dto/guest-order.dto';
 import type { OrderPlacedDto } from './dto/order-placed.dto';
+import { ORDER_NOT_FOUND } from '../../common/constants/checkout.constants';
 
 /**
  * Present only when an ORGANIZER placed this booking themselves (US-REG-03),
@@ -29,31 +30,6 @@ export interface OrganizerEntry {
   createdBy: string;
   notify: boolean;
 }
-
-/**
- * Placing the registration (US-DISC-06): one order, one ticket per admission,
- * exactly once.
- *
- * The summary is re-quoted here rather than taken from the request, so what is
- * charged is what the tier and the code are worth at this instant — not what the
- * page showed some minutes ago. Everything then happens inside
- * `CheckoutRepository.placeOrder`'s single transaction, which is also where the
- * confirmation event is written, so an attendee can never end up with a ticket
- * and no email or an email and no ticket.
- *
- * A free order confirms immediately and its tickets are issued. A paid one is
- * placed as `pending` with its seats still held, and the tickets are minted when
- * the payment settles (US-DISC-05) — so nobody holds a QR for something they
- * have not paid for.
- *
- * On an event that requires approval (US-REG-02) no order is ticketed here: a
- * free one is placed waiting for the organizer with its places counted, and a
- * paid one is placed for payment exactly as above — it starts waiting when the
- * money lands. The tickets and the confirmation come with the approval.
- */
-/** Said for a bad id and for somebody else's alike — the two must not be
- *  distinguishable, or the endpoint becomes a way to probe for orders. */
-const ORDER_NOT_FOUND = 'That order could not be found.';
 
 @Injectable()
 export class CheckoutOrderService {

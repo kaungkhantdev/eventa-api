@@ -7,9 +7,10 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
-import { MAX_MESSAGE_LENGTH } from '../invitations.types';
-
-const MAX_NAME = 120;
+import {
+  MAX_MESSAGE_LENGTH,
+  MAX_NAME,
+} from '../../../common/constants/invitations.constants';
 
 /** Invite one named person to one event (US-REG-06). */
 export class SendInviteDto {

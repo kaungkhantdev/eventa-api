@@ -8,10 +8,11 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-
-const MAX_LIMIT = 100;
-const DEFAULT_LIMIT = 24;
-const MAX_SEARCH = 120;
+import {
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+  MAX_SEARCH,
+} from '../../../common/constants/event-program.constants';
 
 /** Narrow the speaker directory (US-PROG-08). */
 export class ListSpeakersDto {

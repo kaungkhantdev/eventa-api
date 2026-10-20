@@ -27,15 +27,10 @@ import type {
   NewMeeting,
   MeetingPatch,
 } from './meetings.types';
-
-/** Today in BANGKOK, decided by the database so every row is judged alike. */
-const TODAY = sql`(now() AT TIME ZONE 'Asia/Bangkok')::date`;
-
-/**
- * A cancelled meeting no longer counts toward Today or Upcoming (US-MTG-06).
- * It stays on record under All, and under Past once its date has gone by.
- */
-const NOT_CANCELLED = ne(meetings.status, 'cancelled');
+import {
+  NOT_CANCELLED,
+  TODAY,
+} from '../../common/constants/meetings.constants';
 
 /**
  * Data access for meetings (E12).

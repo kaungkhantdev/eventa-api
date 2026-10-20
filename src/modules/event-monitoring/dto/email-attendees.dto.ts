@@ -12,7 +12,7 @@ import {
 import {
   INSTANT_WITH_ZONE,
   INSTANT_WITH_ZONE_MESSAGE,
-} from '../../announcements/announcement-schedule';
+} from '../../../common/constants/announcements.constants';
 
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;

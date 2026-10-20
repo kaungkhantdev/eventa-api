@@ -1,5 +1,4 @@
-/** Where an attendee opens an order's tickets on the public site. */
-const TICKETS_PATH = '/my/tickets/orders';
+import { TICKETS_PATH } from '../../common/constants/checkout.constants';
 
 /**
  * The ABSOLUTE link the confirmation email points at. Built here, from

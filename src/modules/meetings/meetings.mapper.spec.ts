@@ -1,6 +1,6 @@
-import { PHONE_LOCATION } from './meeting-schedule';
 import { toMeetingEntry } from './meetings.mapper';
 import type { MeetingRow } from './meetings.types';
+import { PHONE_LOCATION } from '../../common/constants/meetings.constants';
 
 const NOW = new Date('2026-08-07T09:00:00Z'); // 16:00 Bangkok
 

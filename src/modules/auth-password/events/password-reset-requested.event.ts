@@ -1,8 +1,5 @@
 import type { OutboxEventInput } from '../../platform/outbox.port';
-
-/** Routing key for a password-reset email (consumed by eventa-worker). */
-export const IDENTITY_PASSWORD_RESET_REQUESTED =
-  'identity.password_reset_requested';
+import { IDENTITY_PASSWORD_RESET_REQUESTED } from '../../../common/constants/auth-password.constants';
 
 export interface PasswordResetRequestedInput {
   organizationId: number;

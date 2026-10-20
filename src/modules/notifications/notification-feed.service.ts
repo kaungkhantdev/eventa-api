@@ -11,6 +11,10 @@ import { PaymentFeedPort } from './ports/payment-feed.port';
 import { PayoutFeedPort } from './ports/payout-feed.port';
 import type { FeedItem, FeedWindow } from './ports/notification-feed.types';
 import { RegistrationFeedPort } from './ports/registration-feed.port';
+import {
+  FEED_LIMIT,
+  FEED_WINDOW_DAYS,
+} from '../../common/constants/notifications.constants';
 
 /**
  * Triage everything happening across the workspace in one feed (US-MSG-03).
@@ -25,11 +29,6 @@ import { RegistrationFeedPort } from './ports/registration-feed.port';
  * read" moves it, and unread is everything after it. That is the whole of the
  * read model, and it is why the unread count survives a reload.
  */
-
-/** How far back the feed looks. Older activity belongs to the modules' own screens. */
-export const FEED_WINDOW_DAYS = 30;
-/** The most items the feed will carry, newest first. */
-export const FEED_LIMIT = 100;
 
 export interface FeedItemView extends FeedItem {
   unread: boolean;

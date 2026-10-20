@@ -7,10 +7,10 @@ import {
   RedemptionLedgerPort,
   type Redemption,
 } from '../checkout/ports/redemption-ledger.port';
-
-/** A redemption limit of 0 means unlimited — mirrors `DiscountsPolicy`. */
-const UNLIMITED_REDEMPTIONS = 0;
-const REDEMPTION_LIMIT_REACHED = 'This code has reached its redemption limit.';
+import {
+  REDEMPTION_LIMIT_REACHED,
+  UNLIMITED_REDEMPTIONS,
+} from '../../common/constants/discounts.constants';
 
 /**
  * Discounts' implementation of Checkout's ledger: the row set that

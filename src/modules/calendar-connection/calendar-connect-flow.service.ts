@@ -8,19 +8,16 @@ import type { AuthContext } from '../auth/auth.types';
 import { MeetingsService } from '../meetings/meetings.service';
 import { CalendarConnectionRepository } from './calendar-connection.repository';
 import type { PendingState } from './calendar-connection.types';
-import {
-  CALENDAR_EVENTS_SCOPE,
-  MANAGE_INTEGRATIONS,
-} from './calendar-provider';
 import type { ConnectOutcome } from './calendar-return-url';
 import { formatState, parseState, sha256hex } from './calendar-state';
 import type { CalendarConnectStartDto } from './dto/calendar-connection.dto';
 import { type GoogleGrant, GoogleOAuthPort } from './ports/google-oauth.port';
-
-const NOT_CONFIGURED = "Google Calendar isn't set up on this server yet.";
-
-/** 32 random bytes as base64url: 43 characters, 256 bits. */
-const RANDOM_BYTES = 32;
+import {
+  CALENDAR_EVENTS_SCOPE,
+  MANAGE_INTEGRATIONS,
+  NOT_CONFIGURED,
+  RANDOM_BYTES,
+} from '../../common/constants/calendar-connection.constants';
 
 /** What Google echoes back to the callback — untrusted, possibly arrays. */
 export interface CallbackQuery {

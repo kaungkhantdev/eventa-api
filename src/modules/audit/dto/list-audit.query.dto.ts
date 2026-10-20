@@ -10,19 +10,13 @@ import {
   Min,
   ValidateIf,
 } from 'class-validator';
-import { auditTypeEnum } from '../../../db/schema';
+import { type AuditSubjectType, type AuditType } from '../audit-subject';
 import {
   AUDIT_SUBJECT_TYPES,
-  type AuditSubjectType,
-  type AuditType,
-} from '../audit-subject';
-
-const MAX_LIMIT = 200;
-/** The act labels, read off the schema enum — never a re-typed list. */
-const TYPES = auditTypeEnum.enumValues;
-
-const SUBJECT_PAIR =
-  'Send subjectType and subjectId together — half a subject matches nothing in particular.';
+  MAX_LIMIT,
+  SUBJECT_PAIR,
+  TYPES,
+} from '../../../common/constants/audit.constants';
 
 /**
  * Page, date range, act and subject filters for the audit log (US-SET-05, and

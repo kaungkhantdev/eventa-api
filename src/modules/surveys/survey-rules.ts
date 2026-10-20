@@ -1,5 +1,9 @@
 import { DomainException } from '../../common/errors/domain.exception';
 import type { surveyQuestionTypeEnum, surveyStatusEnum } from '../../db/schema';
+import {
+  MAX_NPS_QUESTIONS,
+  MIN_OPTIONS,
+} from '../../common/constants/surveys.constants';
 
 export type SurveyStatus = (typeof surveyStatusEnum.enumValues)[number];
 export type SurveyQuestionType =
@@ -15,15 +19,6 @@ export interface DraftSurvey {
   title: string;
   questions: DraftQuestion[];
 }
-
-/** A choice between one thing is not a choice. */
-const MIN_OPTIONS = 2;
-
-/**
- * One recommendation question per survey: a second would count each person
- * twice in that survey's NPS.
- */
-const MAX_NPS_QUESTIONS = 1;
 
 /**
  * Whether a survey can actually be answered (US-MSG-09).

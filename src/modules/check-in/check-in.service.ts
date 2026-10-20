@@ -17,6 +17,11 @@ import type {
   ScanResult,
 } from './check-in.types';
 import { CheckInEventPort } from './ports/check-in-event.port';
+import {
+  DENIED_STATUSES,
+  DOOR_SHUT,
+  NEVER_ADMITTED,
+} from '../../common/constants/check-in.constants';
 
 export interface ScanInput {
   qrToken: string;
@@ -28,13 +33,6 @@ export interface ManualAdmitInput {
   method?: CheckInMethod;
   stationId?: string;
 }
-
-const DOOR_SHUT =
-  'Check-in is not open for this event yet — or has already closed.';
-const NEVER_ADMITTED = 'That ticket has not been checked in.';
-
-/** A ticket in one of these states is not entitled to entry. */
-const DENIED_STATUSES = new Set(['void', 'refunded', 'transferred']);
 
 /**
  * The door (US-REG-11/12/13): admitting one person per ticket, however the

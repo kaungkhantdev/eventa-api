@@ -6,13 +6,13 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { BookingClaimTokenDto } from './booking-claim-token.dto';
 import {
   PASSWORD_MAX_LENGTH,
   PASSWORD_MIN_LENGTH,
   PASSWORD_PATTERN,
   PASSWORD_RULE_MESSAGE,
-} from '../../auth-password/auth-password.policy';
-import { BookingClaimTokenDto } from './booking-claim-token.dto';
+} from '../../../common/constants/auth-password.constants';
 
 /**
  * Create the account from the emailed link (US-DISC-15): the link, a password

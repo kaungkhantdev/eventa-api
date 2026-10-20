@@ -1,24 +1,19 @@
 import type { ConfigService } from '@nestjs/config';
 import type { Env } from '../../config/env.validation';
-import { CALENDAR_SCOPES, redirectUriOf } from './calendar-provider';
+import { redirectUriOf } from './calendar-provider';
 import {
   type GoogleGrant,
   GoogleOAuthError,
   GoogleOAuthPort,
 } from './ports/google-oauth.port';
-
-const AUTHORIZE_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
-const TOKEN_URL = 'https://oauth2.googleapis.com/token';
-const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
-
-/**
- * How long one call to Google may hold the request. The callback is a browser
- * waiting on a redirect and disconnect is an Admin waiting on a modal; ten
- * seconds is already long for either.
- */
-const REQUEST_TIMEOUT_MS = 10_000;
-
-const FORM = { 'Content-Type': 'application/x-www-form-urlencoded' };
+import {
+  AUTHORIZE_URL,
+  CALENDAR_SCOPES,
+  FORM,
+  REQUEST_TIMEOUT_MS,
+  REVOKE_URL,
+  TOKEN_URL,
+} from '../../common/constants/calendar-connection.constants';
 
 /**
  * Just enough of `fetch` to post one form and read one JSON body. Injected so

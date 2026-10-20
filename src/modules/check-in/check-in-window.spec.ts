@@ -1,8 +1,8 @@
+import { isCheckInOpen } from './check-in-window';
 import {
   CHECKIN_GRACE_AFTER_END_MS,
   CHECKIN_OPENS_BEFORE_START_MS,
-  isCheckInOpen,
-} from './check-in-window';
+} from '../../common/constants/check-in.constants';
 
 const START = new Date('2026-09-01T10:00:00Z');
 const END = new Date('2026-09-01T18:00:00Z');

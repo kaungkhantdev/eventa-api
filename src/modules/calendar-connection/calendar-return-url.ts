@@ -1,8 +1,6 @@
+import { INTEGRATIONS_PATH } from '../../common/constants/calendar-connection.constants';
 /** How a connect attempt ended, as the web's toast reads it (US-MTG-08). */
 export type ConnectOutcome = 'connected' | 'denied' | 'failed';
-
-/** The web route of Settings → Integrations. */
-const INTEGRATIONS_PATH = '/admin/settings-integrations';
 
 const OUTCOMES: ReadonlySet<string> = new Set<ConnectOutcome>([
   'connected',

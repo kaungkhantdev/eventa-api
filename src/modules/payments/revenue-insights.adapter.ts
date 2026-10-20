@@ -8,9 +8,7 @@ import {
   type RevenuePoint,
   type RevenueTotals,
 } from '../dashboard/ports/revenue-insights.port';
-
-const PAID = 'paid';
-const FAILED = 'failed';
+import { FAILED, PAID } from '../../common/constants/payments.constants';
 
 /**
  * Payments' implementation of the Dashboard-owned revenue port (US-DASH-08/09),

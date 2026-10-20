@@ -5,9 +5,9 @@ import { PermissionsService } from '../access/permissions.service';
 import type { AuthContext } from '../auth/auth.types';
 import { toCalendarConnectionDto } from './calendar-connection.mapper';
 import { CalendarConnectionRepository } from './calendar-connection.repository';
-import { MANAGE_INTEGRATIONS } from './calendar-provider';
 import type { CalendarConnectionDto } from './dto/calendar-connection.dto';
 import { GoogleOAuthPort } from './ports/google-oauth.port';
+import { MANAGE_INTEGRATIONS } from '../../common/constants/calendar-connection.constants';
 
 /**
  * Reading and ending the workspace Google Calendar connection (US-MTG-08).

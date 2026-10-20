@@ -7,10 +7,10 @@ import {
 } from '../registrations/ports/registration-refund.port';
 import { PaymentsRepository, type PaymentRow } from './payments.repository';
 import { RefundsService } from './refunds.service';
-
-const NO_PAYMENT = 'There is no payment on this registration to refund.';
-const REFUSED_BEFORE =
-  'An earlier attempt to refund it was refused by the provider.';
+import {
+  NO_PAYMENT,
+  REFUSED_BEFORE,
+} from '../../common/constants/payments.constants';
 
 /**
  * One refund per PAYMENT on a rejected registration, however often the

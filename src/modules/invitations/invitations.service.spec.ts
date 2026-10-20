@@ -2,10 +2,12 @@ import type { ConfigService } from '@nestjs/config';
 import type { Clock } from '../../common/time/clock';
 import type { AuthContext } from '../auth/auth.types';
 import type { EventsService } from '../events/events.service';
-import { INVITE_SENT_ROUTING_KEY } from './events/invite-sent.event';
 import type { InvitationsRepository } from './invitations.repository';
 import { InvitationsService } from './invitations.service';
-import { INVITE_DEDUPE_WINDOW_MS } from './invitations.types';
+import {
+  INVITE_DEDUPE_WINDOW_MS,
+  INVITE_SENT_ROUTING_KEY,
+} from '../../common/constants/invitations.constants';
 
 const ORG = 7;
 const EVENT = '11111111-1111-4111-8111-111111111111';

@@ -1,8 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsString, MaxLength, MinLength } from 'class-validator';
-
-const MIN_KEY = 8;
-const MAX_KEY = 128;
+import { MAX_KEY, MIN_KEY } from '../../../common/constants/payments.constants';
 
 /**
  * Issue a full refund (US-FIN-02). Note what is absent: an amount. Full refunds

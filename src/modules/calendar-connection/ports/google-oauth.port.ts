@@ -1,3 +1,4 @@
+import { OAUTH_ERROR_CODE } from '../../../common/constants/calendar-connection.constants';
 /**
  * What a completed Google consent hands back (US-MTG-08). Access tokens are
  * deliberately absent: this API never calls the Calendar itself, and an
@@ -11,9 +12,6 @@ export interface GoogleGrant {
   /** What the Admin actually ticked, which may be less than was asked for. */
   grantedScopes: string[];
 }
-
-/** An OAuth `error` code is repeated only if it looks like one. */
-const OAUTH_ERROR_CODE = /^[a-z_]{1,40}$/;
 
 /**
  * Google refused a token-endpoint call.

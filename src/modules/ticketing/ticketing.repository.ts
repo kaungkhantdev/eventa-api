@@ -21,8 +21,7 @@ import type {
   TicketRow,
   TicketStatusCounts,
 } from './ticketing.types';
-
-const DEFAULT_VAT_RATE = 0.07;
+import { DEFAULT_VAT_RATE } from '../../common/constants/ticketing.constants';
 
 /** Data access for the Ticketing context. All reads/writes are tenant-scoped. */
 @Injectable()

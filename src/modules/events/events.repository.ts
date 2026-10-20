@@ -27,32 +27,11 @@ import type {
   ListEventsOptions,
   NewEventValues,
 } from './events.types';
-
-/** Statuses whose event is live to the public — a draft or cancelled one is not. */
-const LIVE_STATUSES = ['planned', 'upcoming', 'live'] as const;
-
-/** The `CheckoutEvent` projection, shared by the public and organizer lookups. */
-const CHECKOUT_EVENT_COLUMNS = {
-  id: events.id,
-  organizationId: events.organizationId,
-  slug: events.slug,
-  name: events.name,
-  startAt: events.startAt,
-  endAt: events.endAt,
-  timezone: events.timezone,
-  isOnline: events.isOnline,
-  onlineNote: events.onlineNote,
-  venueName: events.venueName,
-  venueAddress: events.venueAddress,
-  city: events.city,
-  coverImage: events.coverImage,
-  organizerName: events.organizerName,
-  seatingMode: events.seatingMode,
-  waitlistEnabled: events.waitlistEnabled,
-  requiresApproval: events.requiresApproval,
-};
-/** Only a public event is buyable by an anonymous visitor. */
-const PUBLIC_VISIBILITY = 'public';
+import {
+  CHECKOUT_EVENT_COLUMNS,
+  LIVE_STATUSES,
+  PUBLIC_VISIBILITY,
+} from '../../common/constants/events.constants';
 
 /** Data access for the Events context. All reads/writes are tenant-scoped (RLS). */
 @Injectable()

@@ -11,11 +11,10 @@ import {
   speakers,
   ticketTypes,
 } from '../../db/schema';
-
-/** Statuses whose page is live to the public — a draft or cancelled event is not. */
-const LIVE_STATUSES = ['planned', 'upcoming', 'live'] as const;
-/** Only a public event is reachable by link; unlisted/private are not. */
-const PUBLIC_VISIBILITY = 'public';
+import {
+  LIVE_STATUSES,
+  PUBLIC_VISIBILITY,
+} from '../../common/constants/public-pages.constants';
 
 /**
  * Reads for the ANONYMOUS public page. Deliberately not tenant-scoped: a visitor
