@@ -70,6 +70,7 @@ pnpm install
 pnpm start:dev         # watch dev server (nest start --watch); listens on $PORT or 3000
 pnpm build             # nest build → dist/  (nest-cli deleteOutDir wipes dist/ first)
 pnpm start:prod        # node dist/main
+pnpm migrate:prod      # node dist/db/migrate.main.js — the image's migration entry (needs DATABASE_URL)
 pnpm lint              # eslint --fix (type-aware; also applies prettier)
 pnpm typecheck         # tsc --noEmit over src + test (+ drizzle.config.ts) — the only type check the specs get
 pnpm format            # prettier --write
@@ -179,7 +180,9 @@ the development guide when implementing:
   the relay ships it to RabbitMQ and a consumer (in `eventa-worker`) handles it. **Never dual-write.**
 - **Drizzle ORM** (SQL-first). Schema in `src/db/schema` (TS) → `pnpm drizzle-kit generate --name <x>`
   diffs it to **plain-SQL** migrations (reviewed in the PR) → `pnpm migrate` applies them, each in its own
-  transaction (`scripts/migrate.ts` → `src/db/migrator.ts`). **Never `drizzle-kit migrate` directly**: it applies
+  transaction (`scripts/migrate.ts` → `src/db/migration-runner.ts` → `src/db/migrator.ts`). The production
+  image runs the same runner compiled, `node dist/db/migrate.main.js`, which must never import drizzle-kit,
+  tsx or `drizzle.config.ts` (devDependencies; the image has none). **Never `drizzle-kit migrate` directly**: it applies
   every pending migration in ONE transaction, Postgres refuses to use an enum value in the transaction that
   added it, and 0052 uses keys that 0034/0038/0042 add — so on a fresh database (CI, a new machine, a first
   deploy) the whole batch rolls back to an empty schema. The journal is drizzle's own, so either tool can
