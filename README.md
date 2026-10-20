@@ -9,7 +9,7 @@ side effects.
 
 ## Prerequisites
 
-- **Node.js 20+** (the tooling uses `node --env-file`)
+- **Node.js 24** — what CI and the image run (`pnpm seed` uses `--env-file-if-exists`, Node 22.9+)
 - **pnpm** — `npm i -g pnpm`
 - **Docker** + Docker Compose — runs Postgres, Redis, and RabbitMQ locally
 
