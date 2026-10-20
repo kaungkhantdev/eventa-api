@@ -5,8 +5,10 @@ import {
   asc,
   eq,
   gt,
+  gte,
   ilike,
   inArray,
+  isNotNull,
   isNull,
   lt,
   ne,
@@ -176,6 +178,47 @@ export class MeetingsRepository {
       if (!row) return null;
       await this.outbox.enqueueIn(tx, buildSync(row));
       return row;
+    });
+  }
+
+  /**
+   * Put every not-yet-synced meeting from today on back in the queue, in ONE
+   * transaction with its outbox events (US-MTG-08, US-MTG-06).
+   *
+   * "Not synced" covers saved while disconnected (`not_connected`), given up
+   * on (`failed`) and never answered (`pending` — a message published before
+   * the worker first bound this routing key is dropped by RabbitMQ while its
+   * outbox row reads as published). A cancelled meeting is included only if a
+   * calendar already holds it, because there is nothing to withdraw
+   * otherwise. Past meetings are left alone: an invite for yesterday helps
+   * nobody. `updated_at` is touched like every other write, because the
+   * worker's write-back is conditional on it.
+   */
+  async resyncUnsynced(
+    organizationId: number,
+    buildSync: (row: MeetingRow) => OutboxEventInput,
+  ): Promise<number> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .update(meetings)
+        .set({ syncStatus: 'pending', syncError: null, updatedAt: new Date() })
+        .where(
+          and(
+            eq(meetings.organizationId, organizationId),
+            isNull(meetings.deletedAt),
+            ne(meetings.syncStatus, 'synced'),
+            gte(meetings.meetingDate, TODAY as never),
+            or(
+              eq(meetings.status, 'scheduled'),
+              isNotNull(meetings.externalEventId),
+            ),
+          ),
+        )
+        .returning();
+      for (const row of rows) {
+        await this.outbox.enqueueIn(tx, buildSync(row));
+      }
+      return rows.length;
     });
   }
 

@@ -73,6 +73,7 @@ describe('MeetingsService (US-MTG-03/04/05)', () => {
       cancel: jest.fn().mockResolvedValue(row({ status: 'cancelled' })),
       retrySync: jest.fn().mockResolvedValue(row()),
       findById: jest.fn().mockResolvedValue(row()),
+      resyncUnsynced: jest.fn().mockResolvedValue(3),
     } as unknown as jest.Mocked<MeetingsRepository>;
     events = {
       findForMeeting: jest.fn().mockResolvedValue({
@@ -200,7 +201,10 @@ describe('MeetingsService (US-MTG-03/04/05)', () => {
       expect(patch.location).toBe('QSNCC');
     });
 
-    it('keeps the link when the meeting stays video', async () => {
+    it('leaves the link alone when the meeting stays video', async () => {
+      // The worker writes the Meet link. A link read here, outside the
+      // update's transaction, could be older than one the worker has just
+      // written, so a video-to-video edit must not carry it at all.
       repo.findById.mockResolvedValue(row({ link: 'https://meet/abc' }));
       await service.reschedule(auth, ID, {
         version: 1,
@@ -208,7 +212,7 @@ describe('MeetingsService (US-MTG-03/04/05)', () => {
         endTime: '12:00',
       });
       const [, , , patch] = repo.reschedule.mock.calls[0];
-      expect(patch.link).toBe('https://meet/abc');
+      expect(patch).not.toHaveProperty('link');
     });
 
     it('refuses to edit a cancelled meeting', async () => {
@@ -289,6 +293,61 @@ describe('MeetingsService (US-MTG-03/04/05)', () => {
       repo.findById.mockResolvedValue(null);
       await expect(service.retrySync(auth, ID)).rejects.toMatchObject({
         code: 'NOT_FOUND',
+      });
+    });
+  });
+
+  /**
+   * On connect, everything saved while the calendar was away goes out
+   * (US-MTG-08 AC2 "until the calendar is reconnected", US-MTG-06 AC1).
+   */
+  describe('re-sending unsynced meetings (US-MTG-08)', () => {
+    const buildSyncOf = async () => {
+      await service.resyncUnsynced(ORG);
+      return repo.resyncUnsynced.mock.calls[0][1];
+    };
+
+    it('asks the repository for this workspace and reports how many', async () => {
+      await expect(service.resyncUnsynced(ORG)).resolves.toBe(3);
+      expect(repo.resyncUnsynced.mock.calls[0][0]).toBe(ORG);
+    });
+
+    it('creates an invite the calendar never got', async () => {
+      const buildSync = await buildSyncOf();
+      expect(buildSync(row({ externalEventId: null })).payload).toMatchObject({
+        intent: 'create',
+        needsLink: true,
+      });
+    });
+
+    it('updates an invite that already exists', async () => {
+      const buildSync = await buildSyncOf();
+      expect(
+        buildSync(row({ externalEventId: 'abc123' })).payload,
+      ).toMatchObject({ intent: 'update', needsLink: true });
+    });
+
+    it('asks for no Meet link for a meeting that is not video', async () => {
+      const buildSync = await buildSyncOf();
+      expect(
+        buildSync(row({ mode: 'In person', location: 'QSNCC' })).payload,
+      ).toMatchObject({ intent: 'create', needsLink: false });
+    });
+
+    it('withdraws a meeting cancelled while disconnected', async () => {
+      const buildSync = await buildSyncOf();
+      expect(
+        buildSync(row({ status: 'cancelled', externalEventId: 'abc123' }))
+          .payload,
+      ).toMatchObject({ intent: 'cancel', needsLink: false });
+    });
+
+    it('routes each one as a meeting sync', async () => {
+      const buildSync = await buildSyncOf();
+      expect(buildSync(row())).toMatchObject({
+        routingKey: 'meeting.sync_requested',
+        aggregateId: ID,
+        organizationId: ORG,
       });
     });
   });
