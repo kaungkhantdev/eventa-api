@@ -16,12 +16,14 @@ export const SATANG_PER_BAHT = 100;
 export const CSV_HEADER =
   'date,reference,event,method,status,amount_baht,vat_baht';
 
-export const WIDTH = 600;
+/** The VAT receipt SVG's canvas. */
+export const RECEIPT_WIDTH = 600;
 
-export const HEIGHT = 760;
+export const RECEIPT_HEIGHT = 760;
 
-export const LEFT = 60;
+/** Where the receipt's text starts, and where right-aligned text ends. */
+export const RECEIPT_LEFT_X = 60;
 
-export const RIGHT = WIDTH - 60;
+export const RECEIPT_RIGHT_X = RECEIPT_WIDTH - 60;
 
 export const PERCENT = 100;

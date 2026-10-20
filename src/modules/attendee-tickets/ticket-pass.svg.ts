@@ -1,11 +1,11 @@
 import { escapeXml } from '../../common/xml/escape-xml';
 import type { TicketPassDto } from './dto/my-events.dto';
 import {
-  HEIGHT,
   QR_SIZE,
   QR_X,
   QR_Y,
-  WIDTH,
+  TICKET_PASS_HEIGHT,
+  TICKET_PASS_WIDTH,
 } from '../../common/constants/attendee-tickets.constants';
 
 /**
@@ -24,16 +24,16 @@ export function renderPassSvg(pass: TicketPassDto, qrSvg: string): string {
         .filter(Boolean)
         .join('-')}`
     : 'General admission';
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}" font-family="Helvetica, Arial, sans-serif">
-  <rect width="${WIDTH}" height="${HEIGHT}" fill="#ffffff" stroke="#111111" stroke-width="2" rx="24"/>
-  <text x="${WIDTH / 2}" y="80" text-anchor="middle" font-size="30" font-weight="bold" fill="#111111">${escapeXml(pass.eventName)}</text>
-  <text x="${WIDTH / 2}" y="130" text-anchor="middle" font-size="20" fill="#333333">${escapeXml(when)}</text>
-  <text x="${WIDTH / 2}" y="165" text-anchor="middle" font-size="20" fill="#333333">${escapeXml(where)}</text>
-  <text x="${WIDTH / 2}" y="225" text-anchor="middle" font-size="24" font-weight="bold" fill="#111111">${escapeXml(pass.ticketLabel ?? 'Ticket')}</text>
-  <text x="${WIDTH / 2}" y="260" text-anchor="middle" font-size="18" fill="#333333">${escapeXml(seat)}</text>
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${TICKET_PASS_WIDTH}" height="${TICKET_PASS_HEIGHT}" viewBox="0 0 ${TICKET_PASS_WIDTH} ${TICKET_PASS_HEIGHT}" font-family="Helvetica, Arial, sans-serif">
+  <rect width="${TICKET_PASS_WIDTH}" height="${TICKET_PASS_HEIGHT}" fill="#ffffff" stroke="#111111" stroke-width="2" rx="24"/>
+  <text x="${TICKET_PASS_WIDTH / 2}" y="80" text-anchor="middle" font-size="30" font-weight="bold" fill="#111111">${escapeXml(pass.eventName)}</text>
+  <text x="${TICKET_PASS_WIDTH / 2}" y="130" text-anchor="middle" font-size="20" fill="#333333">${escapeXml(when)}</text>
+  <text x="${TICKET_PASS_WIDTH / 2}" y="165" text-anchor="middle" font-size="20" fill="#333333">${escapeXml(where)}</text>
+  <text x="${TICKET_PASS_WIDTH / 2}" y="225" text-anchor="middle" font-size="24" font-weight="bold" fill="#111111">${escapeXml(pass.ticketLabel ?? 'Ticket')}</text>
+  <text x="${TICKET_PASS_WIDTH / 2}" y="260" text-anchor="middle" font-size="18" fill="#333333">${escapeXml(seat)}</text>
   ${embedQr(qrSvg)}
-  <text x="${WIDTH / 2}" y="${QR_Y + QR_SIZE + 50}" text-anchor="middle" font-size="20" font-weight="bold" fill="#111111">${escapeXml(pass.reference)}</text>
-  <text x="${WIDTH / 2}" y="${QR_Y + QR_SIZE + 85}" text-anchor="middle" font-size="16" fill="#555555">Admission ${escapeXml(pass.admissionNumber)}${pass.holderName ? ` · ${escapeXml(pass.holderName)}` : ''}</text>
+  <text x="${TICKET_PASS_WIDTH / 2}" y="${QR_Y + QR_SIZE + 50}" text-anchor="middle" font-size="20" font-weight="bold" fill="#111111">${escapeXml(pass.reference)}</text>
+  <text x="${TICKET_PASS_WIDTH / 2}" y="${QR_Y + QR_SIZE + 85}" text-anchor="middle" font-size="16" fill="#555555">Admission ${escapeXml(pass.admissionNumber)}${pass.holderName ? ` · ${escapeXml(pass.holderName)}` : ''}</text>
 </svg>`;
 }
 

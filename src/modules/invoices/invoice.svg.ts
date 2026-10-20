@@ -2,11 +2,11 @@ import { formatBaht } from '../../common/money/baht';
 import { escapeXml } from '../../common/xml/escape-xml';
 import type { InvoiceDocumentRow } from './invoices.types';
 import {
-  HEIGHT,
-  LEFT,
+  INVOICE_LEFT_X,
+  INVOICE_PAGE_HEIGHT,
+  INVOICE_PAGE_WIDTH,
+  INVOICE_RIGHT_X,
   PERCENT,
-  RIGHT,
-  WIDTH,
 } from '../../common/constants/invoices.constants';
 
 /**
@@ -22,20 +22,20 @@ export function renderInvoiceSvg(row: InvoiceDocumentRow): string {
   const vatPercent = Math.round(row.vatRate * PERCENT);
   const voidBanner =
     row.status === 'void'
-      ? `<text x="${WIDTH / 2}" y="300" text-anchor="middle" font-size="52" font-weight="bold" fill="#b91c1c" opacity="0.25" transform="rotate(-18 ${WIDTH / 2} 300)">VOID</text>`
+      ? `<text x="${INVOICE_PAGE_WIDTH / 2}" y="300" text-anchor="middle" font-size="52" font-weight="bold" fill="#b91c1c" opacity="0.25" transform="rotate(-18 ${INVOICE_PAGE_WIDTH / 2} 300)">VOID</text>`
       : '';
   const paid = row.paidVia
     ? `${row.paidVia}${row.paidOn ? ` · ${row.paidOn}` : ''}`
     : 'Unpaid';
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}" font-family="Helvetica, Arial, sans-serif">
-  <rect width="${WIDTH}" height="${HEIGHT}" fill="#ffffff"/>
-  <text x="${LEFT}" y="72" font-size="24" font-weight="bold" fill="#111111">TAX INVOICE</text>
-  <text x="${RIGHT}" y="72" text-anchor="end" font-size="18" font-weight="bold" fill="#111111">${escapeXml(row.number)}</text>
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${INVOICE_PAGE_WIDTH}" height="${INVOICE_PAGE_HEIGHT}" viewBox="0 0 ${INVOICE_PAGE_WIDTH} ${INVOICE_PAGE_HEIGHT}" font-family="Helvetica, Arial, sans-serif">
+  <rect width="${INVOICE_PAGE_WIDTH}" height="${INVOICE_PAGE_HEIGHT}" fill="#ffffff"/>
+  <text x="${INVOICE_LEFT_X}" y="72" font-size="24" font-weight="bold" fill="#111111">TAX INVOICE</text>
+  <text x="${INVOICE_RIGHT_X}" y="72" text-anchor="end" font-size="18" font-weight="bold" fill="#111111">${escapeXml(row.number)}</text>
 
-  <text x="${LEFT}" y="118" font-size="15" font-weight="bold" fill="#111111">${escapeXml(row.sellerName)}</text>
+  <text x="${INVOICE_LEFT_X}" y="118" font-size="15" font-weight="bold" fill="#111111">${escapeXml(row.sellerName)}</text>
   ${sellerLine(140, row.sellerAddress)}
   ${sellerLine(160, row.sellerTaxId ? `Tax ID ${row.sellerTaxId}` : null)}
-  <line x1="${LEFT}" y1="190" x2="${RIGHT}" y2="190" stroke="#dddddd"/>
+  <line x1="${INVOICE_LEFT_X}" y1="190" x2="${INVOICE_RIGHT_X}" y2="190" stroke="#dddddd"/>
 
   ${field(222, 'Billed to', row.buyerName)}
   ${field(246, 'Email', row.buyerEmail)}
@@ -45,32 +45,32 @@ export function renderInvoiceSvg(row: InvoiceDocumentRow): string {
   ${field(342, 'Payment', paid)}
   ${voidBanner}
 
-  <line x1="${LEFT}" y1="392" x2="${RIGHT}" y2="392" stroke="#111111"/>
-  <text x="${LEFT}" y="416" font-size="13" fill="#777777">DESCRIPTION</text>
-  <text x="${RIGHT}" y="416" text-anchor="end" font-size="13" fill="#777777">AMOUNT</text>
-  <line x1="${LEFT}" y1="428" x2="${RIGHT}" y2="428" stroke="#dddddd"/>
-  <text x="${LEFT}" y="456" font-size="15" fill="#111111">Event registration — ${escapeXml(row.eventName)}</text>
-  <text x="${RIGHT}" y="456" text-anchor="end" font-size="15" fill="#111111">${formatBaht(row.subtotalSatang)}</text>
+  <line x1="${INVOICE_LEFT_X}" y1="392" x2="${INVOICE_RIGHT_X}" y2="392" stroke="#111111"/>
+  <text x="${INVOICE_LEFT_X}" y="416" font-size="13" fill="#777777">DESCRIPTION</text>
+  <text x="${INVOICE_RIGHT_X}" y="416" text-anchor="end" font-size="13" fill="#777777">AMOUNT</text>
+  <line x1="${INVOICE_LEFT_X}" y1="428" x2="${INVOICE_RIGHT_X}" y2="428" stroke="#dddddd"/>
+  <text x="${INVOICE_LEFT_X}" y="456" font-size="15" fill="#111111">Event registration — ${escapeXml(row.eventName)}</text>
+  <text x="${INVOICE_RIGHT_X}" y="456" text-anchor="end" font-size="15" fill="#111111">${formatBaht(row.subtotalSatang)}</text>
 
-  <line x1="${LEFT}" y1="492" x2="${RIGHT}" y2="492" stroke="#dddddd"/>
+  <line x1="${INVOICE_LEFT_X}" y1="492" x2="${INVOICE_RIGHT_X}" y2="492" stroke="#dddddd"/>
   ${amount(520, 'Subtotal (excl. VAT)', row.subtotalSatang)}
   ${amount(546, `VAT ${vatPercent}%`, row.vatAmountSatang)}
-  <line x1="${LEFT}" y1="568" x2="${RIGHT}" y2="568" stroke="#111111"/>
+  <line x1="${INVOICE_LEFT_X}" y1="568" x2="${INVOICE_RIGHT_X}" y2="568" stroke="#111111"/>
   ${amount(600, 'Total', row.amountSatang, true)}
 
-  <text x="${LEFT}" y="700" font-size="12" fill="#777777">Amounts are in Thai Baht. Payment terms: 14 days from the issue date.</text>
-  <text x="${LEFT}" y="720" font-size="12" fill="#777777">This document is a tax invoice issued under Thai VAT regulations.</text>
+  <text x="${INVOICE_LEFT_X}" y="700" font-size="12" fill="#777777">Amounts are in Thai Baht. Payment terms: 14 days from the issue date.</text>
+  <text x="${INVOICE_LEFT_X}" y="720" font-size="12" fill="#777777">This document is a tax invoice issued under Thai VAT regulations.</text>
 </svg>`;
 }
 
 function sellerLine(y: number, value: string | null): string {
   if (!value) return '';
-  return `<text x="${LEFT}" y="${y}" font-size="13" fill="#555555">${escapeXml(value)}</text>`;
+  return `<text x="${INVOICE_LEFT_X}" y="${y}" font-size="13" fill="#555555">${escapeXml(value)}</text>`;
 }
 
 function field(y: number, label: string, value: string): string {
-  return `<text x="${LEFT}" y="${y}" font-size="13" fill="#777777">${escapeXml(label)}</text>
-  <text x="${RIGHT}" y="${y}" text-anchor="end" font-size="14" fill="#111111">${escapeXml(value)}</text>`;
+  return `<text x="${INVOICE_LEFT_X}" y="${y}" font-size="13" fill="#777777">${escapeXml(label)}</text>
+  <text x="${INVOICE_RIGHT_X}" y="${y}" text-anchor="end" font-size="14" fill="#111111">${escapeXml(value)}</text>`;
 }
 
 function amount(
@@ -81,6 +81,6 @@ function amount(
 ): string {
   const weight = bold ? ' font-weight="bold"' : '';
   const size = bold ? 18 : 14;
-  return `<text x="${LEFT}" y="${y}" font-size="${size}"${weight} fill="#111111">${escapeXml(label)}</text>
-  <text x="${RIGHT}" y="${y}" text-anchor="end" font-size="${size}"${weight} fill="#111111">${formatBaht(satang)}</text>`;
+  return `<text x="${INVOICE_LEFT_X}" y="${y}" font-size="${size}"${weight} fill="#111111">${escapeXml(label)}</text>
+  <text x="${INVOICE_RIGHT_X}" y="${y}" text-anchor="end" font-size="${size}"${weight} fill="#111111">${formatBaht(satang)}</text>`;
 }

@@ -6,6 +6,16 @@ import {
   SENSITIVE_PERMISSIONS,
 } from '../../common/constants/access.constants';
 
+/**
+ * How a change to who-can-do-what is written to the audit trail (US-SET-05,
+ * US-SET-12, NFR-SUP-02): a member moved to another role, a role's grants
+ * edited, a role created.
+ *
+ * Every such entry is `type = 'perm'`. The who is the row's actor, the when its
+ * `occurred_at`, the from-where its IP; what this file decides is the words —
+ * a title naming what changed, and a `meta` line with the detail.
+ */
+
 /** The words of one entry. */
 export interface PermAuditText {
   title: string;

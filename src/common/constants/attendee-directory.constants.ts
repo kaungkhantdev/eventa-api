@@ -1,22 +1,12 @@
 /** The attendee-directory module's named constants. */
 
-/**
- * How a corrected attendee contact is written to the audit trail (US-REG-08).
- *
- * There is ONE mechanism here, not two. The story asks for the change to be
- * "recorded for audit" (AC1) and for an "Updated contact details" entry on the
- * profile's activity timeline (AC5), and in this codebase both are
- * `audit_events`: it is the only durable record of an act that no other table
- * remembers, and it is deliberately hard to erase (its `organizations`
- * reference is the schema's single `ON DELETE RESTRICT`). A second activity
- * table would be a parallel trail that could disagree with the first.
- *
- * The title is the story's own phrase, verbatim and unparameterised, so the
- * timeline entry and the workspace audit line read the same sentence and no
- * client has to match on prose that will be translated.
- */
+/** Every corrected-contact audit row is `type = 'attendee'` (US-REG-08). */
 export const CONTACT_AUDIT_TYPE = 'attendee' as const;
 
+/**
+ * The story's own phrase, verbatim and unparameterised — see
+ * `attendee-contact.audit.ts` before rewording it.
+ */
 export const CONTACT_AUDIT_TITLE = 'Updated contact details';
 
 export const NOT_FOUND = 'That attendee is not in this workspace.';

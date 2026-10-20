@@ -19,13 +19,14 @@ export const ISO_DATE_LOCALE = 'en-CA';
 export const MS_PER_DAY = 86_400_000;
 
 /** A4 portrait at 72dpi, so it prints as exactly one page. */
-export const WIDTH = 595;
+export const INVOICE_PAGE_WIDTH = 595;
 
-export const HEIGHT = 842;
+export const INVOICE_PAGE_HEIGHT = 842;
 
-export const LEFT = 56;
+/** Where the invoice's text starts, and where right-aligned text ends. */
+export const INVOICE_LEFT_X = 56;
 
-export const RIGHT = WIDTH - 56;
+export const INVOICE_RIGHT_X = INVOICE_PAGE_WIDTH - 56;
 
 export const PERCENT = 100;
 
@@ -53,9 +54,12 @@ export const EXPORT_HEADER = [
   'paid_on',
 ];
 
-export const VOID_PAID_NOTE = 'Paid — void it by refunding the payment.';
+/** The invoice list's hint for why Void is disabled on a paid row. */
+export const VOID_BLOCKED_PAID_HINT =
+  'Paid — void it by refunding the payment.';
 
-export const VOID_ALREADY = 'Already void.';
+/** The invoice list's hint for why Void is disabled on a void row. */
+export const VOID_BLOCKED_VOID_HINT = 'Already void.';
 
 export const AUDIT_TYPE = 'invoice' as const;
 
@@ -67,9 +71,11 @@ export const NO_AMOUNT =
 export const NO_BUYER_EMAIL =
   'This order has no buyer email, so the invoice has nobody to bill.';
 
+/** The 409 for voiding a paid invoice. */
 export const VOID_PAID =
   'A paid invoice cannot be voided — refund its payment instead, which voids it.';
 
+/** The 409 for voiding an invoice twice. */
 export const ALREADY_VOID = 'This invoice is already void.';
 
 /** `INV-2026-0001` — sequential per workspace per year, never reused. */

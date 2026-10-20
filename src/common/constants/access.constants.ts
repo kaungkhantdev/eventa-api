@@ -42,15 +42,7 @@ export const MAX_SEARCH = 120;
 /** Routing key for a teammate's join link (consumed by eventa-worker). */
 export const IDENTITY_MEMBER_INVITED = 'identity.member_invited';
 
-/**
- * How a change to who-can-do-what is written to the audit trail (US-SET-05,
- * US-SET-12, NFR-SUP-02): a member moved to another role, a role's grants
- * edited, a role created.
- *
- * Every such entry is `type = 'perm'`. The who is the row's actor, the when its
- * `occurred_at`, the from-where its IP; what this file decides is the words —
- * a title naming what changed, and a `meta` line with the detail.
- */
+/** Every permission-change audit row is `type = 'perm'`. */
 export const PERM_AUDIT_TYPE = 'perm' as const;
 
 /**

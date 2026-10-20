@@ -28,13 +28,7 @@ export const TIME_MESSAGE = 'Use a 24-hour time like 09:30.';
  */
 export const MEETING_SYNC_REQUESTED = 'meeting.sync_requested';
 
-/**
- * Which group a meeting falls into (US-MTG-01). DERIVED, never stored: a stored
- * bucket is wrong from the moment the Bangkok day turns, and would need a
- * nightly job to stay honest. The catalogue lists `meetings.bucket` as a
- * column; this is the same decision taken for invoice ageing and session
- * colour — compute what changes with the clock.
- */
+/** The groups a meeting is listed under (US-MTG-01), derived by `bucketFor`. */
 export const MEETING_BUCKETS = ['today', 'upcoming', 'past'] as const;
 
 /** Short enough for "Sync", long enough to rule out a stray keystroke. */

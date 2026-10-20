@@ -6,8 +6,8 @@ import type {
 } from './dto/list-invoices.dto';
 import type { InvoiceRow } from './invoices.types';
 import {
-  VOID_ALREADY,
-  VOID_PAID_NOTE,
+  VOID_BLOCKED_PAID_HINT,
+  VOID_BLOCKED_VOID_HINT,
 } from '../../common/constants/invoices.constants';
 
 /**
@@ -57,7 +57,7 @@ export function toInvoiceDetail(
 }
 
 function voidBlockedReason(status: InvoiceEntryDto['status']): string | null {
-  if (status === 'paid') return VOID_PAID_NOTE;
-  if (status === 'void') return VOID_ALREADY;
+  if (status === 'paid') return VOID_BLOCKED_PAID_HINT;
+  if (status === 'void') return VOID_BLOCKED_VOID_HINT;
   return null;
 }

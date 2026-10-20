@@ -1,4 +1,5 @@
 import { INTEGRATIONS_PATH } from '../../common/constants/calendar-connection.constants';
+
 /** How a connect attempt ended, as the web's toast reads it (US-MTG-08). */
 export type ConnectOutcome = 'connected' | 'denied' | 'failed';
 

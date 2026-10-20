@@ -39,8 +39,8 @@ export const REUSED_PASSWORD =
  * rule here so every surface enforces exactly the same minimum.
  *
  * US-SET-02 defines it: "at least 8 characters with a number and a symbol".
- * eventa-web's `passwordStrength.ts` mirrors it for the meter; change both
- * together.
+ * eventa-web's `src/lib/constants/auth.constants.ts` mirrors it for the meter
+ * (`MIN_PASSWORD_LENGTH`, `DIGIT`, `SYMBOL`); change both together.
  */
 export const PASSWORD_MIN_LENGTH = 8;
 

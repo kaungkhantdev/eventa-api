@@ -168,8 +168,8 @@ the development guide when implementing:
   helper used by more than one module belongs in `common/guards/`, `common/decorators/`, `common/util/`
   etc. — so a controller never imports from an unrelated domain module just to annotate a route
   (`JwtAuthGuard`, `PermissionsGuard`, `AdminGuard`, `AttendeeGuard`, `@CurrentAuth`, `@RequirePermissions`, `slugify`).
-  A module-local default belongs to the module (e.g. an event's slug fallback is a `const` in
-  `events.service.ts`, not a wrapper file that shadows the shared util).
+  A module-local helper belongs to the module, not to `common` (e.g. `events.service.ts` calls the shared
+  `slugify` with its own `EVENT_SLUG_FALLBACK` rather than adding a wrapper file that shadows the util).
 - **Multi-tenancy: scope every query by `organization_id`** *and* Postgres **RLS**
   (`SET LOCAL app.current_org` per transaction) — defence in depth.
 - **The consistency split is the core design decision.** Money/inventory (checkout, seat holds, ticket
@@ -327,12 +327,16 @@ flow. **The e2e suite is what proves the DI graph resolves — a green `tsc` doe
   `.conflict()`/`.validation()`) with a stable `ErrorCode`; never leak internals.
 - **Enums over magic strings** (`pgEnum`, `ErrorCode`); **constants over magic numbers**, kept in
   `src/common/constants/<module>.constants.ts` (one file per module, e.g. `account-deletion.constants.ts`
-  holds that module's messages, limits and routing keys). A constant that needs its module's own types or
-  functions stays beside them in the module — `common` never imports from `src/modules`.
+  holds that module's messages, limits and routing keys). A constants file never imports from
+  `src/modules`, so a constant that needs its module's own types or functions stays beside them in the
+  module — and so does a library options object that one function is built around (the description
+  sanitizer's allowlist in `events/rich-text.ts`). Name a constant for what it is in the whole module, not
+  in the one file that uses it (`INVOICE_PAGE_WIDTH`, not `WIDTH`).
 - **No hard-coding** — never inline a literal that has a canonical home. Magic strings → enums (`pgEnum`,
   `ErrorCode`, `Persona`); magic numbers / limits / timeouts / user-facing messages → a named constant in
-  `src/common/constants/<module>.constants.ts` (`DEFAULT_LIMIT`, `MAX_LIMIT`); env, hosts, ports, URLs, secrets, credentials, feature flags → `ConfigService` (zod `Env`),
-  **never** a string literal or `process.env` in app code; money & tax rates (VAT 7%, service fee) and
+  `src/common/constants/<module>.constants.ts` (`DEFAULT_LIMIT`, `MAX_LIMIT`); env, hosts, ports, URLs,
+  secrets, credentials, feature flags → `ConfigService` (zod `Env`), **never** a string literal or
+  `process.env` in app code; money & tax rates (VAT 7%, service fee) and
   quotas (per-booking seat cap) → the org-settings row or a named constant, never sprinkled literals.
   **Derive from the single source of truth**: Swagger `enum` lists and DTO validators read the Drizzle
   `pgEnum().enumValues`; seeds and tests reference the same constants — don't re-type the values. Rule of

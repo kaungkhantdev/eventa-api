@@ -111,12 +111,7 @@ export const MAX_SPAN_DAYS = 731;
 
 export const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
-/**
- * Every MIME an export route can answer with, for the OpenAPI document.
- *
- * Declared before the controller: `@ApiProduces` runs when the class is
- * defined, which is before a `const` below it has been initialised.
- */
+/** Every MIME an export route can answer with, for the OpenAPI document. */
 export const PRODUCES = Object.values(EXPORT_MIME);
 
 export const TREND_GRANULARITIES = ['day', 'week', 'month'] as const;

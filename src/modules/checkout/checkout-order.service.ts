@@ -31,6 +31,27 @@ export interface OrganizerEntry {
   notify: boolean;
 }
 
+/**
+ * Placing the registration (US-DISC-06): one order, one ticket per admission,
+ * exactly once.
+ *
+ * The summary is re-quoted here rather than taken from the request, so what is
+ * charged is what the tier and the code are worth at this instant — not what the
+ * page showed some minutes ago. Everything then happens inside
+ * `CheckoutRepository.placeOrder`'s single transaction, which is also where the
+ * confirmation event is written, so an attendee can never end up with a ticket
+ * and no email or an email and no ticket.
+ *
+ * A free order confirms immediately and its tickets are issued. A paid one is
+ * placed as `pending` with its seats still held, and the tickets are minted when
+ * the payment settles (US-DISC-05) — so nobody holds a QR for something they
+ * have not paid for.
+ *
+ * On an event that requires approval (US-REG-02) no order is ticketed here: a
+ * free one is placed waiting for the organizer with its places counted, and a
+ * paid one is placed for payment exactly as above — it starts waiting when the
+ * money lands. The tickets and the confirmation come with the approval.
+ */
 @Injectable()
 export class CheckoutOrderService {
   private readonly publicWebUrl: string;

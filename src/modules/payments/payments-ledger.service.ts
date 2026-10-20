@@ -12,7 +12,6 @@ import type {
 import { PaymentsRepository } from './payments.repository';
 import type { LedgerEntryDto } from './dto/list-payments.dto';
 import {
-  ALREADY_REFUNDED,
   DEFAULT_LIMIT,
   DEFAULT_PAGE,
   EXPORT_HEADER,
@@ -20,6 +19,7 @@ import {
   NOTHING_TO_EXPORT,
   NOT_ELIGIBLE,
   NO_COMPLETED_CHARGE,
+  REFUND_BLOCKED_REFUNDED_HINT,
 } from '../../common/constants/payments.constants';
 
 export interface Ledger {
@@ -145,7 +145,7 @@ function toEntry(row: LedgerRow): LedgerEntryDto {
 
 function refundBlockedReason(status: LedgerRow['status']): string | null {
   if (status === 'paid') return null;
-  if (status === 'refunded') return ALREADY_REFUNDED;
+  if (status === 'refunded') return REFUND_BLOCKED_REFUNDED_HINT;
   if (status === 'failed') return NOT_ELIGIBLE;
   return NO_COMPLETED_CHARGE;
 }

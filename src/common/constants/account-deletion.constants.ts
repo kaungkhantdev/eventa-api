@@ -1,8 +1,7 @@
-/**
- * What "Delete my account" (US-DISC-14) tells the attendee. The web shows each
- * message verbatim, so a change here is a change on screen.
- */
+/** The account-deletion module's named constants. */
 
+// What "Delete my account" (US-DISC-14) tells the attendee. The web shows each
+// of these messages verbatim, so changing one is a change on screen.
 export const NOT_AN_ATTENDEE =
   'Only attendee accounts can be deleted here — workspace members are managed by their organization.';
 export const WRONG_PASSWORD =

@@ -1,4 +1,5 @@
 import { FEED_KINDS } from '../../../common/constants/notifications.constants';
+
 /**
  * What one thing that happened looks like, whichever module it came from
  * (US-MSG-03).

@@ -1,4 +1,5 @@
 import { ALL_CAUGHT_UP } from '../../common/constants/dashboard.constants';
+
 /** What the home screen found outstanding across the modules it summarizes. */
 export interface OutstandingCounts {
   pendingApprovals: number;

@@ -1,5 +1,5 @@
 import { paymentStatusEnum } from '../../db/schema/index';
-import { default as Stripe } from 'stripe';
+import Stripe from 'stripe';
 import { STRIPE_API_VERSION } from '../stripe/stripe-api-version';
 
 /** The payments module's named constants. */
@@ -59,7 +59,9 @@ export const NO_COMPLETED_CHARGE = 'No completed charge yet.';
 export const NOT_ELIGIBLE =
   'This attempt failed, so it is not eligible for refund.';
 
-export const ALREADY_REFUNDED = 'This payment was already refunded.';
+/** The ledger's hint for why Refund is disabled on a refunded row. */
+export const REFUND_BLOCKED_REFUNDED_HINT =
+  'This payment was already refunded.';
 
 /** The header Stripe signs its callbacks with; the fake uses it too. */
 export const SIGNATURE_HEADER = 'stripe-signature';
@@ -142,7 +144,8 @@ export const WEBHOOK_VERIFIER = new Stripe('sk_signature_check_only', {
 export const NOT_PAID =
   'Only a completed payment can be refunded — this one never cleared.';
 
-export const REFUND_ALREADY_ISSUED = 'This payment has already been refunded.';
+/** The 409 for refunding a payment twice. */
+export const ALREADY_REFUNDED = 'This payment has already been refunded.';
 
 export const NO_GATEWAY_REF =
   'This payment has no provider reference, so it cannot be refunded automatically.';

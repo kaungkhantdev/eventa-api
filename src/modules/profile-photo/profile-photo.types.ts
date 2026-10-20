@@ -2,6 +2,7 @@ import {
   PHOTO_PREFIX,
   STAGING_PREFIX,
 } from '../../common/constants/profile-photo.constants';
+
 /**
  * The image types a profile photo may be: the extension each is stored as, and
  * the leading bytes a real file of that type must begin with.

@@ -1,4 +1,5 @@
 import { LEDGER_OUTCOMES } from '../../../common/constants/reports.constants';
+
 /**
  * What Reports needs to show a transaction ledger (US-RPT-06), without reading
  * the payments tables.

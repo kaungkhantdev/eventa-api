@@ -1,4 +1,5 @@
 import { OAUTH_ERROR_CODE } from '../../../common/constants/calendar-connection.constants';
+
 /**
  * What a completed Google consent hands back (US-MTG-08). Access tokens are
  * deliberately absent: this API never calls the Calendar itself, and an

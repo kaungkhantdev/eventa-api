@@ -1,4 +1,5 @@
 import { REPORT_PAYOUT_STATUSES } from '../../../common/constants/reports.constants';
+
 /**
  * What Reports needs to show payouts and settlement (US-RPT-07), without
  * reading the payouts tables.

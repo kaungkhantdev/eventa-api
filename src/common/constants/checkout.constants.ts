@@ -10,27 +10,6 @@ import { orderItems, orders, ticketTypes } from '../../db/schema/index';
  */
 export const DECISION_HOLD_EXPIRY = new Date('9999-12-31T23:59:59Z');
 
-/**
- * Placing the registration (US-DISC-06): one order, one ticket per admission,
- * exactly once.
- *
- * The summary is re-quoted here rather than taken from the request, so what is
- * charged is what the tier and the code are worth at this instant — not what the
- * page showed some minutes ago. Everything then happens inside
- * `CheckoutRepository.placeOrder`'s single transaction, which is also where the
- * confirmation event is written, so an attendee can never end up with a ticket
- * and no email or an email and no ticket.
- *
- * A free order confirms immediately and its tickets are issued. A paid one is
- * placed as `pending` with its seats still held, and the tickets are minted when
- * the payment settles (US-DISC-05) — so nobody holds a QR for something they
- * have not paid for.
- *
- * On an event that requires approval (US-REG-02) no order is ticketed here: a
- * free one is placed waiting for the organizer with its places counted, and a
- * paid one is placed for payment exactly as above — it starts waiting when the
- * money lands. The tickets and the confirmation come with the approval.
- */
 /** Said for a bad id and for somebody else's alike — the two must not be
  *  distinguishable, or the endpoint becomes a way to probe for orders. */
 export const ORDER_NOT_FOUND = 'That order could not be found.';
@@ -127,12 +106,16 @@ export const REGISTRATION_REJECTED = 'registration.rejected';
 /** Routing key for a seat offered to someone on the waitlist (US-REG-04). */
 export const WAITLIST_OFFERED = 'waitlist.offered';
 
-/** Crockford base32 minus I, L, O, U — no character a person can mis-copy. */
-export const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+/**
+ * Crockford base32 minus I, L, O, U — no character a person can mis-copy. Both
+ * the order reference and the QR token are drawn from it.
+ */
+export const CROCKFORD_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
-export const LENGTH = 8;
+/** `ORD-` and eight characters: `ORD-7K2M9QX4`. */
+export const ORDER_REFERENCE_LENGTH = 8;
 
-export const PREFIX = 'ORD';
+export const ORDER_REFERENCE_PREFIX = 'ORD';
 
 /** How many fresh references to try before admitting defeat (32^8 collisions). */
 export const REFERENCE_ATTEMPTS = 3;

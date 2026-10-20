@@ -13,10 +13,10 @@ import type {
 } from './payments.repository';
 import { PaymentsRepository } from './payments.repository';
 import {
+  ALREADY_REFUNDED,
   FINISHED_ELSEWHERE,
   NOT_PAID,
   NO_GATEWAY_REF,
-  REFUND_ALREADY_ISSUED,
 } from '../../common/constants/payments.constants';
 
 export interface RefundPaymentRequest {
@@ -150,7 +150,7 @@ export class RefundsService {
     );
     if (!payment) throw DomainException.notFound('Payment not found.');
     if (payment.status === 'refunded') {
-      throw DomainException.conflict(REFUND_ALREADY_ISSUED);
+      throw DomainException.conflict(ALREADY_REFUNDED);
     }
     if (payment.status !== 'paid') throw DomainException.conflict(NOT_PAID);
     if (!payment.gatewayRef) throw DomainException.conflict(NO_GATEWAY_REF);

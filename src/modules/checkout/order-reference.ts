@@ -1,9 +1,9 @@
 import { randomInt } from 'node:crypto';
 import { isUniqueViolation } from '../../common/errors/unique-violation';
 import {
-  ALPHABET,
-  LENGTH,
-  PREFIX,
+  CROCKFORD_ALPHABET,
+  ORDER_REFERENCE_LENGTH,
+  ORDER_REFERENCE_PREFIX,
   QR_TOKEN_LENGTH,
   REFERENCE_ATTEMPTS,
   REFERENCE_CONSTRAINT,
@@ -19,10 +19,10 @@ import {
  */
 export function generateOrderReference(): string {
   let body = '';
-  for (let i = 0; i < LENGTH; i += 1) {
-    body += ALPHABET[randomInt(ALPHABET.length)];
+  for (let i = 0; i < ORDER_REFERENCE_LENGTH; i += 1) {
+    body += CROCKFORD_ALPHABET[randomInt(CROCKFORD_ALPHABET.length)];
   }
-  return `${PREFIX}-${body}`;
+  return `${ORDER_REFERENCE_PREFIX}-${body}`;
 }
 
 /**
@@ -33,7 +33,7 @@ export function generateOrderReference(): string {
 export function generateQrToken(): string {
   let token = '';
   for (let i = 0; i < QR_TOKEN_LENGTH; i += 1) {
-    token += ALPHABET[randomInt(ALPHABET.length)];
+    token += CROCKFORD_ALPHABET[randomInt(CROCKFORD_ALPHABET.length)];
   }
   return token;
 }

@@ -1,4 +1,5 @@
 import { DISCOUNT_STANDINGS } from '../../../common/constants/reports.constants';
+
 /**
  * What Reports needs to know about promotion payback (US-RPT-10), without
  * reading the promotions tables.

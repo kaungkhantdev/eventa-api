@@ -1,4 +1,5 @@
 import { EVENT_LIFECYCLES } from '../../../common/constants/reports.constants';
+
 /**
  * What Reports needs to rank events against each other (US-RPT-04), without
  * reading the events, orders or tickets tables.
