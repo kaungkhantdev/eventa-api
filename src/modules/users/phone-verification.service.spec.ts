@@ -3,10 +3,10 @@ import { DomainException } from '../../common/errors/domain.exception';
 import type { Clock } from '../../common/time/clock';
 import type { ResendThrottleService } from '../../common/throttle/resend-throttle.service';
 import { organizerAuth } from '../../../test/support/auth-context';
-import { IDENTITY_PHONE_VERIFICATION_REQUESTED } from './events/phone-verification-requested.event';
 import { PhoneVerificationService } from './phone-verification.service';
 import type { ProfileRepository } from './profile.repository';
 import type { PhoneChallengeRow, ProfileRow } from './users.types';
+import { IDENTITY_PHONE_VERIFICATION_REQUESTED } from '../../common/constants/users.constants';
 
 const orgId = 1;
 const userId = 'u1';

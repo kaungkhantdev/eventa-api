@@ -7,5 +7,18 @@
     "incremental": false
   },
   "include": ["src"],
-  "exclude": ["node_modules", "test", "dist", "**/*spec.ts", "drizzle.config.ts"]
+  // What this compiles ships: the production image copies all of dist/, and
+  // anything in it runs with `node dist/...`. src/db/seed.ts is a dev script
+  // (`pnpm seed`, tsx from source) that wipes the `acme` tenant and recreates
+  // admin@acme.test with a password published in the README, so it must not
+  // be in the image. src/production-dependencies.spec.ts fails on any file
+  // compiled here that runs on load other than the production entry points.
+  "exclude": [
+    "node_modules",
+    "test",
+    "dist",
+    "**/*spec.ts",
+    "drizzle.config.ts",
+    "src/db/seed.ts"
+  ]
 }

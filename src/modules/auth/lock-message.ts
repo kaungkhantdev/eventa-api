@@ -1,4 +1,4 @@
-const SECONDS_PER_MINUTE = 60;
+import { SECONDS_PER_MINUTE } from '../../common/constants/auth.constants';
 
 /**
  * What was attempted too often. The same lock guards sign-in and the forgotten-

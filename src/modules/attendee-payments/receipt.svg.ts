@@ -1,12 +1,13 @@
 import { formatBaht } from '../../common/money/baht';
 import { escapeXml } from '../../common/xml/escape-xml';
 import type { ReceiptRow } from './attendee-payments.types';
-
-const WIDTH = 600;
-const HEIGHT = 760;
-const LEFT = 60;
-const RIGHT = WIDTH - 60;
-const PERCENT = 100;
+import {
+  PERCENT,
+  RECEIPT_HEIGHT,
+  RECEIPT_LEFT_X,
+  RECEIPT_RIGHT_X,
+  RECEIPT_WIDTH,
+} from '../../common/constants/attendee-payments.constants';
 
 /**
  * The downloadable VAT receipt (US-DISC-10): one self-contained SVG showing the
@@ -26,12 +27,12 @@ export function renderReceiptSvg(row: ReceiptRow): string {
     }) ?? '—';
   const refundBanner =
     row.status === 'refunded'
-      ? `<text x="${WIDTH / 2}" y="205" text-anchor="middle" font-size="26" font-weight="bold" fill="#b91c1c">REFUNDED</text>`
+      ? `<text x="${RECEIPT_WIDTH / 2}" y="205" text-anchor="middle" font-size="26" font-weight="bold" fill="#b91c1c">REFUNDED</text>`
       : '';
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}" font-family="Helvetica, Arial, sans-serif">
-  <rect width="${WIDTH}" height="${HEIGHT}" fill="#ffffff" stroke="#111111" stroke-width="2" rx="16"/>
-  <text x="${WIDTH / 2}" y="70" text-anchor="middle" font-size="26" font-weight="bold" fill="#111111">VAT Receipt</text>
-  <text x="${WIDTH / 2}" y="105" text-anchor="middle" font-size="18" fill="#111111">${escapeXml(row.organizerName)}</text>
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${RECEIPT_WIDTH}" height="${RECEIPT_HEIGHT}" viewBox="0 0 ${RECEIPT_WIDTH} ${RECEIPT_HEIGHT}" font-family="Helvetica, Arial, sans-serif">
+  <rect width="${RECEIPT_WIDTH}" height="${RECEIPT_HEIGHT}" fill="#ffffff" stroke="#111111" stroke-width="2" rx="16"/>
+  <text x="${RECEIPT_WIDTH / 2}" y="70" text-anchor="middle" font-size="26" font-weight="bold" fill="#111111">VAT Receipt</text>
+  <text x="${RECEIPT_WIDTH / 2}" y="105" text-anchor="middle" font-size="18" fill="#111111">${escapeXml(row.organizerName)}</text>
   ${line(135, row.organizerAddress)}
   ${line(160, row.organizerTaxId ? `Tax ID ${row.organizerTaxId}` : null)}
   ${refundBanner}
@@ -40,12 +41,12 @@ export function renderReceiptSvg(row: ReceiptRow): string {
   ${field(320, 'Billed to', `${row.buyerName} · ${row.buyerEmail}`)}
   ${field(355, 'Event', row.eventName)}
   ${field(390, 'Payment method', row.method)}
-  <line x1="${LEFT}" y1="430" x2="${RIGHT}" y2="430" stroke="#cccccc"/>
+  <line x1="${RECEIPT_LEFT_X}" y1="430" x2="${RECEIPT_RIGHT_X}" y2="430" stroke="#cccccc"/>
   ${amount(475, `Amount excluding VAT`, net)}
   ${amount(510, `VAT ${vatPercent}% (included)`, row.vatSatang)}
-  <line x1="${LEFT}" y1="540" x2="${RIGHT}" y2="540" stroke="#cccccc"/>
+  <line x1="${RECEIPT_LEFT_X}" y1="540" x2="${RECEIPT_RIGHT_X}" y2="540" stroke="#cccccc"/>
   ${amount(580, 'Total paid', row.amountSatang, true)}
-  <text x="${WIDTH / 2}" y="680" text-anchor="middle" font-size="13" fill="#777777">Prices are VAT-inclusive; all amounts settle in Thai Baht.</text>
+  <text x="${RECEIPT_WIDTH / 2}" y="680" text-anchor="middle" font-size="13" fill="#777777">Prices are VAT-inclusive; all amounts settle in Thai Baht.</text>
 </svg>`;
 }
 
@@ -61,12 +62,12 @@ function documentNumber(row: ReceiptRow): string {
 
 function line(y: number, value: string | null): string {
   if (!value) return '';
-  return `<text x="${WIDTH / 2}" y="${y}" text-anchor="middle" font-size="14" fill="#555555">${escapeXml(value)}</text>`;
+  return `<text x="${RECEIPT_WIDTH / 2}" y="${y}" text-anchor="middle" font-size="14" fill="#555555">${escapeXml(value)}</text>`;
 }
 
 function field(y: number, label: string, value: string): string {
-  return `<text x="${LEFT}" y="${y}" font-size="15" fill="#777777">${escapeXml(label)}</text>
-  <text x="${RIGHT}" y="${y}" text-anchor="end" font-size="15" fill="#111111">${escapeXml(value)}</text>`;
+  return `<text x="${RECEIPT_LEFT_X}" y="${y}" font-size="15" fill="#777777">${escapeXml(label)}</text>
+  <text x="${RECEIPT_RIGHT_X}" y="${y}" text-anchor="end" font-size="15" fill="#111111">${escapeXml(value)}</text>`;
 }
 
 function amount(
@@ -77,6 +78,6 @@ function amount(
 ): string {
   const weight = bold ? ' font-weight="bold"' : '';
   const size = bold ? 20 : 16;
-  return `<text x="${LEFT}" y="${y}" font-size="${size}"${weight} fill="#111111">${escapeXml(label)}</text>
-  <text x="${RIGHT}" y="${y}" text-anchor="end" font-size="${size}"${weight} fill="#111111">${formatBaht(satang)}</text>`;
+  return `<text x="${RECEIPT_LEFT_X}" y="${y}" font-size="${size}"${weight} fill="#111111">${escapeXml(label)}</text>
+  <text x="${RECEIPT_RIGHT_X}" y="${y}" text-anchor="end" font-size="${size}"${weight} fill="#111111">${formatBaht(satang)}</text>`;
 }

@@ -1,7 +1,5 @@
 import type { OutboxEventInput } from '../../platform/outbox.port';
-
-/** Routing key for a placed, fully-paid registration (US-DISC-06). */
-export const REGISTRATION_CONFIRMED = 'registration.confirmed';
+import { REGISTRATION_CONFIRMED } from '../../../common/constants/checkout.constants';
 
 export interface RegistrationConfirmedInput {
   organizationId: number;

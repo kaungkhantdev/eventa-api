@@ -1,7 +1,5 @@
 import type { OutboxEventInput } from '../../platform/outbox.port';
-
-/** Routing key for the "event published" notice (consumed by eventa-worker). */
-export const EVENTS_PUBLISHED = 'events.published';
+import { EVENTS_PUBLISHED } from '../../../common/constants/events.constants';
 
 export interface EventPublishedInput {
   organizationId: number;

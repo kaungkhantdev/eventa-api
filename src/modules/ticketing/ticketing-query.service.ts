@@ -2,16 +2,19 @@ import { Injectable } from '@nestjs/common';
 import { Paginated } from '../../common/http/paginated';
 import type { EventActor } from '../events/events.types';
 import { TicketInventoryDto } from './dto/ticket-inventory.dto';
-import { EventLookupPort } from './ports/event-lookup.port';
+import { type EventBrief, EventLookupPort } from './ports/event-lookup.port';
+import { TicketSeatsPort } from './ports/ticket-seats.port';
+import { TicketingPolicy } from './ticketing.policy';
 import { TicketingRepository } from './ticketing.repository';
 import type {
   ListTicketsQuery,
   TicketRow,
   TicketStatusCounts,
 } from './ticketing.types';
-
-const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 100;
+import {
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+} from '../../common/constants/ticketing.constants';
 
 /**
  * The read side of Ticketing: one searchable, filterable view of every tier the
@@ -23,6 +26,8 @@ export class TicketingQueryService {
   constructor(
     private readonly repo: TicketingRepository,
     private readonly events: EventLookupPort,
+    private readonly seats: TicketSeatsPort,
+    private readonly policy: TicketingPolicy,
   ) {}
 
   async list(
@@ -67,29 +72,39 @@ export class TicketingQueryService {
     rows: TicketRow[],
   ): Promise<TicketInventoryDto[]> {
     if (rows.length === 0) return [];
-    const [briefs, vatRate] = await Promise.all([
-      this.events.briefsByIds(
-        organizationId,
-        rows.map((r) => r.eventId),
-      ),
+    const eventIds = [...new Set(rows.map((r) => r.eventId))];
+    const [briefs, typed, vatRate] = await Promise.all([
+      this.events.briefsByIds(organizationId, eventIds),
+      this.seats.eventsWithTypedSeats(organizationId, eventIds),
       this.repo.orgVatRate(organizationId),
     ]);
-    return rows.map((r) =>
-      toInventoryItem(r, briefs.get(r.eventId)?.name, vatRate),
+    return rows.map((r) => {
+      const brief = briefs.get(r.eventId);
+      return toInventoryItem(r, brief, vatRate, this.seatSet(brief, typed));
+    });
+  }
+
+  /** Whether the event's seat map sets its tiers' quantities (US-EVT-05). */
+  private seatSet(brief: EventBrief | undefined, typed: Set<string>): boolean {
+    if (!brief) return false;
+    return this.policy.quantityFromSeats(
+      brief.seatingMode,
+      typed.has(brief.id),
     );
   }
 }
 
 function toInventoryItem(
   t: TicketRow,
-  eventName: string | undefined,
+  event: EventBrief | undefined,
   vatRate: number,
+  quantityFromSeats: boolean,
 ): TicketInventoryDto {
   return {
     id: t.id,
     eventId: t.eventId,
     // A tier outliving its event is a data problem, not a reason to hide the row.
-    eventName: eventName ?? '',
+    eventName: event?.name ?? '',
     name: t.name,
     isFree: t.isFree,
     priceSatang: t.priceSatang,
@@ -101,5 +116,6 @@ function toInventoryItem(
     salesStartAt: t.salesStartAt?.toISOString() ?? null,
     salesEndAt: t.salesEndAt?.toISOString() ?? null,
     version: t.version,
+    quantityFromSeats,
   };
 }

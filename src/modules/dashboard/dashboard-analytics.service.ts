@@ -22,12 +22,11 @@ import {
   RevenueInsightsPort,
   type RevenuePoint,
 } from './ports/revenue-insights.port';
-
-/** How many rows the dashboard table shows before "view all". */
-const TABLE_LIMIT = 10;
-/** How many low-stock tiers the selling-fast panel previews before "Manage". */
-const SELLING_FAST_LIMIT = 3;
-const PERCENT = 100;
+import {
+  PERCENT,
+  SELLING_FAST_LIMIT,
+  TABLE_LIMIT,
+} from '../../common/constants/dashboard.constants';
 
 /** A headline card: the figure, and how it moved. `value` is null when unknown. */
 export interface Kpi {

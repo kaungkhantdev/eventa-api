@@ -15,6 +15,7 @@ import {
   type SocialProvider,
   type VerifiedIdentity,
 } from './ports/social-verifier.port';
+import { CONSENT_DENIED } from '../../common/constants/auth-social.constants';
 
 /**
  * Which providers each audience may use. An organizer signs in with a work
@@ -24,9 +25,6 @@ const PROVIDERS_BY_AUDIENCE: Record<Persona, readonly SocialProvider[]> = {
   admin: ['google', 'linkedin'],
   attendee: ['google', 'apple'],
 };
-
-/** The provider returns this when the person closes the consent screen. */
-const CONSENT_DENIED = 'access_denied';
 
 export interface SocialSignInInput {
   provider: SocialProvider;

@@ -8,7 +8,8 @@ import type {
   WaitlistJoinedDto,
 } from './dto/join-waitlist.dto';
 import { withFreshReference } from './order-reference';
-import { WAITLIST_TICKETS_LEFT, waitlistRefusal } from './waitlist-rules';
+import { waitlistRefusal } from './waitlist-rules';
+import { WAITLIST_TICKETS_LEFT } from '../../common/constants/checkout.constants';
 
 /**
  * Joining a sold-out ticket's waitlist (US-REG-04).

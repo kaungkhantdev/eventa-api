@@ -14,9 +14,10 @@ import type {
   NewCategoryValues,
   UpdateCategoryInput,
 } from './event-categories.types';
-
-const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 100;
+import {
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+} from '../../common/constants/event-categories.constants';
 
 /** Fields a PATCH may set on a category. */
 const UPDATABLE_KEYS: (keyof NewCategoryValues & keyof UpdateCategoryInput)[] =

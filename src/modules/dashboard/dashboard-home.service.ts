@@ -9,10 +9,10 @@ import { type Language, greetingFor } from './greeting';
 import { InventoryInsightsPort } from './ports/operations-insights.port';
 import { RegistrationInsightsPort } from './ports/registration-insights.port';
 import { RevenueInsightsPort } from './ports/revenue-insights.port';
-
-/** How many sign-ups the home preview shows before "view all". */
-const PREVIEW_LIMIT = 5;
-const NOTHING_TODAY = 'No registrations yet today.';
+import {
+  NOTHING_TODAY,
+  PREVIEW_LIMIT,
+} from '../../common/constants/dashboard.constants';
 
 export interface TodayFeedItem {
   orderId: string;

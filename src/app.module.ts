@@ -64,11 +64,19 @@ import { TicketSharingModule } from './modules/ticket-sharing/ticket-sharing.mod
 import { TicketingModule } from './modules/ticketing/ticketing.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { MeetingsModule } from './modules/meetings/meetings.module';
+import { CalendarConnectionModule } from './modules/calendar-connection/calendar-connection.module';
 import { ReportsModule } from './modules/reports/reports.module';
 
 @Module({
   imports: [
     MeetingsModule,
+    /**
+     * The workspace Google Calendar (US-MTG-08): Settings → Integrations and
+     * the OAuth callback. Owns `calendar_connections`; depends on
+     * MeetingsService (re-sends unsynced meetings on connect) and AccessModule.
+     * A leaf — nothing imports it, so no `forwardRef`.
+     */
+    CalendarConnectionModule,
     DashboardModule,
     AppConfigModule,
     LoggerModule.forRootAsync({

@@ -5,9 +5,10 @@ import type {
   InvoiceEntryDto,
 } from './dto/list-invoices.dto';
 import type { InvoiceRow } from './invoices.types';
-
-const VOID_PAID = 'Paid — void it by refunding the payment.';
-const VOID_ALREADY = 'Already void.';
+import {
+  VOID_BLOCKED_PAID_HINT,
+  VOID_BLOCKED_VOID_HINT,
+} from '../../common/constants/invoices.constants';
 
 /**
  * One ledger row (US-FIN-06). The status is the AGED one, so a bill whose term
@@ -56,7 +57,7 @@ export function toInvoiceDetail(
 }
 
 function voidBlockedReason(status: InvoiceEntryDto['status']): string | null {
-  if (status === 'paid') return VOID_PAID;
-  if (status === 'void') return VOID_ALREADY;
+  if (status === 'paid') return VOID_BLOCKED_PAID_HINT;
+  if (status === 'void') return VOID_BLOCKED_VOID_HINT;
   return null;
 }

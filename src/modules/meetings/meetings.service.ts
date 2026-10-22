@@ -12,13 +12,12 @@ import {
 import { MeetingEventPort } from './ports/meeting-event.port';
 import { MeetingsRepository } from './meetings.repository';
 import type { MeetingPatch, MeetingRow, NewMeeting } from './meetings.types';
-
-const GONE = "That meeting isn't available.";
-const ALREADY_CANCELLED =
-  'This meeting was cancelled and can no longer be edited.';
-const CHANGED_UNDERNEATH =
-  'Someone else changed this meeting — reload it and try again.';
-const NO_SUCH_EVENT = "That event isn't in this workspace.";
+import {
+  ALREADY_CANCELLED,
+  CHANGED_UNDERNEATH,
+  GONE,
+  NO_SUCH_EVENT,
+} from '../../common/constants/meetings.constants';
 
 export interface ScheduleMeetingCommand {
   title: string;
@@ -140,8 +139,11 @@ export class MeetingsService {
       location: place.location,
       notes: merged.notes ?? null,
       // A meeting that is no longer video must lose its Meet link, or the guest
-      // is sent to an empty call instead of the venue (US-MTG-05).
-      link: place.needsLink ? current.link : null,
+      // is sent to an empty call instead of the venue (US-MTG-05). One that
+      // stays video does not mention the link at all: the worker writes it,
+      // and `current.link` was read outside this update's transaction, so
+      // carrying it could overwrite a link the worker has just written.
+      ...(place.needsLink ? {} : { link: null }),
     };
     const updated = await this.repo.reschedule(
       auth.organizationId,
@@ -187,6 +189,26 @@ export class MeetingsService {
     );
     if (!retried) throw DomainException.notFound(GONE);
     return retried;
+  }
+
+  /**
+   * Send the calendar everything it missed (US-MTG-08 AC2: meetings saved
+   * while disconnected are "flagged as not synced until the calendar is
+   * reconnected"). Called once a connect succeeds.
+   *
+   * Takes every meeting from today on that is not synced — saved while
+   * disconnected, failed past its retries, or left pending — and enqueues one
+   * sync each, reading the intent off the row: a cancelled meeting that
+   * already reached a calendar is withdrawn (US-MTG-06 AC1), anything else is
+   * created or updated. Returns how many were re-sent.
+   */
+  async resyncUnsynced(organizationId: number): Promise<number> {
+    const now = this.clock.now();
+    return this.repo.resyncUnsynced(organizationId, (row) =>
+      row.status === 'cancelled'
+        ? this.syncEvent(row, 'cancel', false, now)
+        : this.syncEvent(row, intentFor(row), row.mode === 'Video', now),
+    );
   }
 
   private async mustFind(auth: AuthContext, id: string): Promise<MeetingRow> {

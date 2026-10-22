@@ -10,16 +10,13 @@ import {
   users,
 } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
-import { POST_EVENT_THANKYOU_SLUG } from '../message-templates/message-template-catalog';
 import type {
   AnsweredQuestion,
   Reach,
   SubmittedAnswer,
 } from './response-rules';
-
-const CONFIRMED = 'confirmed';
-/** A delivery the transport accepted. A 'failed' one asked nobody anything. */
-const SENT = 'sent';
+import { CONFIRMED, SENT } from '../../common/constants/surveys.constants';
+import { POST_EVENT_THANKYOU_SLUG } from '../../common/constants/message-templates.constants';
 
 /** A type alias, not an interface: `execute<T>` wants a Record. */
 type ReachRow = { asked: number; answered: number };

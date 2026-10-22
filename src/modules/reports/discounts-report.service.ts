@@ -1,15 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { Clock } from '../../common/time/clock';
-import {
-  DEFAULT_REPORT_LIMIT,
-  type ReportFilterQueryDto,
-} from './dto/report-filter.query.dto';
+import { type ReportFilterQueryDto } from './dto/report-filter.query.dto';
 import {
   DiscountReportPort,
   type DiscountPerformanceRow,
   type DiscountStanding,
 } from './ports/discount-report.port';
 import { resolveReportPeriod, type ReportPeriod } from './reports-period';
+import {
+  ALL_EVENTS,
+  DEFAULT_REPORT_LIMIT,
+} from '../../common/constants/reports.constants';
 
 /**
  * Promotion and discount payback (US-RPT-10).
@@ -54,8 +55,6 @@ export interface DiscountsReportView {
     returnRatio: number | null;
   };
 }
-
-const ALL_EVENTS = 'All events';
 
 @Injectable()
 export class DiscountsReportService {

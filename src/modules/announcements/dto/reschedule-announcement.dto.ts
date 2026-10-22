@@ -3,7 +3,7 @@ import { IsISO8601, Matches } from 'class-validator';
 import {
   INSTANT_WITH_ZONE,
   INSTANT_WITH_ZONE_MESSAGE,
-} from '../announcement-schedule';
+} from '../../../common/constants/announcements.constants';
 
 /** Move a scheduled announcement to a new time (US-MSG-05). */
 export class RescheduleAnnouncementDto {

@@ -1,4 +1,13 @@
 import { Injectable } from '@nestjs/common';
+import {
+  ACCOUNT_GONE,
+  CODE_REQUIRED,
+  NO_PASSWORD_SET,
+  NOT_AN_ATTENDEE,
+  SCHEDULED,
+  WRONG_CODE,
+  WRONG_PASSWORD,
+} from '../../common/constants/account-deletion.constants';
 import { DomainException } from '../../common/errors/domain.exception';
 import type { AuthContext } from '../auth/auth.types';
 import { LoginThrottleService } from '../auth/login-throttle.service';
@@ -21,19 +30,6 @@ export interface DeleteAccountInput {
  * and this one guards an irreversible action.
  */
 const throttleId = (userId: string) => `delete|${userId}`;
-
-const NOT_AN_ATTENDEE =
-  'Only attendee accounts can be deleted here — workspace members are managed by their organization.';
-const WRONG_PASSWORD =
-  "That password didn't match — your account is unchanged.";
-const NO_PASSWORD_SET =
-  'Your account signs in with a social provider. Please set a password first (via password reset) to re-verify your identity.';
-const CODE_REQUIRED =
-  'Your authenticator code is required to delete this account.';
-const WRONG_CODE = "That code didn't match — your account is unchanged.";
-const ACCOUNT_GONE = 'Your session is no longer valid. Please sign in again.';
-const SCHEDULED =
-  'Your account is scheduled for deletion and you have been signed out everywhere. A confirmation email is on its way.';
 
 /**
  * Delete my account (US-DISC-14): the danger zone warns about upcoming paid,

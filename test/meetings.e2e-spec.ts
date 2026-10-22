@@ -472,6 +472,27 @@ describe('Meetings (e2e — E12)', () => {
       expect(updated.place).toBe('QSNCC Hall 2');
     });
 
+    it('rescheduling a Video meeting keeps a link the worker wrote', async () => {
+      const m = created(await schedule(meeting()));
+      // What eventa-worker writes once Google has minted the Meet link.
+      await pool.query(
+        `UPDATE meetings SET link = 'https://meet.google.com/abc-defg-hij' WHERE id = $1`,
+        [m.id],
+      );
+      const res = await patch(m.id, {
+        version: m.version,
+        startTime: '14:00',
+        endTime: '15:00',
+      });
+      expect(res.status).toBe(200);
+      expect(created(res).link).toBe('https://meet.google.com/abc-defg-hij');
+      const { rows } = await pool.query<{ link: string | null }>(
+        `SELECT link FROM meetings WHERE id = $1`,
+        [m.id],
+      );
+      expect(rows[0].link).toBe('https://meet.google.com/abc-defg-hij');
+    });
+
     it('cancels, keeps the record, and withdraws the invite', async () => {
       const m = created(await schedule(meeting()));
       const res = await request(server)

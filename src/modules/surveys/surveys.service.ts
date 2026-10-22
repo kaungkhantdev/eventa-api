@@ -12,6 +12,7 @@ import {
   type DraftQuestion,
   type SurveyStatus,
 } from './survey-rules';
+import { COPY_SUFFIX } from '../../common/constants/surveys.constants';
 
 export interface SurveyInput {
   title: string;
@@ -22,9 +23,6 @@ export interface SurveyInput {
 export interface SurveyUpdate extends SurveyInput {
   version: number;
 }
-
-/** Marks a duplicate as the fresh draft it is, rather than a second original. */
-const COPY_SUFFIX = ' (copy)';
 
 /**
  * Authoring and managing feedback surveys (US-MSG-09).

@@ -1,10 +1,10 @@
 import { bucketFor, isJoinable, startsAt } from './meeting-bucket';
-import { PHONE_LOCATION } from './meeting-schedule';
 import type { MeetingRow } from './meetings.types';
 import type { MeetingEntryDto } from './dto/meetings.dto';
-
-/** How a today meeting reads its time, per US-MTG-01's "Today · 09:00 – 10:00". */
-const TODAY_PREFIX = 'Today';
+import {
+  PHONE_LOCATION,
+  TODAY_PREFIX,
+} from '../../common/constants/meetings.constants';
 
 /**
  * Row → what the list shows. Three things are DERIVED here rather than stored,

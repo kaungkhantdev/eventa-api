@@ -10,8 +10,7 @@ import {
   type AttendanceTotals,
   type AttendanceWindow,
 } from '../reports/ports/attendance-report.port';
-
-const LIVE_TICKET_STATUSES = ['issued', 'checked_in'] as const;
+import { LIVE_TICKET_STATUSES } from '../../common/constants/registration-stats.constants';
 
 /**
  * RegistrationStats' implementation of the attendance report (US-RPT-09).

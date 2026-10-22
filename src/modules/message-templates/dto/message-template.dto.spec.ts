@@ -1,6 +1,6 @@
 import { DECORATORS } from '@nestjs/swagger';
-import { TEMPLATE_DELIVERY } from '../message-template-catalog';
 import { MessageTemplateDto } from './message-template.dto';
+import { TEMPLATE_DELIVERY } from '../../../common/constants/message-templates.constants';
 
 /**
  * The prose beside `delivery` has to agree with the vocabulary it documents.

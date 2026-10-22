@@ -3,11 +3,11 @@ import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 import { taxStatusEnum } from '../../../db/schema';
 import type { TaxStatus } from '../tax-periods.types';
-
-/** Thai VAT filing started long after this; a typo'd year is a bug, not data. */
-const MIN_YEAR = 2020;
-const MAX_YEAR = 2100;
-const MAX_WHT_SATANG = 1_000_000_000_000;
+import {
+  MAX_WHT_SATANG,
+  MAX_YEAR,
+  MIN_YEAR,
+} from '../../../common/constants/tax-periods.constants';
 
 export class ListTaxPeriodsDto {
   @ApiProperty({ minimum: MIN_YEAR, maximum: MAX_YEAR, example: 2026 })

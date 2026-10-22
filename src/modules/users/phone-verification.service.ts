@@ -13,21 +13,15 @@ import { phoneVerificationRequestedEvent } from './events/phone-verification-req
 import { toProfileResponse } from './profile.mapper';
 import { ProfileRepository } from './profile.repository';
 import type { ProfileRow } from './users.types';
-
-/** Six digits: what a person will retype off a lock screen without a mistake. */
-const CODE_DIGITS = 6;
-const CODE_CEILING = 10 ** CODE_DIGITS;
-
-const NOT_A_MOBILE_MESSAGE =
-  'Enter a Thai mobile number — for example 0812345678. Eventa can only text Thai mobiles.';
-const ALREADY_CONFIRMED_MESSAGE =
-  'That is already the confirmed number on your account.';
-const WRONG_CODE_MESSAGE =
-  "That code didn't match. Check the text and retype it.";
-const CODE_GONE_MESSAGE =
-  'That code is no longer valid. Ask for a new one and we will text it again.';
-const TOO_MANY_MESSAGE =
-  'Too many wrong codes. Ask for a new one and we will text it again.';
+import {
+  ALREADY_CONFIRMED_MESSAGE,
+  CODE_CEILING,
+  CODE_DIGITS,
+  CODE_GONE_MESSAGE,
+  NOT_A_MOBILE_MESSAGE,
+  TOO_MANY_MESSAGE,
+  WRONG_CODE_MESSAGE,
+} from '../../common/constants/users.constants';
 
 /**
  * Confirming a changed phone number by a texted code (US-DISC-11 AC3).

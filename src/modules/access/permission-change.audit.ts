@@ -1,6 +1,10 @@
-import type { PermissionKey } from '../../common/decorators/require-permissions.decorator';
 import type { Actor } from './access.types';
 import { PERMISSION_CATALOG } from './workspace-defaults';
+import {
+  PERM_AUDIT_TYPE,
+  SENSITIVE_FLAG,
+  SENSITIVE_PERMISSIONS,
+} from '../../common/constants/access.constants';
 
 /**
  * How a change to who-can-do-what is written to the audit trail (US-SET-05,
@@ -11,20 +15,6 @@ import { PERMISSION_CATALOG } from './workspace-defaults';
  * `occurred_at`, the from-where its IP; what this file decides is the words —
  * a title naming what changed, and a `meta` line with the detail.
  */
-export const PERM_AUDIT_TYPE = 'perm' as const;
-
-/**
- * Capabilities whose grant is "clearly flagged in the record" (US-SET-12).
- * Exactly the story's own examples: exporting attendee data and issuing
- * refunds.
- */
-export const SENSITIVE_PERMISSIONS: readonly string[] = [
-  'regExport',
-  'finRefund',
-] satisfies PermissionKey[];
-
-/** Appended to a title when the change grants a sensitive capability. */
-const SENSITIVE_FLAG = ' — sensitive access granted';
 
 /** The words of one entry. */
 export interface PermAuditText {

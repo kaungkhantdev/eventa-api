@@ -32,8 +32,7 @@ import type {
   AttendanceRow,
   ScanAttemptRecord,
 } from './check-in.types';
-
-const AUDIT_TYPE = 'checkin' as const;
+import { AUDIT_TYPE } from '../../common/constants/check-in.constants';
 
 export interface UndoInput {
   undoneBy: string;

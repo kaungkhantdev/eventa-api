@@ -1,13 +1,15 @@
 import {
-  APPROVE_BLOCKED_UNPAID,
-  OFFER_NOT_WAITLISTED,
-  REJECT_BLOCKED_PAID,
-  REJECT_NEEDS_REFUND_PERMISSION,
   canApprove,
   canOffer,
   canReject,
   rejectionRefunds,
 } from './registration-decision';
+import {
+  APPROVE_BLOCKED_UNPAID,
+  OFFER_NOT_WAITLISTED,
+  REJECT_BLOCKED_PAID,
+  REJECT_NEEDS_REFUND_PERMISSION,
+} from '../../common/constants/registrations.constants';
 
 const pending = (o: Record<string, unknown> = {}) => ({
   status: 'pending' as const,

@@ -1,8 +1,5 @@
 import type { OutboxEventInput } from '../../platform/outbox.port';
-
-/** Routing key for the "confirm your new email" message (consumed by eventa-worker). */
-export const IDENTITY_EMAIL_CHANGE_REQUESTED =
-  'identity.email_change_requested';
+import { IDENTITY_EMAIL_CHANGE_REQUESTED } from '../../../common/constants/users.constants';
 
 export interface EmailChangeRequestedInput {
   organizationId: number;

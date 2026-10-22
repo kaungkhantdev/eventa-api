@@ -4,14 +4,16 @@ import { Permission } from '../../common/decorators/require-permissions.decorato
 import type { AuthContext } from '../auth/auth.types';
 import { PermissionsService } from '../access/permissions.service';
 import {
-  DEFAULT_LIMIT,
-  MAX_LIMIT,
   type RegistrationCountsDto,
   type RegistrationEntryDto,
 } from './dto/registrations.dto';
 import { toRegistrationEntry } from './registrations.mapper';
 import { RegistrationsRepository } from './registrations.repository';
 import type { QueueAccess, RegistrationFilters } from './registrations.types';
+import {
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+} from '../../common/constants/registrations.constants';
 
 export interface ListRegistrationsQuery {
   page?: number;

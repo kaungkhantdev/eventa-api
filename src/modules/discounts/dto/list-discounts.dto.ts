@@ -12,10 +12,12 @@ import {
 } from 'class-validator';
 import { discountStatusEnum } from '../../../db/schema';
 import type { DiscountStatus } from '../discounts.types';
+import {
+  MAX_LIMIT,
+  MAX_SEARCH,
+} from '../../../common/constants/discounts.constants';
 
 const STATUSES: readonly DiscountStatus[] = discountStatusEnum.enumValues;
-const MAX_LIMIT = 100;
-const MAX_SEARCH = 120;
 
 export class ListDiscountsDto {
   @ApiPropertyOptional({ minimum: 1, default: 1 })

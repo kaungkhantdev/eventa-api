@@ -1,9 +1,6 @@
 import type { OutboxEventInput } from '../../platform/outbox.port';
 import type { Locale } from '../auth-booking-signup.types';
-
-/** Routing key for a booking's create-your-account email (consumed by eventa-worker). */
-export const IDENTITY_BOOKING_ACCOUNT_LINK_REQUESTED =
-  'identity.booking_account_link_requested';
+import { IDENTITY_BOOKING_ACCOUNT_LINK_REQUESTED } from '../../../common/constants/auth-booking-signup.constants';
 
 export interface BookingAccountLinkRequestedInput {
   /** The PLATFORM organization — every attendee account lives there (US-DISC-08). */

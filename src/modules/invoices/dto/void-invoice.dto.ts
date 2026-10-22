@@ -1,7 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsString, MaxLength } from 'class-validator';
-
-const MAX_REASON = 500;
+import { MAX_REASON } from '../../../common/constants/invoices.constants';
 
 /** Why an invoice was raised in error (US-FIN-10). Optional, but recorded. */
 export class VoidInvoiceDto {

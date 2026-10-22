@@ -21,6 +21,7 @@ import {
   organizations,
   seatAssignments,
   seatHolds,
+  seatMaps,
   seats,
   ticketTypes,
   tickets,
@@ -30,17 +31,26 @@ import type { BillableOrder } from '../invoices/ports/invoice-order.port';
 import { OutboxPort, type OutboxEventInput } from '../platform/outbox.port';
 import { rejectionRefunds } from '../registrations/registration-decision';
 import {
-  DECISION_HOLD_EXPIRY,
   isAwaitingApproval,
   isOnCheckoutClock,
   statusAfterRefund,
 } from './approval-rules';
+import { exceedsAllocation } from './allocation-rules';
 import type { OrderTotals } from './checkout-pricing';
+import { heldSeatsMatch, seatSellsUnder } from './held-seat-rules';
 import { RedemptionLedgerPort } from './ports/redemption-ledger.port';
-
-/** Fallbacks if a workspace row somehow has none — the Thai statutory rate. */
-const DEFAULT_VAT_RATE = 0.07;
-const DEFAULT_SERVICE_FEE_RATE = 0.05;
+import {
+  ACTIVE_HOLD,
+  AWAITING_DECISION,
+  DECIDED_ELSEWHERE,
+  DECISION_HOLD_EXPIRY,
+  DEFAULT_SERVICE_FEE_RATE,
+  DEFAULT_VAT_RATE,
+  LIVE_TICKET_STATUSES,
+  PAID_WHILE_DECIDING,
+  REFUND_REASON,
+  WAITLIST_ENTRY_COLUMNS,
+} from '../../common/constants/checkout.constants';
 
 /** The two rates that turn a ticket subtotal into what the attendee pays. */
 export interface OrgRates {
@@ -170,14 +180,6 @@ const WAITLISTED: OrderState = {
   paymentStatus: 'pending',
 };
 
-/** How a waitlist entry is read, wherever it is read from. */
-const WAITLIST_ENTRY_COLUMNS = {
-  order: orders,
-  ticketTypeId: orderItems.ticketTypeId,
-  ticketTypeName: ticketTypes.name,
-  quantity: orderItems.quantity,
-};
-
 /** What was placed — `replayed` when an identical request already did this. */
 export interface PlacedOrder {
   order: OrderRow;
@@ -284,27 +286,18 @@ interface SettlementContext {
   seatIds: number[];
   takenSeatIds: number[];
   /**
+   * Every held seat still sells under the order's ticket type (US-EVT-05). A
+   * lapsed hold does not keep its seat's type, so a payment landing late can
+   * find the seat given to another type.
+   */
+  seatTypesMatch: boolean;
+  /**
    * The order's places are already in `sold` — it has been waiting for approval
    * (US-REG-02). Counting them again would refuse the last place as sold out
    * because of the order itself, and leave `sold` one order too high.
    */
   placesCounted: boolean;
 }
-
-/**
- * Why money that arrived is going back, as the CODE `payment.refund_required`
- * carries. eventa-worker words each one for the buyer in their own language
- * (`REASONS` in its refund-notice.ts) — an English sentence here landed inside
- * the Thai email. Keep the two lists in step.
- */
-const REFUND_REASON = {
-  tierRemoved: 'tier_removed',
-  soldOut: 'soldout',
-  seatsTaken: 'seats_unavailable',
-  seatMismatch: 'seat_mismatch',
-  seatsReleased: 'seats_released',
-  orderClosed: 'order_closed',
-} as const;
 
 /**
  * The same four refusals, for whoever is about to read them. A buyer's is a
@@ -334,32 +327,19 @@ function settlementBlocker(
 ): string | null {
   const said = BLOCKERS[mode];
   if (!context.line) return said.noTier;
-  const { sold, total, quantity } = context.line;
-  const counted = context.placesCounted;
-  if (!counted && total !== UNLIMITED && sold + quantity > total) {
+  const { quantity } = context.line;
+  if (!context.placesCounted && exceedsAllocation(context.line, quantity)) {
     return said.soldOut;
   }
   if (context.takenSeatIds.length > 0) return said.seatsTaken;
-  // A reserved-seating order must seat every admission it is about to ticket.
+  // A reserved-seating order must seat every admission it is about to ticket,
+  // each in a seat its ticket type sells — never a VIP seat at Normal's price.
   if (context.seatIds.length > 0 && context.seatIds.length !== quantity) {
     return said.seatMismatch;
   }
+  if (!context.seatTypesMatch) return said.seatMismatch;
   return null;
 }
-
-/** The two states awaiting a decision — approvable, and rejectable. */
-const AWAITING_DECISION = ['pending', 'waitlisted'] as const;
-const DECIDED_ELSEWHERE =
-  'This registration was decided by someone else — refresh to see where it stands.';
-/** A payment landed between the organizer reading the list and clicking. */
-const PAID_WHILE_DECIDING =
-  'This registration was paid for while you were deciding — refresh to see where it stands.';
-
-/** An allocation of 0 means unlimited — mirrors `TicketingPolicy`. */
-const UNLIMITED = 0;
-const ACTIVE_HOLD = 'active';
-/** A ticket that still admits someone — the set a refund takes back. */
-const LIVE_TICKET_STATUSES = ['issued', 'checked_in'] as const;
 
 /**
  * Data access for the checkout, including THE money-path transaction
@@ -384,7 +364,9 @@ export class CheckoutRepository {
    *      thing, so a double-tapped Confirm returns the first registration rather
    *      than placing a second.
    *   2. The buyer's holds are re-checked as still active — a lapsed hold means
-   *      the inventory went back on sale and this order cannot be honoured.
+   *      the inventory went back on sale and this order cannot be honoured —
+   *      and, for seats, as holding exactly the seats that were priced, each of
+   *      this order's ticket type (US-DISC-04).
    *   3. The ticket type is locked `FOR UPDATE` before `sold` moves, so two
    *      confirms cannot push it past its allocation.
    *   4. Seat assignments rely on `uq_seat_active`: if another buyer's order won
@@ -403,6 +385,7 @@ export class CheckoutRepository {
       if (existing) return { ...existing, replayed: true };
 
       await this.assertHoldsStillActive(tx, input);
+      await this.assertHeldSeatsMatch(tx, input);
       const attendeeId = await this.upsertAttendee(tx, input);
       const order = await this.insertOrder(
         tx,
@@ -1252,12 +1235,49 @@ export class CheckoutRepository {
       .limit(1);
     const tier = item ? await this.lockTier(tx, item.ticketTypeId) : null;
     const seatIds = await this.heldSeatIds(tx, input, order.id);
+    const takenSeatIds = await this.seatsAlreadyAssigned(tx, input, seatIds);
+    const seatTypesMatch =
+      !item ||
+      (await this.seatsSellUnder(tx, input, order.eventId, seatIds, item));
     return {
       line: item && tier ? { ...item, ...tier } : null,
       seatIds,
-      takenSeatIds: await this.seatsAlreadyAssigned(tx, input, seatIds),
+      takenSeatIds,
+      seatTypesMatch,
       placesCounted: isAwaitingApproval(order),
     };
+  }
+
+  /**
+   * Whether every one of `seatIds` sells under `ticketTypeId` (US-EVT-05).
+   * Read after `seatsAlreadyAssigned` has locked the seats, so a seat map
+   * save retyping them has either committed or waits behind this.
+   */
+  private async seatsSellUnder(
+    tx: Tx,
+    input: SettleOrderInput,
+    eventId: string,
+    seatIds: number[],
+    line: { ticketTypeId: string },
+  ): Promise<boolean> {
+    if (seatIds.length === 0) return true;
+    const held = await tx
+      .select({ ticketTypeId: seats.ticketTypeId })
+      .from(seats)
+      .where(
+        and(
+          eq(seats.organizationId, input.organizationId),
+          inArray(seats.id, seatIds),
+        ),
+      );
+    const mapTyped = await this.mapHasTypedSeats(
+      tx,
+      input.organizationId,
+      eventId,
+    );
+    return held.every((s) =>
+      seatSellsUnder(s.ticketTypeId, line.ticketTypeId, mapTyped),
+    );
   }
 
   /**
@@ -1489,6 +1509,75 @@ export class CheckoutRepository {
     );
   }
 
+  /**
+   * A reserved order is seated from its holds (a paid one when the money
+   * lands) but priced from the seats the request named, so the two must be the
+   * same seats, each selling under this order's ticket type — or a buyer could
+   * hold a VIP seat and pay the Normal price for it. Plain reads, no locks: a
+   * seat with an active hold cannot change type (US-EVT-05), so neither answer
+   * can move.
+   */
+  private async assertHeldSeatsMatch(
+    tx: Tx,
+    input: PlaceOrderInput,
+  ): Promise<void> {
+    if (!input.seatIds || input.seatIds.length === 0) return;
+    const held = await tx
+      .select({ seatId: seatHolds.seatId })
+      .from(seatHolds)
+      .where(
+        and(
+          eq(seatHolds.organizationId, input.organizationId),
+          inArray(seatHolds.id, input.holdIds),
+          isNotNull(seatHolds.seatId),
+        ),
+      );
+    const priced = await tx
+      .select({ id: seats.id, ticketTypeId: seats.ticketTypeId })
+      .from(seats)
+      .where(
+        and(
+          eq(seats.organizationId, input.organizationId),
+          inArray(seats.id, input.seatIds),
+        ),
+      );
+    const match = heldSeatsMatch({
+      pricedSeatIds: input.seatIds,
+      heldSeatIds: held.flatMap((h) => (h.seatId === null ? [] : [h.seatId])),
+      seatTypes: new Map(priced.map((s) => [s.id, s.ticketTypeId])),
+      ticketTypeId: input.ticketTypeId,
+      mapTyped: await this.mapHasTypedSeats(
+        tx,
+        input.organizationId,
+        input.eventId,
+      ),
+    });
+    if (match) return;
+    throw DomainException.conflict('Your seats changed. Please choose again.');
+  }
+
+  /** Whether any seat of the event's map has a ticket type (US-EVT-05). */
+  private async mapHasTypedSeats(
+    tx: Tx,
+    organizationId: number,
+    eventId: string,
+  ): Promise<boolean> {
+    const [typed] = await tx
+      .select({ id: seats.id })
+      .from(seats)
+      .innerJoin(seatMaps, eq(seats.seatMapId, seatMaps.id))
+      .where(
+        and(
+          eq(seats.organizationId, organizationId),
+          eq(seatMaps.eventId, eventId),
+          isNull(seatMaps.deletedAt),
+          isNotNull(seats.ticketTypeId),
+        ),
+      )
+      .limit(1);
+    return typed !== undefined;
+  }
+
   /** This buyer's entry for this ticket, if they are already in line. */
   private async alreadyWaiting(
     tx: Tx,
@@ -1677,15 +1766,14 @@ export class CheckoutRepository {
     if (!tier) {
       throw DomainException.conflict('That ticket type is no longer on sale.');
     }
-    const sold = tier.sold + input.quantity;
-    if (tier.total !== UNLIMITED && sold > tier.total) {
+    if (exceedsAllocation(tier, input.quantity)) {
       throw DomainException.conflict(
         'Those tickets sold out while you were checking out. Please choose again.',
       );
     }
     await tx
       .update(ticketTypes)
-      .set({ sold, updatedAt: input.now })
+      .set({ sold: tier.sold + input.quantity, updatedAt: input.now })
       .where(eq(ticketTypes.id, input.ticketTypeId));
   }
 

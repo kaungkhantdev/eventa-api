@@ -7,11 +7,10 @@ import {
   type CheckInRate,
   CheckInInsightsPort,
 } from '../dashboard/ports/operations-insights.port';
-
-/** A ticket that entitles someone to walk in — the denominator of the rate. */
-const ADMISSIBLE = ['issued', 'checked_in'] as const;
-/** Only an event that has actually happened can have a turnout. */
-const HELD_STATUSES = ['live', 'completed'] as const;
+import {
+  ADMISSIBLE,
+  HELD_STATUSES,
+} from '../../common/constants/check-in.constants';
 
 /**
  * Check-in's implementation of the Dashboard-owned attendance port

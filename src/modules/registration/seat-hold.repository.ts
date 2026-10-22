@@ -22,10 +22,9 @@ import {
 import { withTenant, type Tx } from '../../db/tenant';
 import type { CheckoutSeat } from '../checkout/checkout.types';
 import type { HoldQuantityResult, HoldSeatsResult } from './seat-hold.types';
+import { ACTIVE } from '../../common/constants/registration.constants';
 
 type NewSeatHold = typeof seatHolds.$inferInsert;
-
-const ACTIVE = 'active' as const;
 
 /**
  * Data access for the checkout seat-hold engine. These methods run the money-path
@@ -46,10 +45,15 @@ export class SeatHoldRepository {
    * (freeing the `uq_seat_hold_active` unique), then re-checks availability under
    * the lock before inserting. A seat is holdable only if it exists, belongs to
    * this event, is `available`, has no active hold, and has no live assignment.
+   * Each hold records the tier being bought, as a GA hold does (US-DISC-04),
+   * so the tier is locked first (`FOR KEY SHARE`, what the hold's foreign key
+   * takes anyway): tier before seats is the order a seat map's save and an
+   * order's settlement lock in, and the reverse order deadlocks with them.
    */
   async holdSeats(
     organizationId: number,
     eventId: string,
+    ticketTypeId: string,
     seatIds: number[],
     expiresAt: Date,
     now: Date,
@@ -61,6 +65,16 @@ export class SeatHoldRepository {
     if (ids.length === 0) return { ok: false, unavailableSeatIds: [] };
 
     return withTenant(this.db, organizationId, async (tx) => {
+      await tx
+        .select({ id: ticketTypes.id })
+        .from(ticketTypes)
+        .where(
+          and(
+            eq(ticketTypes.organizationId, organizationId),
+            eq(ticketTypes.id, ticketTypeId),
+          ),
+        )
+        .for('key share');
       const locked = await tx
         .select()
         .from(seats)
@@ -99,6 +113,7 @@ export class SeatHoldRepository {
           ids.map((seatId): NewSeatHold => ({
             organizationId,
             eventId,
+            ticketTypeId,
             seatId,
             quantity: 1,
             status: ACTIVE,
@@ -274,6 +289,87 @@ export class SeatHoldRepository {
   }
 
   /**
+   * Seats per ticket type on the event's live seat map; a type with none is
+   * absent. On a reserved event whose seats have types this is each type's
+   * quantity (US-EVT-05).
+   */
+  async seatsByTicketType(
+    organizationId: number,
+    eventId: string,
+  ): Promise<Map<string, number>> {
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .select({
+          ticketTypeId: seats.ticketTypeId,
+          seats: sql<number>`count(*)::int`,
+        })
+        .from(seats)
+        .innerJoin(seatMaps, eq(seats.seatMapId, seatMaps.id))
+        .where(
+          and(
+            eq(seats.organizationId, organizationId),
+            eq(seatMaps.eventId, eventId),
+            isNull(seatMaps.deletedAt),
+            isNotNull(seats.ticketTypeId),
+          ),
+        )
+        .groupBy(seats.ticketTypeId);
+      return new Map(
+        rows.flatMap((r) =>
+          r.ticketTypeId ? [[r.ticketTypeId, r.seats]] : [],
+        ),
+      );
+    });
+  }
+
+  /**
+   * Seats on a live seat map whose row sells `ticketTypeId`, inside the
+   * caller's transaction — a ticket type's removal, which has locked the type
+   * so a seat map's save cannot give it a row meanwhile (US-TKT-05).
+   */
+  async seatsOfTicketTypeIn(
+    tx: Tx,
+    organizationId: number,
+    ticketTypeId: string,
+  ): Promise<number> {
+    const [row] = await tx
+      .select({ seats: sql<number>`count(*)::int` })
+      .from(seats)
+      .innerJoin(seatMaps, eq(seats.seatMapId, seatMaps.id))
+      .where(
+        and(
+          eq(seats.organizationId, organizationId),
+          eq(seats.ticketTypeId, ticketTypeId),
+          isNull(seatMaps.deletedAt),
+        ),
+      );
+    return row?.seats ?? 0;
+  }
+
+  /** Of `eventIds`, the events whose live seat map has a seat with a ticket type. */
+  async eventsWithTypedSeats(
+    organizationId: number,
+    eventIds: string[],
+  ): Promise<Set<string>> {
+    if (eventIds.length === 0) return new Set();
+    return withTenant(this.db, organizationId, async (tx) => {
+      const rows = await tx
+        .selectDistinct({ eventId: seatMaps.eventId })
+        .from(seats)
+        .innerJoin(seatMaps, eq(seats.seatMapId, seatMaps.id))
+        .where(
+          and(
+            eq(seats.organizationId, organizationId),
+            inArray(seatMaps.eventId, eventIds),
+            isNull(seatMaps.deletedAt),
+            isNotNull(seats.ticketTypeId),
+          ),
+        );
+      return new Set(rows.map((r) => r.eventId));
+    });
+  }
+
+  /**
    * Is a checkout still holding this tier? Only unexpired `active` holds count —
    * a lapsed one reserves nothing and must not block the organizer (US-TKT-05).
    */
@@ -297,6 +393,37 @@ export class SeatHoldRepository {
         .limit(1);
       return row !== undefined;
     });
+  }
+
+  /**
+   * Of `seatIds`, the ones booked (a seat assignment not yet released) or held
+   * (an `active` hold unexpired at `now`), read inside the caller's
+   * transaction — the seat map's save, so a row somebody booked or is checking
+   * out with keeps its ticket type (US-EVT-05).
+   */
+  async occupiedSeatIdsIn(
+    tx: Tx,
+    organizationId: number,
+    seatIds: number[],
+    now: Date,
+  ): Promise<Set<number>> {
+    if (seatIds.length === 0) return new Set();
+    const held = await tx
+      .select({ seatId: seatHolds.seatId })
+      .from(seatHolds)
+      .where(
+        and(
+          eq(seatHolds.organizationId, organizationId),
+          inArray(seatHolds.seatId, seatIds),
+          eq(seatHolds.status, ACTIVE),
+          gt(seatHolds.expiresAt, now),
+        ),
+      );
+    const booked = await this.assignedSeatIds(tx, organizationId, seatIds);
+    const heldIds = held
+      .map((h) => h.seatId)
+      .filter((id): id is number => id !== null);
+    return new Set([...heldIds, ...booked]);
   }
 
   /** Release active holds early (buyer abandoned checkout) — frees the inventory. */

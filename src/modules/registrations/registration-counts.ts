@@ -3,15 +3,13 @@ import type {
   RegistrationCounts,
   RegistrationStatus,
 } from './registrations.types';
+import { PUBLISHED } from '../../common/constants/registrations.constants';
 
 /** One row of the queue's `GROUP BY status`, as the repository selects it. */
 export interface StatusTally {
   status: RegistrationStatus;
   count: number;
 }
-
-/** The statuses this build is able to publish a field for. */
-const PUBLISHED: ReadonlySet<string> = new Set(orderStatusEnum.enumValues);
 
 /**
  * Grouped row counts → the queue's tab totals (US-REG-01).

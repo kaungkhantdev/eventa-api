@@ -6,11 +6,8 @@ import type { AuthContext } from '../auth/auth.types';
 import { EventsService } from '../events/events.service';
 import { inviteSentEvent } from './events/invite-sent.event';
 import { InvitationsRepository } from './invitations.repository';
-import {
-  INVITE_DEDUPE_WINDOW_MS,
-  type InviteOutcome,
-  type SendInviteInput,
-} from './invitations.types';
+import { type InviteOutcome, type SendInviteInput } from './invitations.types';
+import { INVITE_DEDUPE_WINDOW_MS } from '../../common/constants/invitations.constants';
 
 /**
  * Inviting someone to an event (US-REG-06).

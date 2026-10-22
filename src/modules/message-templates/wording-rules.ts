@@ -1,4 +1,5 @@
 import { DomainException } from '../../common/errors/domain.exception';
+import { TAG } from '../../common/constants/message-templates.constants';
 
 export interface LocaleWording {
   subject: string;
@@ -14,9 +15,6 @@ const LANGUAGE: Record<keyof Wording, string> = {
   en: 'English',
   th: 'Thai',
 };
-
-/** `{{ first_name }}` — whitespace inside the braces is what people type. */
-const TAG = /\{\{\s*([\w.]+)\s*\}\}/g;
 
 /**
  * Merge fields the text uses that this message cannot fill.

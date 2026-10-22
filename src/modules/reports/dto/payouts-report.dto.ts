@@ -1,9 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  REPORT_PAYOUT_STATUSES,
-  type ReportPayoutStatus,
-} from '../ports/payout-report.port';
+import { type ReportPayoutStatus } from '../ports/payout-report.port';
 import { ReportPeriodDto } from './report-common.dto';
+import { REPORT_PAYOUT_STATUSES } from '../../../common/constants/reports.constants';
 
 /** An event a payout settles money for. */
 export class PayoutCoveredEventDto {

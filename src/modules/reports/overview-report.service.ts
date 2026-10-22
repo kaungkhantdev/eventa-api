@@ -28,6 +28,7 @@ import {
   type TrendGranularity,
   type TrendPoint,
 } from './revenue-trend';
+import { PERCENT } from '../../common/constants/reports.constants';
 
 /**
  * Workspace health at a glance (US-RPT-01).
@@ -86,8 +87,6 @@ export interface OverviewReportView {
   /** Largest share first. Empty when nothing was sold in the window. */
   ticketMix: TicketMixSlice[];
 }
-
-const PERCENT = 100;
 
 @Injectable()
 export class OverviewReportService {

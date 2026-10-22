@@ -1,14 +1,17 @@
 import { HttpStatus } from '@nestjs/common';
 import type { DomainException } from '../../common/errors/domain.exception';
 import type { Clock } from '../../common/time/clock';
-import { EVENTS_ATTENDEES_EMAIL_REQUESTED } from '../events/events/attendees-email-requested.event';
-import { ALREADY_CANCELLED, ALREADY_SENT } from './announcement-schedule';
 import type {
   AnnouncementListRow,
   AnnouncementsRepository,
 } from './announcements.repository';
 import { AnnouncementsService } from './announcements.service';
 import { organizerAuth } from '../../../test/support/auth-context';
+import { EVENTS_ATTENDEES_EMAIL_REQUESTED } from '../../common/constants/events.constants';
+import {
+  ALREADY_CANCELLED,
+  ALREADY_SENT,
+} from '../../common/constants/announcements.constants';
 
 const NOW = new Date('2026-07-31T09:00:00.000Z');
 const auth = organizerAuth();

@@ -13,15 +13,15 @@ import {
 } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { organizations, ticketStatusEnum, ticketTypes } from '../../db/schema';
-import { withTenant } from '../../db/tenant';
+import { type Tx, withTenant } from '../../db/tenant';
 import type {
   NewTicketValues,
+  RemovalGuard,
   SearchTicketsOptions,
   TicketRow,
   TicketStatusCounts,
 } from './ticketing.types';
-
-const DEFAULT_VAT_RATE = 0.07;
+import { DEFAULT_VAT_RATE } from '../../common/constants/ticketing.constants';
 
 /** Data access for the Ticketing context. All reads/writes are tenant-scoped. */
 @Injectable()
@@ -60,6 +60,10 @@ export class TicketingRepository {
     });
   }
 
+  /**
+   * In the order they were added, ties by id — the public page's order too, so
+   * a ticket's seat colour is the same in the wizard and on the page (US-EVT-05).
+   */
   async listByEvent(
     organizationId: number,
     eventId: string,
@@ -75,7 +79,7 @@ export class TicketingRepository {
             isNull(ticketTypes.deletedAt),
           ),
         )
-        .orderBy(asc(ticketTypes.createdAt)),
+        .orderBy(asc(ticketTypes.createdAt), asc(ticketTypes.id)),
     );
   }
 
@@ -216,8 +220,13 @@ export class TicketingRepository {
     });
   }
 
-  async softDelete(organizationId: number, ticketId: string): Promise<boolean> {
+  async softDelete(
+    organizationId: number,
+    ticketId: string,
+    guard: RemovalGuard,
+  ): Promise<boolean> {
     return withTenant(this.db, organizationId, async (tx) => {
+      await this.lockForRemoval(tx, organizationId, ticketId, guard);
       const rows = await tx
         .update(ticketTypes)
         .set({ deletedAt: new Date() })
@@ -237,8 +246,13 @@ export class TicketingRepository {
    * Erase a tier outright — only ever called for one that never sold (US-TKT-05),
    * so no order, issued ticket or seat assignment can reference it.
    */
-  async hardDelete(organizationId: number, ticketId: string): Promise<boolean> {
+  async hardDelete(
+    organizationId: number,
+    ticketId: string,
+    guard: RemovalGuard,
+  ): Promise<boolean> {
     return withTenant(this.db, organizationId, async (tx) => {
+      await this.lockForRemoval(tx, organizationId, ticketId, guard);
       const rows = await tx
         .delete(ticketTypes)
         .where(
@@ -251,6 +265,82 @@ export class TicketingRepository {
         .returning({ id: ticketTypes.id });
       return rows.length > 0;
     });
+  }
+
+  /**
+   * Lock the tier `FOR UPDATE`, then let `guard` judge its removal in the same
+   * transaction. A seat map's save locks the event's tiers before it gives a
+   * seat a type (US-EVT-05), so the two take turns: the guard sees any seat a
+   * save gave this tier, and a save that comes second no longer finds it.
+   * Judged before the lock, a save could slip in between, and the seats'
+   * foreign key (`ON DELETE SET NULL`) would quietly clear those seats' type.
+   */
+  private async lockForRemoval(
+    tx: Tx,
+    organizationId: number,
+    ticketId: string,
+    guard: RemovalGuard,
+  ): Promise<void> {
+    await tx
+      .select({ id: ticketTypes.id })
+      .from(ticketTypes)
+      .where(
+        and(
+          eq(ticketTypes.id, ticketId),
+          eq(ticketTypes.organizationId, organizationId),
+        ),
+      )
+      .for('update');
+    await guard(tx);
+  }
+
+  /**
+   * The event's live tiers, row-locked in id order inside the caller's
+   * transaction — the seat map's save (US-EVT-05). `FOR NO KEY UPDATE`: the
+   * save changes quantities, never a key, so a seat hold's foreign key on the
+   * tier is not made to wait behind it.
+   */
+  lockLiveByEventIn(
+    tx: Tx,
+    organizationId: number,
+    eventId: string,
+  ): Promise<TicketRow[]> {
+    return tx
+      .select()
+      .from(ticketTypes)
+      .where(
+        and(
+          eq(ticketTypes.organizationId, organizationId),
+          eq(ticketTypes.eventId, eventId),
+          isNull(ticketTypes.deletedAt),
+        ),
+      )
+      .orderBy(asc(ticketTypes.id))
+      .for('no key update');
+  }
+
+  /** A tier's quantity and the status it implies, inside the caller's transaction. */
+  async setTotalIn(
+    tx: Tx,
+    organizationId: number,
+    ticketId: string,
+    total: number,
+    status: TicketRow['status'],
+  ): Promise<void> {
+    await tx
+      .update(ticketTypes)
+      .set({
+        total,
+        status,
+        version: sql`${ticketTypes.version} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(ticketTypes.id, ticketId),
+          eq(ticketTypes.organizationId, organizationId),
+        ),
+      );
   }
 
   /** Number of live tiers on the event (guards "can't remove the last one"). */

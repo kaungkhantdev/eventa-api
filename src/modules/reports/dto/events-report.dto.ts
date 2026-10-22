@@ -1,9 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  EVENT_LIFECYCLES,
-  type EventLifecycle,
-} from '../ports/event-performance.port';
+import { type EventLifecycle } from '../ports/event-performance.port';
 import { ReportPeriodDto } from './report-common.dto';
+import { EVENT_LIFECYCLES } from '../../../common/constants/reports.constants';
 
 /** One event's standing, best-first by registrations (US-RPT-04). */
 export class EventPerformanceRowDto {

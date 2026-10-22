@@ -6,10 +6,14 @@ import type { TicketRow } from './ticketing.types';
 
 const iso = (d: Date | null): string | null => (d ? d.toISOString() : null);
 
-/** Map a ticket_types row to its response DTO, adding the VAT-inclusive split. */
+/**
+ * Map a ticket_types row to its response DTO, adding the VAT-inclusive split.
+ * `quantityFromSeats`: the event's seat map sets `total` (US-EVT-05).
+ */
 export function toTicketResponse(
   t: TicketRow,
   vatRate: number,
+  quantityFromSeats: boolean,
 ): TicketResponseDto {
   const { grossSatang, netSatang, vatSatang } = vatInclusiveBreakdown(
     t.priceSatang,
@@ -33,6 +37,7 @@ export function toTicketResponse(
     salesStartAt: iso(t.salesStartAt),
     salesEndAt: iso(t.salesEndAt),
     version: t.version,
+    quantityFromSeats,
   };
 }
 
@@ -41,9 +46,10 @@ export function toUpdatedTicketResponse(
   t: TicketRow,
   vatRate: number,
   waitlist: WaitlistOfferOutcome,
+  quantityFromSeats: boolean,
 ): UpdatedTicketResponseDto {
   return {
-    ...toTicketResponse(t, vatRate),
+    ...toTicketResponse(t, vatRate, quantityFromSeats),
     waitlistOffered: waitlist.offered,
     waitlistOfferInterrupted: waitlist.interrupted,
   };

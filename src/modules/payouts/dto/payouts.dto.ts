@@ -4,8 +4,7 @@ import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 import { payoutStatusEnum } from '../../../db/schema';
 import type { PayoutStatus } from '../payouts.types';
 import type { TimelineEntry } from '../payout-timeline';
-
-const MAX_LIMIT = 100;
+import { MAX_LIMIT } from '../../../common/constants/payouts.constants';
 
 export class ListPayoutsDto {
   @ApiPropertyOptional({ minimum: 1, default: 1 })

@@ -16,10 +16,11 @@ import type {
   RegistrationPayment,
   RegistrationStatus,
 } from '../registrations.types';
-
-export const DEFAULT_LIMIT = 20;
-export const MAX_LIMIT = 100;
-const MAX_SEARCH = 120;
+import {
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+  MAX_SEARCH,
+} from '../../../common/constants/registrations.constants';
 
 /** Narrow the registrations queue (US-REG-01). */
 export class ListRegistrationsDto {

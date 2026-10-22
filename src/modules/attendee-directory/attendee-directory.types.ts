@@ -1,4 +1,5 @@
 import type { attendeeTagEnum } from '../../db/schema';
+import { CONTACT_FIELDS } from '../../common/constants/attendee-directory.constants';
 
 export type AttendeeTag = (typeof attendeeTagEnum.enumValues)[number];
 
@@ -45,9 +46,6 @@ export interface SegmentCounts {
 }
 
 // ── Keeping contact details current (US-REG-08) ──────────────────────────────
-
-/** The three fields an organizer may correct, in the order they are reported. */
-export const CONTACT_FIELDS = ['name', 'email', 'phone'] as const;
 
 export type ContactField = (typeof CONTACT_FIELDS)[number];
 

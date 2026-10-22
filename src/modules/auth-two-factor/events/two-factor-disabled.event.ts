@@ -1,7 +1,5 @@
 import type { OutboxEventInput } from '../../platform/outbox.port';
-
-/** Routing key for the "two-factor was turned off" notice (consumed by the worker). */
-export const IDENTITY_TWO_FACTOR_DISABLED = 'identity.two_factor_disabled';
+import { IDENTITY_TWO_FACTOR_DISABLED } from '../../../common/constants/auth-two-factor.constants';
 
 export interface TwoFactorDisabledInput {
   organizationId: number;

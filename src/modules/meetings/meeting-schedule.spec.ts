@@ -1,12 +1,11 @@
+import { assertSchedulable, placeOf } from './meeting-schedule';
 import {
   DATE_PAST,
   END_BEFORE_START,
   MIN_TITLE,
   PHONE_LOCATION,
   TITLE_REQUIRED,
-  assertSchedulable,
-  placeOf,
-} from './meeting-schedule';
+} from '../../common/constants/meetings.constants';
 
 const NOW = new Date('2026-08-07T09:00:00Z'); // 16:00 Bangkok, 7 Aug
 

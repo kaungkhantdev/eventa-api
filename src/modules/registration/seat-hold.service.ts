@@ -13,8 +13,7 @@ import type {
   SeatHoldRow,
 } from './seat-hold.types';
 import { TicketEligibilityPolicy } from './ticket-eligibility.policy';
-
-const MS_PER_SECOND = 1000;
+import { MS_PER_SECOND } from '../../common/constants/registration.constants';
 
 /**
  * The checkout seat-hold engine: reserve inventory for a buyer while they check
@@ -56,6 +55,7 @@ export class SeatHoldService {
     const result = await this.repo.holdSeats(
       actor.organizationId,
       input.eventId,
+      input.ticketTypeId,
       seatIds,
       this.expiryFrom(now),
       now,

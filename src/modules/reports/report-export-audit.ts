@@ -3,6 +3,7 @@ import type {
   TabularDocument,
 } from '../../common/export/tabular';
 import type { ExportRecord } from '../audit/audit.service';
+import { SCOPE_SEPARATOR } from '../../common/constants/reports.constants';
 
 /**
  * What the audit trail records about a report export (US-RPT-12 AC3: who
@@ -13,8 +14,6 @@ import type { ExportRecord } from '../audit/audit.service';
  * carried, and the filters it states — so the trail describes the file that
  * actually left, not the request that asked for it.
  */
-
-const SCOPE_SEPARATOR = ' · ';
 
 export function exportAuditEntry(
   format: ExportFormat,

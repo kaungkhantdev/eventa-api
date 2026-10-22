@@ -2,8 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Gauge, Registry, collectDefaultMetrics } from 'prom-client';
 import { OutboxLagRepository } from './outbox-lag.repository';
 import { safeError } from '../../common/errors/safe-error';
-
-const PREFIX = 'eventa_';
+import { PREFIX } from '../../common/constants/metrics.constants';
 
 /**
  * What the API tells Prometheus.

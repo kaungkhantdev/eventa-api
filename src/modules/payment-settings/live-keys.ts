@@ -1,5 +1,4 @@
-/** The one environment where charging a real card is the intended outcome. */
-const PRODUCTION = 'production';
+import { PRODUCTION } from '../../common/constants/payment-settings.constants';
 
 /**
  * Whether this server will accept a workspace's LIVE Stripe keys.

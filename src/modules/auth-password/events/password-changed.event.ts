@@ -1,7 +1,5 @@
 import type { OutboxEventInput } from '../../platform/outbox.port';
-
-/** Routing key for the "your password was changed" notice (consumed by the worker). */
-export const IDENTITY_PASSWORD_CHANGED = 'identity.password_changed';
+import { IDENTITY_PASSWORD_CHANGED } from '../../../common/constants/auth-password.constants';
 
 export interface PasswordChangedInput {
   organizationId: number;

@@ -19,14 +19,12 @@ import { PasswordService } from '../auth-password/auth-password.service';
 import { SignupRepository } from './auth-signup.repository';
 import { ResendThrottleService } from '../../common/throttle/resend-throttle.service';
 import { TokenService } from '../auth/token.service';
-
-const CHECK_INBOX_MESSAGE =
-  'Check your inbox to confirm your email and finish signing up.';
-const INVALID_LINK_MESSAGE =
-  'This confirmation link is invalid or has expired. Request a new one.';
-const NO_ATTENDEE_WORKSPACE_MESSAGE =
-  "An attendee account doesn't have a workspace — leave organizationName out.";
-const NAME_TAKEN_MESSAGE = 'That workspace name is already taken. Try another.';
+import {
+  CHECK_INBOX_MESSAGE,
+  INVALID_LINK_MESSAGE,
+  NAME_TAKEN_MESSAGE,
+  NO_ATTENDEE_WORKSPACE_MESSAGE,
+} from '../../common/constants/auth-signup.constants';
 
 export interface RegisterInput {
   name: string;

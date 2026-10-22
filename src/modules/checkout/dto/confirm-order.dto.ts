@@ -16,13 +16,14 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { MAX_SEATS_PER_BOOKING } from '../../../common/booking/booking.limits';
-
-const MAX_NAME = 120;
-const MAX_EMAIL = 254;
-const MAX_PHONE = 24;
-const MAX_CODE = 24;
-const MIN_IDEMPOTENCY_KEY = 8;
-const MAX_IDEMPOTENCY_KEY = 128;
+import {
+  MAX_CODE,
+  MAX_EMAIL,
+  MAX_IDEMPOTENCY_KEY,
+  MAX_NAME,
+  MAX_PHONE,
+  MIN_IDEMPOTENCY_KEY,
+} from '../../../common/constants/checkout.constants';
 
 /**
  * Who is registering. A guest gives these directly; a signed-in attendee gets

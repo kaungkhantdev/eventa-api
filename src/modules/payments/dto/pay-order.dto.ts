@@ -4,8 +4,10 @@ import {
   PAYMENT_METHOD_CHOICES,
   type PaymentMethodChoice,
 } from '../ports/payment-provider.port';
-const MIN_IDEMPOTENCY_KEY = 8;
-const MAX_IDEMPOTENCY_KEY = 128;
+import {
+  MAX_IDEMPOTENCY_KEY,
+  MIN_IDEMPOTENCY_KEY,
+} from '../../../common/constants/payments.constants';
 
 /**
  * Start collecting an order's total (US-DISC-05). Note what is absent: any

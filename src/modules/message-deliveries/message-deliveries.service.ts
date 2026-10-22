@@ -7,20 +7,12 @@ import {
   type DeliveryFilter,
   type DeliveryRow,
 } from './message-deliveries.repository';
-
-const DEFAULT_PAGE = 1;
-const DEFAULT_LIMIT = 20;
-
-/**
- * How many rows an export carries.
- *
- * A ceiling rather than no limit: US-MSG-07's "very large export" belongs with
- * the prepared-file-and-notification slice, and until that exists a log of a
- * hundred thousand sends is truncated rather than left to time out mid-download.
- */
-const EXPORT_LIMIT = 5000;
-const NOTHING_TO_EXPORT =
-  'There is nothing to export — no messages match these filters.';
+import {
+  DEFAULT_LIMIT,
+  DEFAULT_PAGE,
+  EXPORT_LIMIT,
+  NOTHING_TO_EXPORT,
+} from '../../common/constants/message-deliveries.constants';
 
 export type DeliveriesQuery = Partial<
   Pick<DeliveryFilter, 'status' | 'kind' | 'q' | 'page' | 'limit'>

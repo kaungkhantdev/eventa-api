@@ -28,8 +28,8 @@ enumerate the finished epics and list what was "still to come", and it was wrong
 named payouts, VAT periods, check-in, the dashboard and messaging as unbuilt long after all five shipped.
 A reader who trusted it would have rebuilt working modules. So the inventory lives where it cannot drift:
 
-- **What exists** — `ls src/modules` (54 today), `ls src/db/migrations` (`0000`…`0071`), and the
-  committed `pgTable` definitions in `src/db/schema` (57 tables).
+- **What exists** — `ls src/modules` (55 today), `ls src/db/migrations` (`0000`…`0075`), and the
+  committed `pgTable` definitions in `src/db/schema` (58 tables).
 - **What is left** — the `US-*` backlog in
   [`../eventa-docs/01-requirements-and-features/functional-requirements.md`](../eventa-docs/01-requirements-and-features/functional-requirements.md),
   which is the only place a story's acceptance criteria live. Before building, find the story and quote
@@ -50,7 +50,7 @@ The build plan is **not in this repo** — it lives in the sibling SDLC docs at 
 these before adding anything:
 - [`../eventa-docs/05-development/development-guide.md`](../eventa-docs/05-development/development-guide.md) — how to build *this* repo (layout, conventions, the feature playbook). **Primary reference.**
 - [`../eventa-docs/04-architecture/software-architecture.md`](../eventa-docs/04-architecture/software-architecture.md) — the SAD (modular monolith, outbox, checkout consistency, ADRs).
-- [`../eventa-docs/04-architecture/entities.md`](../eventa-docs/04-architecture/entities.md) + `erd.md` — the data dictionary: **57 tables**, all of which exist today. Note the direction: those documents are **read back from the live schema**, so where a document and the database disagree the database wins and the *document* is corrected. **This repo owns the schema & migrations**, so the committed `pgTable` definitions are the inventory — and `entities.md` is where you learn *why* a table exists.
+- [`../eventa-docs/04-architecture/entities.md`](../eventa-docs/04-architecture/entities.md) + `erd.md` — the data dictionary: **58 tables**, all of which exist today. Note the direction: those documents are **read back from the live schema**, so where a document and the database disagree the database wins and the *document* is corrected. **This repo owns the schema & migrations**, so the committed `pgTable` definitions are the inventory — and `entities.md` is where you learn *why* a table exists.
 - [`../eventa-docs/01-requirements-and-features/functional-requirements.md`](../eventa-docs/01-requirements-and-features/functional-requirements.md) — the product backlog; a `US-*` story's acceptance criteria become your tests ([test cases](../eventa-docs/06-testing/test-cases.md)).
 
 Polyrepo siblings: `../eventa-web` (React front-end, reads this API's `openapi.json`), `../eventa-worker`
@@ -70,6 +70,7 @@ pnpm install
 pnpm start:dev         # watch dev server (nest start --watch); listens on $PORT or 3000
 pnpm build             # nest build → dist/  (nest-cli deleteOutDir wipes dist/ first)
 pnpm start:prod        # node dist/main
+pnpm migrate:prod      # node dist/db/migrate.main.js — the image's migration entry (needs DATABASE_URL)
 pnpm lint              # eslint --fix (type-aware; also applies prettier)
 pnpm typecheck         # tsc --noEmit over src + test (+ drizzle.config.ts) — the only type check the specs get
 pnpm format            # prettier --write
@@ -96,6 +97,17 @@ pnpm migrate           # apply pending migrations, each in its own transaction (
 pnpm seed              # seeds the `acme` tenant + admin@acme.test, idempotent (src/db/seed.ts)
 pnpm db:studio         # drizzle-kit studio — browse the local DB
 ```
+
+**Container image:** one `Dockerfile`, twelve-factor. `docker build .` gives the production image (the
+last stage: compiled JS, production dependencies only, `USER 1000`, read-only at run time, `CMD ["node",
+"dist/main"]`); `--target dev` gives the watch-mode image the umbrella `eventa/docker-compose.yml` runs.
+Its header maps each factor to where it is kept. Keep the image needing no file to boot: config is the
+environment (`.dockerignore` keeps every `.env` out), and anything the code reads from disk at run time
+must be in `dist/` or copied by the `prod` stage (today: `dist/assets` fonts, `src/db/migrations`).
+The reverse holds too: every file `nest build` compiles ships, and runs with `node dist/...`, so dev
+scripts stay out of `dist/`. `tsconfig.build.json` excludes `src/db/seed.ts` (it recreates
+`admin@acme.test` with a published password), and `src/production-dependencies.spec.ts` fails on any
+compiled file that runs on load other than `main.ts` and `db/migrate.main.ts`.
 
 Swagger UI is at `/api/docs`, the spec at `/api/docs/json`; `openapi.json` is also written to the repo
 root on boot when `EMIT_OPENAPI=true` **and** `NODE_ENV` is not `production` (git-ignored —
@@ -147,7 +159,7 @@ the development guide when implementing:
   (`event-categories.service.ts` → `EventCategoriesService`). Related modules share a **name prefix** so
   they sort together: `auth`, `auth-signup`, `auth-password` · `events`, `event-categories`,
   `event-program`, `event-seating`, `event-sharing`, `event-monitoring`, `event-duplication`.
-  **`ls src/modules` is the list** — 54 of them, and a prose copy here went stale by fourteen before
+  **`ls src/modules` is the list** — 55 of them, and a prose copy here went stale by fourteen before
   anybody noticed. What a listing cannot tell you is which name means what, so these are the ones worth
   knowing before you add a sibling next to them: `auth` (sign-in, tokens, sessions) and its prefix family
   (`auth-signup`, `auth-booking-signup` — an account from a booking, only via the link emailed to the
@@ -157,15 +169,19 @@ the development guide when implementing:
   (provider seam + webhooks) · the finance family (`invoices`, `tax-periods` — the monthly VAT ledger and
   PP30 filing, `payouts`) · `platform` (the transactional outbox, and only that — its docstring reserves
   idempotency, audit and jobs for later, so do not go looking for them there; `audit` is its own
-  module and order idempotency lives in `checkout`/`payments`).
-  Tree: `src/db/`, `src/modules/<name>/`, `src/common/` (`guards/`, `decorators/`, `interceptors/`,
-  `filters/`, `http/`, `util/`, tenancy), plus a generated `openapi.json`.
+  module and order idempotency lives in `checkout`/`payments`) · `calendar-connection` (the workspace
+  Google Calendar, US-MTG-08: `GET /calendar-connection` for any console member, `POST
+  /calendar-connection/connect` and `/disconnect` with `setIntegrations`, and the public OAuth callback
+  `GET /public/calendar-connection/google/callback` — the one `@Res()` redirect in `src`, always a 302
+  back to Settings → Integrations; `meetings` owns the diary and eventa-worker sends the invites).
+  Tree: `src/db/`, `src/modules/<name>/`, `src/common/` (`constants/`, `guards/`, `decorators/`,
+  `interceptors/`, `filters/`, `http/`, `util/`, tenancy), plus a generated `openapi.json`.
 - **Cross-cutting code lives in `src/common/`, never in a domain module.** A guard, decorator, pipe or
   helper used by more than one module belongs in `common/guards/`, `common/decorators/`, `common/util/`
   etc. — so a controller never imports from an unrelated domain module just to annotate a route
   (`JwtAuthGuard`, `PermissionsGuard`, `AdminGuard`, `AttendeeGuard`, `@CurrentAuth`, `@RequirePermissions`, `slugify`).
-  A module-local default belongs to the module (e.g. an event's slug fallback is a `const` in
-  `events.service.ts`, not a wrapper file that shadows the shared util).
+  A module-local helper belongs to the module, not to `common` (e.g. `events.service.ts` calls the shared
+  `slugify` with its own `EVENT_SLUG_FALLBACK` rather than adding a wrapper file that shadows the util).
 - **Multi-tenancy: scope every query by `organization_id`** *and* Postgres **RLS**
   (`SET LOCAL app.current_org` per transaction) — defence in depth.
 - **The consistency split is the core design decision.** Money/inventory (checkout, seat holds, ticket
@@ -175,7 +191,9 @@ the development guide when implementing:
   the relay ships it to RabbitMQ and a consumer (in `eventa-worker`) handles it. **Never dual-write.**
 - **Drizzle ORM** (SQL-first). Schema in `src/db/schema` (TS) → `pnpm drizzle-kit generate --name <x>`
   diffs it to **plain-SQL** migrations (reviewed in the PR) → `pnpm migrate` applies them, each in its own
-  transaction (`scripts/migrate.ts` → `src/db/migrator.ts`). **Never `drizzle-kit migrate` directly**: it applies
+  transaction (`scripts/migrate.ts` → `src/db/migration-runner.ts` → `src/db/migrator.ts`). The production
+  image runs the same runner compiled, `node dist/db/migrate.main.js`, which must never import drizzle-kit,
+  tsx or `drizzle.config.ts` (devDependencies; the image has none). **Never `drizzle-kit migrate` directly**: it applies
   every pending migration in ONE transaction, Postgres refuses to use an enum value in the transaction that
   added it, and 0052 uses keys that 0034/0038/0042 add — so on a fresh database (CI, a new machine, a first
   deploy) the whole batch rolls back to an empty schema. The journal is drizzle's own, so either tool can
@@ -268,11 +286,13 @@ its own `ports/` folder; the **owner** implements it as an adapter and binds it
 (`{ provide: EventStatsPort, useClass: RegistrationStatsAdapter }`). So Events reads registration numbers
 without importing Registration's tables. Use `forwardRef` **only** for a genuine bidirectional dependency
 (auth↔access, auth↔auth-signup, auth↔auth-password, auth↔auth-social, auth↔users, events↔ticketing,
-ticketing↔registration, ticketing↔checkout — which pulls discounts→ticketing into the cycle too, and
-payment-settings→ticketing now that checkout asks PaymentSettings which methods are on — invoices↔payments)
-— not to paper over a bad boundary. Ports in play — the cross-context reads worth knowing; there are 52
-`*Port` abstract classes today and `grep -rn 'abstract class .*Port' src` is the inventory (the
-`reports`/`dashboard` read families and the payment-setup ports are not listed here):
+events↔event-seating — the publish gate asks Seating about the seats' ticket types, US-EVT-05, which also defers
+event-seating's import of ticketing, since that reaches events — ticketing↔registration, ticketing↔checkout —
+which pulls discounts→ticketing into the cycle too, and payment-settings→ticketing now that checkout asks
+PaymentSettings which methods are on — invoices↔payments) — not to paper over a bad boundary. Ports in
+play — the cross-context reads worth knowing; there are 58 `*Port` abstract classes today and
+`grep -rn 'abstract class .*Port' src` is the inventory (the `reports`/`dashboard` read families and the
+payment-setup ports are not listed here):
 `TicketAvailabilityPort` ·
 `EventStatsPort` · `TicketSalesPort` ·
 `TicketEligibilityPort` (Registration asks Ticketing "may this tier be sold right now?") ·
@@ -292,10 +312,22 @@ transaction) · `TaxableSalesPort` (the VAT ledger asks
 Payments what was collected each month) · `SettledFundsPort` (Payouts asks Payments what has settled) ·
 `PayoutAccountPort` (Payouts asks PaymentSettings whether a payout account is connected) ·
 `CheckInEventPort` (the door asks Events whether it may admit, which is also its tenancy check) ·
-`BookingClaimOrderPort` (AuthBookingSignup asks Checkout which booking a claim link names, US-DISC-15). Provider seams
-(infrastructure behind an abstract class, not cross-context reads): `SocialVerifierPort` (OAuth token
-verification) · `PaymentProviderPort` (the PSP adapter — PCI SAQ-A; also carries the payout settings link
-and payout retry) · `ObjectStoragePort` (S3 for profile photos).
+`BookingClaimOrderPort` (AuthBookingSignup asks Checkout which booking a claim link names, US-DISC-15) ·
+`TicketQuantityPort` (Seating locks the event's tiers and sets each one's quantity to the seats it
+holds through Ticketing, in the seat map's transaction, US-EVT-05 — a seat has its own type, a whole
+row being a shorthand) · `SeatOccupancyPort` (Seating asks Registration which seats are booked or held,
+in that transaction, so a booked or held seat keeps its type while the rest of its row may move) ·
+`SeatingReadinessPort` (the publish gate asks Seating, via `seatsReadiness`, whether every seat has a
+ticket type and every type a seat: `seatsWithoutType`, `ticketTypesWithoutSeats`) · `TicketSeatsPort`
+(Ticketing asks Registration how many seats each tier holds, so a seat-set quantity is read-only and a
+tier with seats can't be retired) · `PublicSeatMapPort` (the public page asks Seating each seat's
+ticket type, row by row — `seatTicketTypes`, with the row's `ticketTypeId` null when its seats differ —
+US-PAGE-05).
+Provider seams (infrastructure behind an abstract class, not cross-context reads): `SocialVerifierPort`
+(OAuth token verification) · `PaymentProviderPort` (the PSP adapter — PCI SAQ-A; also carries the
+payout settings link and payout retry) · `ObjectStoragePort` (S3 for profile photos) ·
+`GoogleOAuthPort` (the Google Calendar consent, code exchange and revoke — real, fake or off by
+`CALENDAR_PROVIDER`; the fake is refused in production).
 
 **5. Register it in `app.module.ts`** and write the module docstring: what it owns, what it depends on, and
 why any `forwardRef` exists.
@@ -307,11 +339,18 @@ flow. **The e2e suite is what proves the DI graph resolves — a green `tsc` doe
 - **Business rules live in a policy / domain service / validator** — never scattered in controllers or inlined.
 - **Custom, meaningful exceptions** — throw `DomainException` (factories `.notFound()`/`.forbidden()`/
   `.conflict()`/`.validation()`) with a stable `ErrorCode`; never leak internals.
-- **Enums over magic strings** (`pgEnum`, `ErrorCode`); **constants over magic numbers** (module-level `const`).
+- **Enums over magic strings** (`pgEnum`, `ErrorCode`); **constants over magic numbers**, kept in
+  `src/common/constants/<module>.constants.ts` (one file per module, e.g. `account-deletion.constants.ts`
+  holds that module's messages, limits and routing keys). A constants file never imports from
+  `src/modules`, so a constant that needs its module's own types or functions stays beside them in the
+  module — and so does a library options object that one function is built around (the description
+  sanitizer's allowlist in `events/rich-text.ts`). Name a constant for what it is in the whole module, not
+  in the one file that uses it (`INVOICE_PAGE_WIDTH`, not `WIDTH`).
 - **No hard-coding** — never inline a literal that has a canonical home. Magic strings → enums (`pgEnum`,
-  `ErrorCode`, `Persona`); magic numbers / limits / timeouts → module-level `const` (`DEFAULT_LIMIT`,
-  `MAX_LIMIT`); env, hosts, ports, URLs, secrets, credentials, feature flags → `ConfigService` (zod `Env`),
-  **never** a string literal or `process.env` in app code; money & tax rates (VAT 7%, service fee) and
+  `ErrorCode`, `Persona`); magic numbers / limits / timeouts / user-facing messages → a named constant in
+  `src/common/constants/<module>.constants.ts` (`DEFAULT_LIMIT`, `MAX_LIMIT`); env, hosts, ports, URLs,
+  secrets, credentials, feature flags → `ConfigService` (zod `Env`), **never** a string literal or
+  `process.env` in app code; money & tax rates (VAT 7%, service fee) and
   quotas (per-booking seat cap) → the org-settings row or a named constant, never sprinkled literals.
   **Derive from the single source of truth**: Swagger `enum` lists and DTO validators read the Drizzle
   `pgEnum().enumValues`; seeds and tests reference the same constants — don't re-type the values. Rule of

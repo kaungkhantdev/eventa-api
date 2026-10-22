@@ -1,7 +1,5 @@
 import type { OutboxEventInput } from '../../platform/outbox.port';
-
-/** Routing key for the sign-in event (consumed by eventa-worker). */
-export const IDENTITY_SIGNED_IN = 'identity.signed_in';
+import { IDENTITY_SIGNED_IN } from '../../../common/constants/auth.constants';
 
 export interface SignedInInput {
   organizationId: number;

@@ -1,7 +1,5 @@
 import type { OutboxEventInput } from '../../platform/outbox.port';
-
-/** Routing key for a sign-up the organizer turned down. */
-export const REGISTRATION_REJECTED = 'registration.rejected';
+import { REGISTRATION_REJECTED } from '../../../common/constants/checkout.constants';
 
 export interface RegistrationRejectedInput {
   organizationId: number;

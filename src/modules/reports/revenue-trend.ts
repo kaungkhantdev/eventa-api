@@ -1,4 +1,9 @@
 import { BANGKOK_OFFSET_MS, DAY_MS } from '../../common/time/bangkok';
+import {
+  MAX_DAILY_DAYS,
+  MAX_WEEKLY_DAYS,
+  TREND_GRANULARITIES,
+} from '../../common/constants/reports.constants';
 
 /**
  * The overview's revenue chart (US-RPT-01).
@@ -26,12 +31,7 @@ export interface TrendPoint {
   netSatang: number;
 }
 
-export const TREND_GRANULARITIES = ['day', 'week', 'month'] as const;
 export type TrendGranularity = (typeof TREND_GRANULARITIES)[number];
-
-/** Beyond these, a daily (then weekly) chart stops being readable. */
-const MAX_DAILY_DAYS = 31;
-const MAX_WEEKLY_DAYS = 120;
 
 /**
  * How finely to plot a window of `days`.

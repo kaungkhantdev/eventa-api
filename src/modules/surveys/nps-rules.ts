@@ -1,11 +1,8 @@
-/** The scale a recommendation question is answered on. */
-export const MIN_NPS_SCORE = 0;
-export const MAX_NPS_SCORE = 10;
-
-/** The standard NPS bands: 9–10 promote, 7–8 are passive, 0–6 detract. */
-const PROMOTER_FROM = 9;
-const DETRACTOR_UP_TO = 6;
-const PERCENT = 100;
+import {
+  DETRACTOR_UP_TO,
+  PERCENT,
+  PROMOTER_FROM,
+} from '../../common/constants/surveys.constants';
 
 export interface NpsSummary {
   answers: number;

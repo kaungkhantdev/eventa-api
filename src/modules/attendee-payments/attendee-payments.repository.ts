@@ -15,12 +15,13 @@ import type {
   TransactionStatus,
   TransactionSummary,
 } from './attendee-payments.types';
+import {
+  DEFAULT_VAT_RATE,
+  MAX_EXPORT,
+} from '../../common/constants/attendee-payments.constants';
 
 /** Only settled money is a transaction; attempts that never charged are not. */
 const SETTLED: readonly TransactionStatus[] = ['paid', 'refunded'];
-/** An export is one person's purchases — bounded, but capped for sanity. */
-const MAX_EXPORT = 1000;
-const DEFAULT_VAT_RATE = 0.07;
 
 /**
  * The number of the invoice issued for the payment's order (US-DISC-10). At

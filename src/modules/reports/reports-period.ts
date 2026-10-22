@@ -1,5 +1,10 @@
 import { DomainException } from '../../common/errors/domain.exception';
 import { BANGKOK_OFFSET_MS, DAY_MS } from '../../common/time/bangkok';
+import {
+  DAY_PATTERN,
+  MAX_SPAN_DAYS,
+  REPORT_RANGES,
+} from '../../common/constants/reports.constants';
 
 /**
  * The window a report covers, and the one it is compared against (US-RPT-02).
@@ -13,8 +18,6 @@ import { BANGKOK_OFFSET_MS, DAY_MS } from '../../common/time/bangkok';
  * days, has to refuse the ones that make no sense, and is capped.
  */
 
-/** The ranges the overview's toggle offers (US-RPT-01). */
-export const REPORT_RANGES = ['7d', '30d', '90d', 'year'] as const;
 export type ReportRange = (typeof REPORT_RANGES)[number];
 
 const RANGE_DAYS: Record<ReportRange, number> = {
@@ -26,17 +29,6 @@ const RANGE_DAYS: Record<ReportRange, number> = {
 
 /** What the overview opens on, matching the dashboard's own default range. */
 const DEFAULT_RANGE: ReportRange = 'year';
-
-/**
- * Two years and the leap day between them.
- *
- * US-RPT-02 caps a span at 24 months. Expressed in days because every other
- * window in this codebase is day arithmetic, and because a calendar-month cap
- * would make the limit itself depend on which months were asked for.
- */
-export const MAX_SPAN_DAYS = 731;
-
-const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export interface ReportPeriodRequest {
   /** A Bangkok calendar day, `YYYY-MM-DD`. Wins over `range` when both are given. */

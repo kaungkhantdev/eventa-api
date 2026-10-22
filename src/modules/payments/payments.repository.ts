@@ -10,12 +10,10 @@ import {
 } from '../../db/schema';
 import { withTenant, type Tx } from '../../db/tenant';
 import type { VerifiedWebhook } from './ports/payment-provider.port';
+import { BANGKOK } from '../../common/constants/payments.constants';
 
 export type PaymentRow = typeof payments.$inferSelect;
 export type RefundRow = typeof refunds.$inferSelect;
-
-/** Tax periods and invoice dates are the organizer's calendar day, not UTC's. */
-const BANGKOK = 'Asia/Bangkok';
 
 /** Everything one refund attempt writes (US-FIN-02). */
 export interface ClaimRefundInput {

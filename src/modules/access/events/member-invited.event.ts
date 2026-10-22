@@ -1,7 +1,5 @@
 import type { OutboxEventInput } from '../../platform/outbox.port';
-
-/** Routing key for a teammate's join link (consumed by eventa-worker). */
-export const IDENTITY_MEMBER_INVITED = 'identity.member_invited';
+import { IDENTITY_MEMBER_INVITED } from '../../../common/constants/access.constants';
 
 export interface MemberInvitedInput {
   organizationId: number;

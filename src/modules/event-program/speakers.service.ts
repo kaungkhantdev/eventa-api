@@ -14,6 +14,12 @@ import type {
   SpeakerRow,
   UpdateSpeakerInput,
 } from './speakers.types';
+import {
+  CONFIRM_SPEAKER_REMOVAL,
+  DEFAULT_LIMIT,
+  DUPLICATE_EMAIL,
+  MAX_LIMIT,
+} from '../../common/constants/event-program.constants';
 
 /** Fields a PATCH may set on a speaker. */
 const UPDATABLE_KEYS: (keyof NewSpeakerValues & keyof UpdateSpeakerInput)[] = [
@@ -30,15 +36,6 @@ const UPDATABLE_KEYS: (keyof NewSpeakerValues & keyof UpdateSpeakerInput)[] = [
   'website',
   'socialLinks',
 ];
-
-export const DEFAULT_LIMIT = 24;
-export const MAX_LIMIT = 100;
-
-const CONFIRM_SPEAKER_REMOVAL =
-  'Removing this speaker takes them off ALL of their sessions and cannot be undone. Re-send with confirm=true to proceed.';
-
-const DUPLICATE_EMAIL =
-  'Another speaker on this event already uses that email address.';
 
 /** Manage an event's speaker line-up (Events & Program context). */
 @Injectable()

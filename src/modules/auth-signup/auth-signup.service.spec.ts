@@ -9,8 +9,8 @@ import { SignupService } from './auth-signup.service';
 import type { SignupRepository } from './auth-signup.repository';
 import type { ResendThrottleService } from '../../common/throttle/resend-throttle.service';
 import type { TokenService } from '../auth/token.service';
-import { IDENTITY_EMAIL_VERIFICATION_REQUESTED } from './events/email-verification-requested.event';
 import { outboxDouble } from '../../../test/support/outbox-double';
+import { IDENTITY_EMAIL_VERIFICATION_REQUESTED } from '../../common/constants/auth-signup.constants';
 
 const NOW = new Date('2026-07-31T00:00:00.000Z');
 const newAccount = {

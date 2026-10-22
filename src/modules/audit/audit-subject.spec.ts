@@ -1,5 +1,6 @@
 import { contactAuditSubject } from '../attendee-directory/attendee-contact.audit';
-import { AUDIT_SUBJECT_TYPES, toSubjectFilter } from './audit-subject';
+import { toSubjectFilter } from './audit-subject';
+import { AUDIT_SUBJECT_TYPES } from '../../common/constants/audit.constants';
 
 describe('resolving an audit subject to a filter (US-REG-08 AC5)', () => {
   it('reads the prefix from the writer that records it, not a copy', () => {

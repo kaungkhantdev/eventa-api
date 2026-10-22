@@ -7,11 +7,11 @@ import type {
   DirectoryFilters,
   SegmentCounts,
 } from './attendee-directory.types';
+import { type AttendeeEntryDto } from './dto/directory.dto';
 import {
   DEFAULT_LIMIT,
   MAX_LIMIT,
-  type AttendeeEntryDto,
-} from './dto/directory.dto';
+} from '../../common/constants/attendee-directory.constants';
 
 export type ListAttendeesQuery = Partial<DirectoryFilters>;
 

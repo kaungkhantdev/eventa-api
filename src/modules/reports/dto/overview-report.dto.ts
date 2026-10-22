@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { TREND_GRANULARITIES, type TrendGranularity } from '../revenue-trend';
+import { type TrendGranularity } from '../revenue-trend';
 import { PeriodChangeDto, ReportPeriodDto } from './report-common.dto';
+import { TREND_GRANULARITIES } from '../../../common/constants/reports.constants';
 
 export class OverviewKpiDto {
   @ApiProperty({

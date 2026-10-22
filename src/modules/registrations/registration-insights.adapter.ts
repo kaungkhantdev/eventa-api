@@ -9,11 +9,10 @@ import {
   type RegistrationTotals,
   type TierShare,
 } from '../dashboard/ports/registration-insights.port';
-
-/** A sign-up counts once it is confirmed — a pending one may never happen. */
-const COUNTED = 'confirmed';
-/** The two states awaiting an organizer, mirroring `registration-decision.ts`. */
-const AWAITING = ['pending', 'waitlisted'] as const;
+import {
+  AWAITING,
+  COUNTED,
+} from '../../common/constants/registrations.constants';
 
 /**
  * Registrations' implementation of the Dashboard-owned insights port

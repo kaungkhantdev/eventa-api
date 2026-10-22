@@ -15,6 +15,37 @@ class SeatMapSummaryDto {
   totalSeats!: number;
 }
 
+/** One row of a reserved map and the ticket types its seats sell (US-EVT-05). */
+class SeatRowDto {
+  @ApiProperty({ example: '1', description: 'Rows are numbered "1".."N"' })
+  rowLabel!: string;
+
+  @ApiProperty({
+    format: 'uuid',
+    nullable: true,
+    type: String,
+    description:
+      'The ticket type every seat of the row sells; null when its seats sell different types or none',
+  })
+  ticketTypeId!: string | null;
+
+  @ApiProperty({ example: 12 })
+  seats!: number;
+
+  @ApiProperty({
+    type: 'array',
+    items: { type: 'string', format: 'uuid', nullable: true },
+    example: [
+      '3f1c2b4a-0000-4000-8000-000000000003',
+      '3f1c2b4a-0000-4000-8000-000000000002',
+      null,
+    ],
+    description:
+      "Each seat's ticket type in seat-number order (index 0 = seat 1); null for a seat with none",
+  })
+  seatTicketTypes!: (string | null)[];
+}
+
 class SeatShortfallDto {
   @ApiProperty({ example: 120 })
   totalSeats!: number;
@@ -36,6 +67,22 @@ export class SeatingResponseDto {
 
   @ApiProperty({ type: SeatMapSummaryDto, nullable: true })
   seatMap!: SeatMapSummaryDto | null;
+
+  @ApiProperty({
+    type: [SeatRowDto],
+    description:
+      'Every row of a reserved map in number order; empty for general admission',
+  })
+  rows!: SeatRowDto[];
+
+  @ApiProperty({
+    example: 0,
+    description: 'Rows with at least one seat that has no ticket type yet',
+  })
+  unassignedRows!: number;
+
+  @ApiProperty({ example: 0, description: 'Seats with no ticket type yet' })
+  unassignedSeats!: number;
 
   @ApiProperty({ example: 200, description: 'Sum of ticket-tier quantities' })
   ticketQuantity!: number;

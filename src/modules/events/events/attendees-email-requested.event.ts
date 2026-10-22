@@ -1,8 +1,5 @@
 import type { OutboxEventInput } from '../../platform/outbox.port';
-
-/** Routing key for an organizer's "Email all attendees" broadcast request. */
-export const EVENTS_ATTENDEES_EMAIL_REQUESTED =
-  'events.attendees_email_requested';
+import { EVENTS_ATTENDEES_EMAIL_REQUESTED } from '../../../common/constants/events.constants';
 
 export interface AttendeesEmailRequestedInput {
   organizationId: number;

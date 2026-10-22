@@ -10,10 +10,11 @@ import {
 } from './auth-password.repository';
 import { PasswordService } from './auth-password.service';
 import { passwordChangedEvent } from './events/password-changed.event';
-
-const WRONG_CURRENT = 'Your current password is incorrect.';
-const REUSED = 'Please choose a password different from your current one.';
-const CHANGED = 'Your password has been changed.';
+import {
+  CHANGED,
+  REUSED,
+  WRONG_CURRENT,
+} from '../../common/constants/auth-password.constants';
 
 /** Change a password while signed in (US-ACC-05 / US-SET-02). */
 @Injectable()

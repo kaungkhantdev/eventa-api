@@ -1,7 +1,5 @@
 import type { OutboxEventInput } from '../../platform/outbox.port';
-
-/** Routing key for a seat offered to someone on the waitlist (US-REG-04). */
-export const WAITLIST_OFFERED = 'waitlist.offered';
+import { WAITLIST_OFFERED } from '../../../common/constants/checkout.constants';
 
 export interface WaitlistOfferedInput {
   organizationId: number;

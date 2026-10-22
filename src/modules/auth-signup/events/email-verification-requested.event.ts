@@ -1,8 +1,5 @@
 import type { OutboxEventInput } from '../../platform/outbox.port';
-
-/** Routing key for a new account's email-confirmation (consumed by eventa-worker). */
-export const IDENTITY_EMAIL_VERIFICATION_REQUESTED =
-  'identity.email_verification_requested';
+import { IDENTITY_EMAIL_VERIFICATION_REQUESTED } from '../../../common/constants/auth-signup.constants';
 
 export interface EmailVerificationRequestedInput {
   organizationId: number;

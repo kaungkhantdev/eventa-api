@@ -2,6 +2,8 @@
 export interface EventBrief {
   id: string;
   name: string;
+  /** `ga` or `reserved` — a reserved map can set the tiers' quantities (US-EVT-05). */
+  seatingMode: string;
 }
 
 /**

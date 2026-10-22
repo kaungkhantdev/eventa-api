@@ -1,4 +1,5 @@
 import sanitizeHtml from 'sanitize-html';
+import { EMPTY_PARAGRAPH } from '../../common/constants/events.constants';
 
 /**
  * The event description, made safe to render.
@@ -58,9 +59,6 @@ const ALLOWED: sanitizeHtml.IOptions = {
   // them only where the content is itself the payload.
   nonTextTags: ['style', 'script', 'textarea', 'option', 'noscript'],
 };
-
-/** An editor that has been typed into and cleared still emits this. */
-const EMPTY_PARAGRAPH = /^(<p>(\s|<br\s*\/?>|&nbsp;)*<\/p>)+$/;
 
 export function sanitizeDescription(html: string): string {
   const clean = sanitizeHtml(html, ALLOWED).trim();

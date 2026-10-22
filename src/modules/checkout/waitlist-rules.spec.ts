@@ -1,13 +1,15 @@
 import {
-  WAITLIST_CLOSED,
-  WAITLIST_RESERVED_SEATING,
-  WAITLIST_TICKETS_LEFT,
   autoOffersWaitlist,
   canJoinWaitlist,
   confirmsOnOffer,
   hasOpenWaitlist,
   waitlistRefusal,
 } from './waitlist-rules';
+import {
+  WAITLIST_CLOSED,
+  WAITLIST_RESERVED_SEATING,
+  WAITLIST_TICKETS_LEFT,
+} from '../../common/constants/checkout.constants';
 
 const OPEN = { waitlistEnabled: true, seatingMode: 'ga' as const };
 const SOLD_OUT = { status: 'soldout' as const };

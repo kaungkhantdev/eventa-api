@@ -6,8 +6,8 @@ import type {
   PayoutReportRow,
   PayoutReportTotals,
 } from './ports/payout-report.port';
-import { DEFAULT_REPORT_LIMIT } from './dto/report-filter.query.dto';
 import { resolveReportPeriod } from './reports-period';
+import { DEFAULT_REPORT_LIMIT } from '../../common/constants/reports.constants';
 
 /**
  * The payouts report (US-RPT-07).

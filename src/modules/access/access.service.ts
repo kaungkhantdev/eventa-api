@@ -4,7 +4,7 @@ import { DomainException } from '../../common/errors/domain.exception';
 import { Paginated } from '../../common/http/paginated';
 import { TokenService } from '../auth/token.service';
 import { PermissionsService } from './permissions.service';
-import { ADMIN_ROLE, AccessRepository } from './access.repository';
+import { AccessRepository } from './access.repository';
 import { Clock } from '../../common/time/clock';
 import type { Env } from '../../config/env.validation';
 import { OutboxPort } from '../platform/outbox.port';
@@ -21,9 +21,11 @@ import type {
   MemberStatusCounts,
   RoleWithPermissions,
 } from './access.types';
-
-const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 100;
+import {
+  ADMIN_ROLE,
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+} from '../../common/constants/access.constants';
 
 /** Team-member administration: invite, list, and re-assign a member's role. */
 @Injectable()

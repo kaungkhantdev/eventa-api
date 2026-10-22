@@ -1,10 +1,10 @@
 import {
-  DECISION_HOLD_EXPIRY,
   isAwaitingApproval,
   isOnCheckoutClock,
   placementFor,
   statusAfterRefund,
 } from './approval-rules';
+import { DECISION_HOLD_EXPIRY } from '../../common/constants/checkout.constants';
 
 describe('approval rules (US-REG-02 — require approval, pay first)', () => {
   describe('placementFor', () => {

@@ -4,8 +4,7 @@ import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { paymentSettings } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
 import { PaymentSetupPort } from '../dashboard/ports/workspace-setup.port';
-
-const CONNECTED = 'connected';
+import { CONNECTED } from '../../common/constants/payment-settings.constants';
 
 /**
  * Payment settings' answer to "could this workspace take money today"

@@ -12,17 +12,10 @@ import {
   type IncomeWindow,
 } from '../reports/ports/income-report.port';
 import type { NetRevenueDay } from '../reports/revenue-trend';
-
-/**
- * Every payment that took money. A settled refund flips its payment to
- * `refunded` (`markRefundedIn`), and that payment still collected its gross —
- * scanning `paid` alone dropped it from gross AND from refunds, so a completed
- * refund vanished from the report instead of showing as money that went back.
- */
-const COLLECTED: ('paid' | 'refunded')[] = ['paid', 'refunded'];
-
-/** Only a refund that moved the money back counts as one (US-RPT-05). */
-const SETTLED_REFUND = 'succeeded';
+import {
+  COLLECTED,
+  SETTLED_REFUND,
+} from '../../common/constants/payments.constants';
 
 /**
  * Payments' implementation of the income report (US-RPT-05), so Reports never

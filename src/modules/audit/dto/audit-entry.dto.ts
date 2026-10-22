@@ -1,8 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import type { AuditRecord } from '../audit.repository';
-
-/** Anything that looks like a secret is shown as a hint, never in full. */
-const SECRET_HINT = /((?:sk|pk|rk)_[A-Za-z0-9_]+|[A-Za-z0-9]{24,})/g;
+import { SECRET_HINT } from '../../../common/constants/audit.constants';
 
 /** One immutable entry in the security & access log (US-SET-05). */
 export class AuditEntryDto {

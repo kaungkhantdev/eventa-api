@@ -11,8 +11,7 @@ import type {
   DiscountQuoteResult,
 } from './discounts.types';
 import type { DiscountSnapshot } from './discounts.types';
-
-const SATANG_PER_BAHT = 100;
+import { SATANG_PER_BAHT } from '../../common/constants/discounts.constants';
 
 /**
  * Applying a code at checkout (US-TKT-11) — the attendee-facing half of

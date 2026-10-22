@@ -31,6 +31,7 @@ interface Ticket {
   vatSatang: number;
   total: number;
   status: string;
+  quantityFromSeats: boolean;
 }
 
 describe('Ticket types (e2e — US-EVT-06)', () => {
@@ -132,6 +133,33 @@ describe('Ticket types (e2e — US-EVT-06)', () => {
     expect(res.status).toBe(200);
     const names = (res.body as Success<Ticket[]>).data.map((t) => t.name);
     expect(names).toEqual(expect.arrayContaining(['VIP', 'Free']));
+  });
+
+  // Student and Standard were added in one moment, so their ids settle it —
+  // the order the public page uses, so a ticket keeps its seat colour on
+  // both (US-EVT-05). Each id sorts apart from the order of entry.
+  it('lists the tiers in the order they were added, ties by id', async () => {
+    const jwt = await token(ADMIN, ORG.slug);
+    const ordered = await createEvent(jwt, 'Ordered Event');
+    await pool.query(
+      `INSERT INTO ticket_types (id, organization_id, event_id, name, price_satang, is_free, total, created_at)
+       SELECT v.id::uuid, e.organization_id, e.id, v.name, 50000, false, 10, now() - v.age::interval
+         FROM events e,
+              (VALUES ('ffffffff-0000-4000-8000-000000000021','Early bird','2 minutes'),
+                      ('bbbbbbbb-0000-4000-8000-000000000022','Standard','1 minute'),
+                      ('aaaaaaaa-0000-4000-8000-000000000023','Student','1 minute'))
+                AS v(id, name, age)
+        WHERE e.id = $1`,
+      [ordered],
+    );
+    const res = await request(server)
+      .get(`/api/v1/events/${ordered}/tickets`)
+      .set('Authorization', `Bearer ${jwt}`);
+    expect((res.body as Success<Ticket[]>).data.map((t) => t.name)).toEqual([
+      'Early bird',
+      'Student',
+      'Standard',
+    ]);
   });
 
   it('rejects lowering total below what has already sold (422)', async () => {
@@ -522,6 +550,200 @@ describe('Ticket types (e2e — US-EVT-06)', () => {
     expect((res.body as { message: string }).message).toMatch(/pause/i);
   });
 
+  describe('on a reserved event whose rows have ticket types (US-EVT-05)', () => {
+    let gala: string;
+    let vip: string;
+    let normal: string;
+    let jwt: string;
+
+    const tickets = (id: string) =>
+      request(server)
+        .get(`/api/v1/events/${id}/tickets`)
+        .set('Authorization', `Bearer ${jwt}`);
+    const patch = (ticketId: string, body: Record<string, unknown>) =>
+      request(server)
+        .patch(`/api/v1/events/${gala}/tickets/${ticketId}`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send(body);
+    const add = async (id: string, body: Record<string, unknown>) => {
+      const res = await request(server)
+        .post(`/api/v1/events/${id}/tickets`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send(body)
+        .expect(201);
+      return (res.body as Success<Ticket>).data;
+    };
+
+    beforeAll(async () => {
+      jwt = await token(ADMIN, ORG.slug);
+      gala = await createEvent(jwt, 'Seat Rows Gala');
+      vip = (await add(gala, { name: 'VIP', priceSatang: 250000, total: 100 }))
+        .id;
+      normal = (
+        await add(gala, { name: 'Normal', priceSatang: 89000, total: 100 })
+      ).id;
+      // 4 rows × 3 seats: rows 1 VIP, rows 2–4 Normal.
+      await request(server)
+        .put(`/api/v1/events/${gala}/seating/reserved`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({
+          name: 'Hall',
+          rows: 4,
+          seatsPerRow: 3,
+          rowTicketTypes: [vip, normal, normal, normal],
+        })
+        .expect(200);
+    });
+
+    it('lists each quantity as its seats, set by the seat map', async () => {
+      const res = await tickets(gala).expect(200);
+      const list = res.body as Success<Ticket[]>;
+      expect(
+        list.data.map((t) => [t.name, t.total, t.quantityFromSeats]),
+      ).toEqual([
+        ['VIP', 3, true],
+        ['Normal', 9, true],
+      ]);
+    });
+
+    it('refuses a different quantity (409) but saves the same one with other changes', async () => {
+      const refused = await patch(normal, { total: 100 });
+      expect(refused.status).toBe(409);
+      expect((refused.body as { message: string }).message).toBe(
+        "This event's ticket quantities come from its seat map. Give rows to a ticket type instead.",
+      );
+      const saved = await patch(normal, { total: 9, name: 'Standard' });
+      expect(saved.status).toBe(200);
+      expect((saved.body as Success<Ticket>).data).toMatchObject({
+        name: 'Standard',
+        total: 9,
+        quantityFromSeats: true,
+      });
+      // 3 seats, 8 per order: still editable — the rows set the quantity.
+      await patch(vip, { name: 'VIP Lounge' }).expect(200);
+    });
+
+    it('starts a new ticket type at 0 seats until it gets rows', async () => {
+      const late = await add(gala, {
+        name: 'Late',
+        priceSatang: 50000,
+        total: 40,
+      });
+      expect(late).toMatchObject({ total: 0, quantityFromSeats: true });
+      // A type with no rows can go.
+      await request(server)
+        .delete(`/api/v1/events/${gala}/tickets/${late.id}`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .expect(200);
+    });
+
+    it('refuses to delete a type that still has seats (409)', async () => {
+      const res = await request(server)
+        .delete(`/api/v1/events/${gala}/tickets/${vip}`)
+        .set('Authorization', `Bearer ${jwt}`);
+      expect(res.status).toBe(409);
+      expect((res.body as { message: string }).message).toBe(
+        'VIP Lounge still has seats. Give them to another ticket type first.',
+      );
+      await tickets(gala)
+        .expect(200)
+        .then((r) =>
+          expect(
+            (r.body as Success<Ticket[]>).data.map((t) => t.name),
+          ).toContain('VIP Lounge'),
+        );
+    });
+
+    it('refuses a delete that a seat map save beat to the type (409), never leaving its row untyped', async () => {
+      const gold = await add(gala, { name: 'Gold', priceSatang: 300000 });
+      const layout = (first: string) =>
+        request(server)
+          .put(`/api/v1/events/${gala}/seating/reserved`)
+          .set('Authorization', `Bearer ${jwt}`)
+          .send({
+            name: 'Hall',
+            rows: 4,
+            seatsPerRow: 3,
+            rowTicketTypes: [first, normal, normal, normal],
+          });
+      const remove = () =>
+        request(server)
+          .delete(`/api/v1/events/${gala}/tickets/${gold.id}`)
+          .set('Authorization', `Bearer ${jwt}`);
+      // Another transaction holds Gold the way a hold's foreign key does, so
+      // the delete — Gold has no rows when it looks — waits before removing.
+      const other = await pool.connect();
+      try {
+        await other.query('BEGIN');
+        await other.query(
+          'SELECT id FROM ticket_types WHERE id = $1 FOR KEY SHARE',
+          [gold.id],
+        );
+        const deleting = remove().then((r) => r);
+        await waitForLockWait(pool, 'ticket_types');
+        await layout(gold.id).expect(200);
+        await other.query('COMMIT');
+        const res = await deleting;
+        expect(res.status).toBe(409);
+        expect((res.body as { message: string }).message).toBe(
+          'Gold still has seats. Give them to another ticket type first.',
+        );
+      } finally {
+        other.release();
+      }
+      const { rows } = await pool.query<{ untyped: string }>(
+        `SELECT count(*)::text AS untyped FROM seats se
+           JOIN seat_maps m ON m.id = se.seat_map_id
+          WHERE m.event_id = $1 AND se.ticket_type_id IS NULL`,
+        [gala],
+      );
+      expect(rows[0].untyped).toBe('0');
+      // Row 1 back to VIP; Gold, rowless again, can go.
+      await layout(vip).expect(200);
+      await remove().expect(200);
+    });
+
+    it('marks them in the cross-event inventory, and nothing else', async () => {
+      const res = await request(server)
+        .get(`/api/v1/tickets?limit=100`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .expect(200);
+      const items = (
+        res.body as Success<
+          { eventId: string; name: string; quantityFromSeats: boolean }[]
+        >
+      ).data;
+      const onGala = items.filter((t) => t.eventId === gala);
+      expect(onGala.map((t) => t.quantityFromSeats)).toEqual([true, true]);
+      const elsewhere = items.filter((t) => t.eventId !== gala);
+      expect(elsewhere.length).toBeGreaterThan(0);
+      expect(elsewhere.every((t) => !t.quantityFromSeats)).toBe(true);
+    });
+
+    it('keeps typed quantities on a reserved map with no typed rows', async () => {
+      const legacy = await createEvent(jwt, 'Untyped Rows Hall');
+      const any = await add(legacy, {
+        name: 'Any seat',
+        priceSatang: 10000,
+        total: 50,
+      });
+      await request(server)
+        .put(`/api/v1/events/${legacy}/seating/reserved`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({ name: 'Hall', rows: 2, seatsPerRow: 2 })
+        .expect(200);
+      const res = await request(server)
+        .patch(`/api/v1/events/${legacy}/tickets/${any.id}`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .send({ total: 60 })
+        .expect(200);
+      expect((res.body as Success<Ticket>).data).toMatchObject({
+        total: 60,
+        quantityFromSeats: false,
+      });
+    });
+  });
+
   it('refuses to delete the last remaining tier but allows others', async () => {
     const jwt = await token(ADMIN, ORG.slug);
     // Make a fresh event with a single tier.
@@ -601,6 +823,25 @@ async function seedOrg(
       [orgId, user.rows[0].id, roleId, p.roleName],
     );
   }
+}
+
+/**
+ * Until a statement on `table` is waiting for a row lock — how a test knows a
+ * request it started has reached the lock another transaction holds.
+ */
+async function waitForLockWait(pool: Pool, table: string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const { rows } = await pool.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'
+          AND query ILIKE '%' || $1 || '%'`,
+      [table],
+    );
+    if (Number(rows[0].n) > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`nothing came to wait for a lock on ${table}`);
 }
 
 async function cleanup(pool: Pool): Promise<void> {

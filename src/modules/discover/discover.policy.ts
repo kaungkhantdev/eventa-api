@@ -1,12 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { formatBaht } from '../../common/money/baht';
 import type { DiscoverBadge, PriceFrom, TierInventory } from './discover.types';
-
-/** An allocation of 0 means unlimited — mirrors `TicketingPolicy`. */
-const UNLIMITED = 0;
-/** At/above this share of the allocation sold, the card starts nudging. */
-const SELLING_FAST_RATIO = 0.9;
-const FREE_LABEL = 'Free';
+import {
+  FREE_LABEL,
+  SELLING_FAST_RATIO,
+  UNLIMITED,
+} from '../../common/constants/discover.constants';
 
 /**
  * The two judgements a Discover card makes about an event's inventory (US-DISC-01):

@@ -1,8 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
-
-const MAX_LIMIT = 100;
+import { MAX_LIMIT } from '../../../common/constants/attendee-payments.constants';
 
 /** Paging for the transaction list (US-DISC-10). */
 export class ListTransactionsDto {

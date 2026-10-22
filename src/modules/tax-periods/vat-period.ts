@@ -1,24 +1,9 @@
 import { vatInclusiveBreakdown } from '../../common/money/vat';
 import type { TaxStatus } from './tax-periods.types';
-
-/** Thai VAT returns (PP30) are due on the 15th of the following month. */
-export const VAT_FILING_DAY = 15;
-export const MONTHS_IN_YEAR = 12;
-
-const MONTH_LABELS = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-] as const;
+import {
+  MONTH_LABELS,
+  VAT_FILING_DAY,
+} from '../../common/constants/tax-periods.constants';
 
 /** `6` → `Jun`. Months are 1-based, as they are written. */
 export function monthLabel(month: number): string {

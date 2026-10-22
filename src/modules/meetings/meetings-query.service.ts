@@ -12,10 +12,11 @@ import type {
 } from './meetings.types';
 import type { MeetingEntryDto } from './dto/meetings.dto';
 import { MeetingEventPort } from './ports/meeting-event.port';
-
-export const DEFAULT_LIMIT = 20;
-export const MAX_LIMIT = 100;
-export const NO_MATCHES = 'No meetings match your filters.';
+import {
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+  NO_MATCHES,
+} from '../../common/constants/meetings.constants';
 
 export interface ListMeetingsQuery {
   page?: number;

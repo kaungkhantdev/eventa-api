@@ -15,9 +15,6 @@ import type { ContactField } from './attendee-directory.types';
  * timeline entry and the workspace audit line read the same sentence and no
  * client has to match on prose that will be translated.
  */
-export const CONTACT_AUDIT_TYPE = 'attendee' as const;
-
-export const CONTACT_AUDIT_TITLE = 'Updated contact details';
 
 /**
  * The record an entry is about, written so a prefix match is unambiguous: the

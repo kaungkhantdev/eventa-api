@@ -9,11 +9,10 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { memberStatusEnum } from '../../../db/schema';
-
-const STATUSES = memberStatusEnum.enumValues;
-/** Long enough for any name or address; a bound, not a rule. */
-const MAX_SEARCH = 120;
+import {
+  MAX_SEARCH,
+  STATUSES,
+} from '../../../common/constants/access.constants';
 
 /**
  * The Users screen's filters (US-ACC-02).

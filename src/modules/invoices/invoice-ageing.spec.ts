@@ -1,9 +1,5 @@
-import {
-  INVOICE_TERM_DAYS,
-  ageInvoice,
-  bangkokToday,
-  dueDateFor,
-} from './invoice-ageing';
+import { ageInvoice, bangkokToday, dueDateFor } from './invoice-ageing';
+import { INVOICE_TERM_DAYS } from '../../common/constants/invoices.constants';
 
 describe('Invoice ageing (US-FIN-06)', () => {
   const TODAY = '2026-06-15';

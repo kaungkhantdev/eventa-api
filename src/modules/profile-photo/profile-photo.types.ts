@@ -1,3 +1,8 @@
+import {
+  PHOTO_PREFIX,
+  STAGING_PREFIX,
+} from '../../common/constants/profile-photo.constants';
+
 /**
  * The image types a profile photo may be: the extension each is stored as, and
  * the leading bytes a real file of that type must begin with.
@@ -44,16 +49,6 @@ export const ALLOWED_IMAGE_TYPES: ReadonlyMap<string, ImageType> = new Map([
 ]);
 
 export const ALLOWED_CONTENT_TYPES = [...ALLOWED_IMAGE_TYPES.keys()];
-
-/** Enough bytes to cover the longest signature above. */
-export const MAGIC_BYTES_TO_READ = 12;
-
-/**
- * Uploads land here first. The final key is never presigned, so nobody can
- * replace the bytes after they have been checked.
- */
-export const STAGING_PREFIX = 'uploads';
-export const PHOTO_PREFIX = 'avatars';
 
 export function stagingPrefixFor(userId: string): string {
   return `${STAGING_PREFIX}/${userId}/`;

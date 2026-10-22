@@ -1,12 +1,10 @@
 import type { InvoiceStatus } from './invoices.types';
-
-/** Thai invoice terms are fixed at 14 days from issue (US-FIN-06/07). */
-export const INVOICE_TERM_DAYS = 14;
-
-const BANGKOK = 'Asia/Bangkok';
-/** `en-CA` formats as `YYYY-MM-DD`, which is what a `date` column stores. */
-const ISO_DATE_LOCALE = 'en-CA';
-const MS_PER_DAY = 86_400_000;
+import {
+  BANGKOK,
+  INVOICE_TERM_DAYS,
+  ISO_DATE_LOCALE,
+  MS_PER_DAY,
+} from '../../common/constants/invoices.constants';
 
 export interface Ageing {
   /** What the row actually reads as once its due date is taken into account. */

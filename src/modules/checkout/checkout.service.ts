@@ -133,6 +133,7 @@ export class CheckoutService {
       selection.mode === 'reserved'
         ? await this.holds.holdSeats(actor, {
             eventId: event.id,
+            ticketTypeId: selection.ticketTypeId,
             seatIds: selection.seatIds,
           })
         : [

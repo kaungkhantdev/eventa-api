@@ -9,11 +9,11 @@ import {
   EventInsightsPort,
 } from '../dashboard/ports/operations-insights.port';
 import { Clock } from '../../common/time/clock';
-
-const LIVE_STATUSES = ['planned', 'upcoming', 'live'] as const;
-/** An allocation of 0 means unlimited — mirrors `TicketingPolicy`. */
-const UNLIMITED = 0;
-const PERCENT = 100;
+import {
+  LIVE_STATUSES,
+  PERCENT,
+  UNLIMITED,
+} from '../../common/constants/events.constants';
 
 /**
  * Events' implementation of the Dashboard-owned reach port (US-DASH-08), so

@@ -1,6 +1,7 @@
 import { DomainException } from '../../common/errors/domain.exception';
 import { DAY_MS } from '../../common/time/bangkok';
-import { MAX_SPAN_DAYS, resolveReportPeriod } from './reports-period';
+import { resolveReportPeriod } from './reports-period';
+import { MAX_SPAN_DAYS } from '../../common/constants/reports.constants';
 
 /**
  * The window every report covers (US-RPT-02).

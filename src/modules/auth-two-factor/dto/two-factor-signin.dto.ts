@@ -1,9 +1,9 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsString, MaxLength, MinLength } from 'class-validator';
-
-/** A recovery code is longer than a TOTP; both arrive through `code`. */
-const MIN_CODE = 6;
-const MAX_CODE = 32;
+import {
+  MAX_CODE,
+  MIN_CODE,
+} from '../../../common/constants/auth-two-factor.constants';
 
 /** Trade the login challenge plus a code for a session (US-ACC-05). */
 export class TwoFactorSignInDto {

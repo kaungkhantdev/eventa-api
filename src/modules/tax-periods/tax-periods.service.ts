@@ -13,13 +13,20 @@ import type {
   VatHeadlines,
 } from './tax-periods.types';
 import {
-  MONTHS_IN_YEAR,
   isLateFiling,
   monthLabel,
   periodDueDate,
   periodStatus,
   vatOnSales,
 } from './vat-period';
+import {
+  ALREADY_FILED,
+  BAD_MONTH,
+  EXPORT_HEADER,
+  MONTHS_IN_YEAR,
+  NOT_DUE,
+  NOTHING_TO_EXPORT,
+} from '../../common/constants/tax-periods.constants';
 
 export interface ListPeriodsQuery {
   year: number;
@@ -32,26 +39,6 @@ export interface FilePeriodInput {
   /** Withholding tax reconciled for this period (Thai PND); optional. */
   whtSatang?: number;
 }
-
-const NOT_DUE =
-  'Only a period that has ended can be filed — this one is still running.';
-const ALREADY_FILED = 'This period has already been filed.';
-const BAD_MONTH = 'Month must be between 1 and 12.';
-const NOTHING_TO_EXPORT =
-  'There is nothing to export — no periods match these filters.';
-const EXPORT_HEADER = [
-  'period',
-  'year',
-  'due_at',
-  'taxable_sales_baht',
-  'vat_collected_baht',
-  'vat_remitted_baht',
-  'vat_payable_baht',
-  'withholding_baht',
-  'status',
-  'filed_at',
-  'late',
-];
 
 function toCsvRow(row: TaxPeriodRow): CsvValue[] {
   return [

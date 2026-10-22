@@ -1,10 +1,8 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional } from 'class-validator';
-import {
-  EVENT_LIFECYCLES,
-  type EventLifecycle,
-} from '../ports/event-performance.port';
+import { type EventLifecycle } from '../ports/event-performance.port';
 import { ReportFilterQueryDto } from './report-filter.query.dto';
+import { EVENT_LIFECYCLES } from '../../../common/constants/reports.constants';
 
 /**
  * The shared report filter, plus the one control only this report has

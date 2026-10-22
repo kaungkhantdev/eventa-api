@@ -14,12 +14,10 @@ import type {
   SessionRow,
   UpdateSessionInput,
 } from './sessions.types';
-
-const CONFIRM_REMOVAL =
-  'Removing this session will NOT notify attendees who bookmarked it, and cannot be undone. Re-send with confirm=true to proceed.';
-
-/** A not-yet-inserted session excludes nothing when conflicts are checked. */
-const NO_SESSION_YET = '';
+import {
+  CONFIRM_REMOVAL,
+  NO_SESSION_YET,
+} from '../../common/constants/event-program.constants';
 
 /** The only part of a session the overlap test needs. */
 interface TimeSpan {

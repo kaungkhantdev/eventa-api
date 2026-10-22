@@ -29,7 +29,6 @@ import { toAttendanceRow, toScanResult } from './check-in.mapper';
 import {
   AttendanceCountsDto,
   AttendanceRowDto,
-  DEFAULT_LIMIT,
   ListAttendanceDto,
 } from './dto/attendance.dto';
 import {
@@ -37,6 +36,7 @@ import {
   ScanResultDto,
   ScanTicketDto,
 } from './dto/check-in.dto';
+import { DEFAULT_LIMIT } from '../../common/constants/check-in.constants';
 
 /**
  * The check-in station (US-REG-11/12/13). Every route needs `regCheckin` —

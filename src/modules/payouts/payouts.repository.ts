@@ -4,8 +4,7 @@ import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { auditEvents, payoutItems, payouts } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
 import type { PayoutFilters, PayoutRow, PayoutStatus } from './payouts.types';
-
-const AUDIT_TYPE = 'payout' as const;
+import { AUDIT_TYPE } from '../../common/constants/payouts.constants';
 
 /** What one retry writes back (US-FIN-04). */
 export interface RetryOutcome {

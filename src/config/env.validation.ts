@@ -165,12 +165,67 @@ export const envSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+
+  // The workspace Google Calendar (US-MTG-04/08): meeting invites, Meet links
+  // and the 15-minute reminder. All optional, because a server with no Google
+  // client still has to boot and save meetings — it says "not set up" on
+  // Settings → Integrations instead. eventa-worker declares the same three
+  // names and must resolve to the same provider, or the cards and the header
+  // disagree about whether the calendar is connected.
+  //
+  // Unset, the provider is derived: 'google' when both client values are
+  // present, otherwise 'off' (`resolveCalendarProvider`). 'fake' completes the
+  // consent round-trip without Google, for local runs and the e2e suite.
+  CALENDAR_PROVIDER: z.enum(['off', 'fake', 'google']).optional(),
+  GOOGLE_CALENDAR_CLIENT_ID: z.string().min(1).optional(),
+  /** Never logged. */
+  GOOGLE_CALENDAR_CLIENT_SECRET: z.string().min(1).optional(),
+  // No default here on purpose: the adapter derives it from PUBLIC_API_URL
+  // and the callback route, so the two cannot drift apart. Set it only when
+  // Google must call back through a different host than PUBLIC_API_URL.
+  GOOGLE_CALENDAR_REDIRECT_URI: z.string().url().optional(),
+});
+
+const FAKE_CALENDAR_IN_PRODUCTION =
+  'CALENDAR_PROVIDER=fake cannot run in production — no invite would ever reach Google.';
+
+/**
+ * Cross-field rules zod cannot express per key. Each refusal is a boot
+ * failure, which is the cheapest moment to find it: a missing client secret
+ * found at boot is a deploy that did not start, found at the first connect it
+ * is an Admin staring at an error page.
+ */
+const refinedEnvSchema = envSchema.superRefine((env, ctx) => {
+  if (env.CALENDAR_PROVIDER === 'google') {
+    for (const key of [
+      'GOOGLE_CALENDAR_CLIENT_ID',
+      'GOOGLE_CALENDAR_CLIENT_SECRET',
+    ] as const) {
+      if (!env[key]) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: `CALENDAR_PROVIDER=google requires ${key}.`,
+        });
+      }
+    }
+  }
+  // The fake answers every connect with a made-up account and every sync with
+  // a made-up Meet link, so in production it would mark meetings synced while
+  // no guest ever received an invite.
+  if (env.CALENDAR_PROVIDER === 'fake' && env.NODE_ENV === 'production') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['CALENDAR_PROVIDER'],
+      message: FAKE_CALENDAR_IN_PRODUCTION,
+    });
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;
 
 export function validateEnv(config: Record<string, unknown>): Env {
-  const parsed = envSchema.safeParse(config);
+  const parsed = refinedEnvSchema.safeParse(config);
   if (!parsed.success) {
     const issues = parsed.error.issues
       .map((i) => `  - ${i.path.join('.') || '(root)'}: ${i.message}`)

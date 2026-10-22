@@ -7,8 +7,7 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator';
-
-const MAX_DESCRIPTOR = 22;
+import { MAX_DESCRIPTOR } from '../../../common/constants/payment-settings.constants';
 
 /** Checkout & receipt preferences (US-SET-10). */
 export class UpdatePaymentPreferencesDto {

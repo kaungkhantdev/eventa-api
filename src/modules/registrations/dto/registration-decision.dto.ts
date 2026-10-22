@@ -1,9 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
 import { Type } from 'class-transformer';
-
-/** A rejection reason is for the organizer's own records and the notice email. */
-export const MAX_REJECTION_REASON = 500;
+import { MAX_REJECTION_REASON } from '../../../common/constants/registrations.constants';
 
 export class RejectRegistrationDto {
   @ApiProperty({

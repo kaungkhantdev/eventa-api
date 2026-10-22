@@ -17,6 +17,7 @@ import { ticketsUrlFor } from './ticket-links';
 import type { ConfirmOrderDto } from './dto/confirm-order.dto';
 import type { GuestOrderDto } from './dto/guest-order.dto';
 import type { OrderPlacedDto } from './dto/order-placed.dto';
+import { ORDER_NOT_FOUND } from '../../common/constants/checkout.constants';
 
 /**
  * Present only when an ORGANIZER placed this booking themselves (US-REG-03),
@@ -51,10 +52,6 @@ export interface OrganizerEntry {
  * paid one is placed for payment exactly as above — it starts waiting when the
  * money lands. The tickets and the confirmation come with the approval.
  */
-/** Said for a bad id and for somebody else's alike — the two must not be
- *  distinguishable, or the endpoint becomes a way to probe for orders. */
-const ORDER_NOT_FOUND = 'That order could not be found.';
-
 @Injectable()
 export class CheckoutOrderService {
   private readonly publicWebUrl: string;

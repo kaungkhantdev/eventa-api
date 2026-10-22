@@ -7,9 +7,7 @@ import {
 } from '../payments/ports/order-invoice.port';
 import { bangkokToday } from './invoice-ageing';
 import { InvoicesRepository } from './invoices.repository';
-
-/** Why an invoice voided by its sale's refund reads Void (US-FIN-02). */
-export const REFUND_VOID_REASON = 'Refunded';
+import { REFUND_VOID_REASON } from '../../common/constants/invoices.constants';
 
 /**
  * Invoices' implementation of Payments' `OrderInvoicePort`. Invoices owns the

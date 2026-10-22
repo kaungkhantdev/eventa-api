@@ -2,11 +2,11 @@ import { Permission } from '../../common/decorators/require-permissions.decorato
 import type { Clock } from '../../common/time/clock';
 import type { PermissionsService } from '../access/permissions.service';
 import type { AuthContext } from '../auth/auth.types';
-import { ALL_CAUGHT_UP } from './alerts';
 import { DashboardHomeService } from './dashboard-home.service';
 import type { RegistrationInsightsPort } from './ports/registration-insights.port';
 import type { RevenueInsightsPort } from './ports/revenue-insights.port';
 import type { InventoryInsightsPort } from './ports/operations-insights.port';
+import { ALL_CAUGHT_UP } from '../../common/constants/dashboard.constants';
 
 const ORG = 7;
 /** 16:00 Bangkok on a Friday. */

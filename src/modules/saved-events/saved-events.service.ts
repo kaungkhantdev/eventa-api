@@ -5,11 +5,11 @@ import { DiscoverService } from '../discover/discover.service';
 import type { EventCardDto } from '../discover/dto/event-card.dto';
 import { SavedEventsRepository } from './saved-events.repository';
 import type { SavedEventsQuery } from './saved-events.types';
-
-/** Matches the Discover grid — a saved list is the same cards, kept. */
-const DEFAULT_LIMIT = 12;
-const MAX_LIMIT = 48;
-const FIRST_PAGE = 1;
+import {
+  DEFAULT_LIMIT,
+  FIRST_PAGE,
+  MAX_LIMIT,
+} from '../../common/constants/saved-events.constants';
 
 /**
  * An attendee's saved events (US-DISC-03) — the heart on a Discover card, kept

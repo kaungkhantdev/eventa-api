@@ -9,20 +9,16 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import {
+  ATTENDANCE_SORTS,
+  ATTENDANCE_STATUSES,
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+  MAX_SEARCH,
+} from '../../../common/constants/check-in.constants';
 
-export const DEFAULT_LIMIT = 20;
-export const MAX_LIMIT = 100;
-const MAX_SEARCH = 120;
-
-/** Someone is either already inside, or still expected. */
-export const ATTENDANCE_STATUSES = ['checked_in', 'expected'] as const;
 export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
 
-/**
- * By name reads like a list to work down; by arrival reads like a feed of who
- * just walked in. The queue wants the first, the station the second.
- */
-export const ATTENDANCE_SORTS = ['name', 'recent'] as const;
 export type AttendanceSort = (typeof ATTENDANCE_SORTS)[number];
 
 /** Who is expected at this event, and who is already inside (US-REG-11). */

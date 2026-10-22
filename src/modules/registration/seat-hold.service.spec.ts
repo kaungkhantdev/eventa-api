@@ -134,12 +134,14 @@ describe('SeatHoldService', () => {
 
       const holds = await service.holdSeats(actor, {
         eventId: 'e1',
+        ticketTypeId: 't1',
         seatIds: [5, 5, 7],
       });
 
       expect(repo.holdSeats).toHaveBeenCalledWith(
         1,
         'e1',
+        't1',
         [5, 7],
         EXPECTED_EXPIRY,
         NOW,
@@ -152,12 +154,14 @@ describe('SeatHoldService', () => {
       repo.holdSeats.mockResolvedValue({ ok: true, holds: [] });
       await service.holdSeats(actor, {
         eventId: 'e1',
+        ticketTypeId: 't1',
         seatIds: [5],
         orderId: 'o1',
       });
       expect(repo.holdSeats).toHaveBeenCalledWith(
         1,
         'e1',
+        't1',
         [5],
         EXPECTED_EXPIRY,
         NOW,
@@ -168,7 +172,11 @@ describe('SeatHoldService', () => {
     it('rejects an empty selection (422)', async () => {
       expect(
         await statusOf(() =>
-          service.holdSeats(actor, { eventId: 'e1', seatIds: [] }),
+          service.holdSeats(actor, {
+            eventId: 'e1',
+            ticketTypeId: 't1',
+            seatIds: [],
+          }),
         ),
       ).toBe(HttpStatus.UNPROCESSABLE_ENTITY);
       expect(repo.holdSeats).not.toHaveBeenCalled();
@@ -179,6 +187,7 @@ describe('SeatHoldService', () => {
         await statusOf(() =>
           service.holdSeats(actor, {
             eventId: 'e1',
+            ticketTypeId: 't1',
             seatIds: [1, 2, 3, 4, 5, 6, 7, 8, 9],
           }),
         ),
@@ -193,7 +202,11 @@ describe('SeatHoldService', () => {
       });
       let caught: DomainException | undefined;
       try {
-        await service.holdSeats(actor, { eventId: 'e1', seatIds: [5, 7] });
+        await service.holdSeats(actor, {
+          eventId: 'e1',
+          ticketTypeId: 't1',
+          seatIds: [5, 7],
+        });
       } catch (err) {
         caught = err as DomainException;
       }
@@ -353,7 +366,11 @@ describe('SeatHoldService', () => {
       );
       repo.holdSeats.mockResolvedValue({ ok: true, holds: [seatHold(1)] });
 
-      await service.holdSeats(actor, { eventId: 'e1', seatIds: [5, 6] });
+      await service.holdSeats(actor, {
+        eventId: 'e1',
+        ticketTypeId: 't1',
+        seatIds: [5, 6],
+      });
 
       expect(repo.ticketTypeIdsForSeats).toHaveBeenCalledWith(1, 'e1', [5, 6]);
       expect(ticketSales.getEligibilityByIds).toHaveBeenCalledWith(1, [
@@ -369,7 +386,11 @@ describe('SeatHoldService', () => {
         new Map([['t1', sellable({ status: 'scheduled' })]]),
       );
       await expect(
-        service.holdSeats(actor, { eventId: 'e1', seatIds: [5] }),
+        service.holdSeats(actor, {
+          eventId: 'e1',
+          ticketTypeId: 't1',
+          seatIds: [5],
+        }),
       ).rejects.toMatchObject({ code: 'CONFLICT' });
       expect(repo.holdSeats).not.toHaveBeenCalled();
     });
@@ -377,7 +398,11 @@ describe('SeatHoldService', () => {
     it('reserves seats that carry no tier without consulting Ticketing', async () => {
       repo.ticketTypeIdsForSeats.mockResolvedValue([]);
       repo.holdSeats.mockResolvedValue({ ok: true, holds: [seatHold(1)] });
-      await service.holdSeats(actor, { eventId: 'e1', seatIds: [5] });
+      await service.holdSeats(actor, {
+        eventId: 'e1',
+        ticketTypeId: 't1',
+        seatIds: [5],
+      });
       expect(ticketSales.getEligibilityByIds).not.toHaveBeenCalled();
       expect(repo.holdSeats).toHaveBeenCalledTimes(1);
     });

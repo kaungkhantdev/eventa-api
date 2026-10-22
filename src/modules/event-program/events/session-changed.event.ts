@@ -1,7 +1,5 @@
 import type { OutboxEventInput } from '../../platform/outbox.port';
-
-/** Routing key for a session that moved on a schedule people are following. */
-export const SESSION_CHANGED = 'program.session_changed';
+import { SESSION_CHANGED } from '../../../common/constants/event-program.constants';
 
 /** When and where a session sits. `day` is the event day number, not a date. */
 export interface SessionWhen {

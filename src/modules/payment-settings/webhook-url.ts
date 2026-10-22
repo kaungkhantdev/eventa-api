@@ -1,10 +1,4 @@
-/**
- * Where this service listens, matching `setGlobalPrefix` in `main.ts` and the
- * route on `PaymentsController`. Named once here because an organizer pastes
- * the result into Stripe by hand: if it drifts from the mapped route, the
- * callback 404s and orders stop settling with nothing on screen to say so.
- */
-const WEBHOOK_PATH = '/api/v1/public/payments/webhook';
+import { WEBHOOK_PATH } from '../../common/constants/payment-settings.constants';
 
 /**
  * This workspace's own webhook URL (US-SET-08).

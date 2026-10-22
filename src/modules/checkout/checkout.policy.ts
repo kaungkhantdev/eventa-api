@@ -7,6 +7,11 @@ import type {
   SeatingMode,
   SelectionInput,
 } from './checkout.types';
+import { seatSellsUnder } from './held-seat-rules';
+import {
+  NOT_ON_SALE,
+  OTHER_TICKET_TYPE,
+} from '../../common/constants/checkout.constants';
 
 /**
  * The rules a checkout selection must satisfy before any money or inventory is
@@ -68,8 +73,12 @@ export class CheckoutPolicy {
 
   /**
    * Match the chosen seat ids to the map, in the order asked. Every seat must
-   * exist, still be free, and be priced by the ticket type being bought —
-   * otherwise the summary would quote a price the seat does not carry.
+   * exist, still be free, and sell under the tier being bought: a seat carries
+   * its own ticket type (US-EVT-05) — a row may split between types — and
+   * sells only as that type, or the summary would quote a price the seat does
+   * not carry. A seat with no type sells under whichever tier is chosen only
+   * on a map laid out before seats had types; once any seat has a type, it is
+   * not on sale.
    */
   resolveSeats(
     seats: CheckoutSeat[],
@@ -77,6 +86,7 @@ export class CheckoutPolicy {
     ticketTypeId: string,
   ): CheckoutSeat[] {
     const byId = new Map(seats.map((s) => [s.id, s]));
+    const mapTyped = seats.some((s) => s.ticketTypeId !== null);
     return seatIds.map((id) => {
       const seat = byId.get(id);
       if (!seat) {
@@ -84,9 +94,9 @@ export class CheckoutPolicy {
           'One of those seats is no longer available. Please choose again.',
         );
       }
-      if (seat.ticketTypeId !== ticketTypeId) {
+      if (!seatSellsUnder(seat.ticketTypeId, ticketTypeId, mapTyped)) {
         throw DomainException.validation(
-          'Those seats belong to a different ticket type. Please choose again.',
+          seat.ticketTypeId === null ? NOT_ON_SALE : OTHER_TICKET_TYPE,
         );
       }
       if (!seat.available) {

@@ -32,6 +32,10 @@ import type { ReportPeriod } from './reports-period';
 import { toCsvTable } from './reports-csv';
 import { TransactionsReportService } from './transactions-report.service';
 import { PayoutsReportService } from './payouts-report.service';
+import {
+  EXPORTABLE,
+  EXPORT_LIMIT,
+} from '../../common/constants/reports.constants';
 
 /**
  * A report, as a file (US-RPT-11).
@@ -45,32 +49,7 @@ import { PayoutsReportService } from './payouts-report.service';
  * table — CSV, Excel and PDF cannot disagree about what the report says.
  */
 
-/** The reports that can be exported, which is every report with rows. */
-export const EXPORTABLE = [
-  'registrations',
-  'attendance',
-  'events',
-  'income',
-  'discounts',
-  'transactions',
-  'payouts',
-] as const;
 export type ExportableReport = (typeof EXPORTABLE)[number];
-
-/**
- * How many rows an export will carry.
- *
- * A ceiling rather than no limit at all: the story's "very large export"
- * criterion asks for a prepared file and a notification, which is a separate
- * slice — until then a report that would run to tens of thousands of rows is
- * truncated rather than allowed to time out mid-download. The workbook and the
- * PDF say when they have been cut.
- *
- * One ceiling for all three formats, though they do not cost the same: see the
- * capacity note in `common/export/pdf` for what a full one costs the event
- * loop, and why a PDF-only ceiling is a decision rather than a tweak.
- */
-export const EXPORT_LIMIT = 5000;
 
 export interface ExportedFile {
   body: Buffer;

@@ -1,9 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { DomainException } from '../../common/errors/domain.exception';
-import {
-  ResendThrottleService,
-  type SendBudget,
-} from '../../common/throttle/resend-throttle.service';
+import { ResendThrottleService } from '../../common/throttle/resend-throttle.service';
 import { SignupRepository } from '../auth-signup/auth-signup.repository';
 import {
   attendeeAccountsUnavailable,
@@ -17,27 +14,14 @@ import {
   BookingClaimOrderPort,
   type ClaimableBooking,
 } from './ports/booking-claim-order.port';
-
-const ORDER_NOT_FOUND = 'That order could not be found.';
+import {
+  BOOKING_NOT_CONFIRMED,
+  CLAIM_LINK_BUDGET,
+  ORDER_NOT_FOUND,
+} from '../../common/constants/auth-booking-signup.constants';
 
 /** The one status whose booking has tickets to keep in an account. */
 const CONFIRMED: OrderStatus = 'confirmed';
-const BOOKING_NOT_CONFIRMED =
-  "This booking isn't confirmed, so there are no tickets to keep in an account yet.";
-
-const SECONDS_PER_DAY = 24 * 60 * 60;
-
-/**
- * How many claim emails one address may be sent a day, on top of the
- * one-a-minute cool-off. Whoever holds an order id can ask — the booker, not
- * only the buyer, and anybody can book with anybody's address — so the
- * cool-off alone would let a stranger have Eventa mail somebody ~1,440 times a
- * day. A handful covers a buyer whose first link went to spam.
- */
-const CLAIM_LINK_BUDGET: SendBudget = {
-  max: 5,
-  windowSeconds: SECONDS_PER_DAY,
-};
 
 /**
  * The cool-off key for a booking's claim email: per address, in a space no

@@ -7,21 +7,15 @@ import {
   NotificationPreferencesRepository,
   type NotificationCategory,
 } from './notification-preferences.repository';
+import {
+  ATTENDEE_CATEGORIES,
+  DEFAULT_EMAIL,
+  DEFAULT_SMS,
+} from '../../common/constants/notification-preferences.constants';
 
-/**
- * Which topics each audience can be alerted about (both derived from the schema
- * enum). Organizers watch their events' commerce; attendees manage reminders and
- * marketing (US-DISC-12). Order confirmations and receipts are transactional —
- * they are deliberately in NEITHER list, so nothing here can switch them off.
- */
-const ATTENDEE_CATEGORIES = ['reminder', 'marketing'] as const;
 const ORGANIZER_CATEGORIES = notificationKindEnum.enumValues.filter(
   (kind) => !(ATTENDEE_CATEGORIES as readonly string[]).includes(kind),
 );
-
-/** Defaults when a member has never touched a topic. */
-const DEFAULT_EMAIL = true;
-const DEFAULT_SMS = false;
 
 export interface PreferenceView {
   category: NotificationCategory;

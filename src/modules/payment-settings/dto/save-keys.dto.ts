@@ -1,10 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
-import { paymentModeEnum } from '../../../db/schema';
-
-const MODES = paymentModeEnum.enumValues;
-/** Well above any real Stripe key; a bound, not a rule. */
-const MAX_KEY = 255;
+import {
+  MAX_KEY,
+  MODES,
+} from '../../../common/constants/payment-settings.constants';
 
 /**
  * The workspace's own Stripe keys (US-SET-08).

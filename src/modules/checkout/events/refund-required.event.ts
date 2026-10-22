@@ -1,7 +1,5 @@
 import type { OutboxEventInput } from '../../platform/outbox.port';
-
-/** Routing key for money that arrived for inventory we could not honour. */
-export const PAYMENT_REFUND_REQUIRED = 'payment.refund_required';
+import { PAYMENT_REFUND_REQUIRED } from '../../../common/constants/checkout.constants';
 
 export interface RefundRequiredInput {
   organizationId: number;

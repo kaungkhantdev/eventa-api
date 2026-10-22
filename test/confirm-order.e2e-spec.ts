@@ -9,12 +9,15 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { OrderPaymentPort } from '../src/modules/payments/ports/order-payment.port';
 import { listenOnLoopback } from './support/loopback';
 
 const ORG = { slug: 'confirm-e2e', name: 'Confirm E2E' };
 const FREE = 'cfm-free-meetup';
 const PAID = 'cfm-paid-summit';
 const GALA = 'cfm-gala-dinner';
+const SPLIT = 'cfm-split-gala';
+const MIXED = 'cfm-mixed-row-gala';
 const BAHT = 100;
 
 interface Success<T> {
@@ -44,6 +47,9 @@ describe('Confirming a registration (e2e — US-DISC-06)', () => {
     events: Record<string, string>;
     tiers: Record<string, string>;
     seats: number[];
+    split: { vip: number[]; normal: number[]; untyped: number[] };
+    /** Row 7's 16 seats in seat-number order: 1–5 Free, 6–16 Normal. */
+    row7: number[];
   };
   let keySeq = 0;
 
@@ -558,6 +564,341 @@ describe('Confirming a registration (e2e — US-DISC-06)', () => {
     });
   });
 
+  describe('seats split between ticket types (US-DISC-04)', () => {
+    const splitHold = (ticketTypeId: string, seatIds: number[]) =>
+      hold({ eventId: ids.events[SPLIT], ticketTypeId, seatIds });
+
+    const assignedSeats = async (): Promise<number> => {
+      const { rows } = await pool.query<{ n: string }>(
+        `SELECT count(*)::text AS n FROM seat_assignments WHERE organization_id = $1`,
+        [ids.orgId],
+      );
+      return Number(rows[0].n);
+    };
+
+    it('refuses to hold a VIP seat for the Normal price (422)', async () => {
+      const res = await request(server)
+        .post('/api/v1/public/checkout/hold')
+        .send({
+          eventId: ids.events[SPLIT],
+          ticketTypeId: ids.tiers.normal,
+          seatIds: [ids.split.vip[0]],
+        });
+      expect(res.status).toBe(422);
+      expect((res.body as { message: string }).message).toBe(
+        'Those seats belong to a different ticket type. Please choose again.',
+      );
+    });
+
+    it('refuses to hold a seat with no ticket type once rows have types (422)', async () => {
+      const res = await request(server)
+        .post('/api/v1/public/checkout/hold')
+        .send({
+          eventId: ids.events[SPLIT],
+          ticketTypeId: ids.tiers.normal,
+          seatIds: ids.split.untyped,
+        });
+      expect(res.status).toBe(422);
+      expect((res.body as { message: string }).message).toBe(
+        "Those seats aren't on sale. Please choose different seats.",
+      );
+    });
+
+    it('refuses to confirm a held VIP seat as a Normal order (409) — nothing is placed', async () => {
+      const vipHold = await splitHold(ids.tiers.vip, [ids.split.vip[0]]);
+      const res = await confirm({
+        eventId: ids.events[SPLIT],
+        ticketTypeId: ids.tiers.normal,
+        seatIds: [ids.split.normal[0]],
+        holdIds: vipHold,
+        buyer,
+        idempotencyKey: nextKey(),
+      });
+      expect(res.status).toBe(409);
+      expect((res.body as { message: string }).message).toBe(
+        'Your seats changed. Please choose again.',
+      );
+      expect(await orderCount()).toBe(0);
+      expect(await assignedSeats()).toBe(0);
+    });
+
+    it('refuses holds that cover fewer seats than were priced (409)', async () => {
+      const oneHold = await splitHold(ids.tiers.normal, [ids.split.normal[0]]);
+      const res = await confirm({
+        eventId: ids.events[SPLIT],
+        ticketTypeId: ids.tiers.normal,
+        seatIds: ids.split.normal,
+        holdIds: oneHold,
+        buyer,
+        idempotencyKey: nextKey(),
+      });
+      expect(res.status).toBe(409);
+      expect(await orderCount()).toBe(0);
+    });
+
+    it('places a Normal order on its held Normal seats, the hold naming the tier', async () => {
+      const holdIds = await splitHold(ids.tiers.normal, ids.split.normal);
+      const { rows } = await pool.query<{ ticket_type_id: string }>(
+        `SELECT ticket_type_id FROM seat_holds WHERE id = ANY($1)`,
+        [holdIds],
+      );
+      expect(rows.map((r) => r.ticket_type_id)).toEqual([
+        ids.tiers.normal,
+        ids.tiers.normal,
+      ]);
+      const res = await confirm({
+        eventId: ids.events[SPLIT],
+        ticketTypeId: ids.tiers.normal,
+        seatIds: ids.split.normal,
+        holdIds,
+        buyer,
+        idempotencyKey: nextKey(),
+      });
+      expect(res.status).toBe(201);
+      const p = (res.body as Success<Placed>).data;
+      expect(p.status).toBe('pending');
+      expect(p.totalSatang).toBe(1_869 * BAHT); // ฿890 x2 + 5% fee
+    });
+
+    describe('when the money lands (US-DISC-05)', () => {
+      /** A pending Normal order on row 2's first seat. */
+      const placeNormal = async (): Promise<{
+        orderId: string;
+        holdIds: number[];
+      }> => {
+        const holdIds = await splitHold(ids.tiers.normal, [
+          ids.split.normal[0],
+        ]);
+        const res = await confirm({
+          eventId: ids.events[SPLIT],
+          ticketTypeId: ids.tiers.normal,
+          seatIds: [ids.split.normal[0]],
+          holdIds,
+          buyer,
+          idempotencyKey: nextKey(),
+        });
+        expect(res.status).toBe(201);
+        return { orderId: (res.body as Success<Placed>).data.orderId, holdIds };
+      };
+
+      const settle = (orderId: string) =>
+        app
+          .get(OrderPaymentPort)
+          .settle(ids.orgId, orderId, () => Promise.resolve());
+
+      const refundReasons = async (): Promise<string[]> => {
+        const { rows } = await pool.query<{ reason: string }>(
+          `SELECT payload->>'reason' AS reason FROM outbox_events
+            WHERE organization_id = $1 AND routing_key = 'payment.refund_required'`,
+          [ids.orgId],
+        );
+        return rows.map((r) => r.reason);
+      };
+
+      it('refunds a payment whose lapsed hold’s row went to VIP, never seating it at the Normal price', async () => {
+        const { orderId, holdIds } = await placeNormal();
+        // The checkout timer ran out with the money in flight, so the row was
+        // free to change type (US-EVT-05), and the organizer gave it to VIP.
+        await pool.query(
+          `UPDATE seat_holds SET expires_at = now() - interval '1 minute'
+            WHERE id = ANY($1)`,
+          [holdIds],
+        );
+        await pool.query(
+          `UPDATE seats SET ticket_type_id = $1 WHERE id = ANY($2)`,
+          [ids.tiers.vip, ids.split.normal],
+        );
+        try {
+          const settled = await settle(orderId);
+          expect(settled.outcome).toBe('refund_required');
+          expect(await assignedSeats()).toBe(0);
+          expect(await soldFor(ids.tiers.normal)).toBe(0);
+          expect(await refundReasons()).toEqual(['seat_mismatch']);
+        } finally {
+          await pool.query(
+            `UPDATE seats SET ticket_type_id = $1 WHERE id = ANY($2)`,
+            [ids.tiers.normal, ids.split.normal],
+          );
+        }
+      });
+
+      it('refunds a payment for a type whose rows were all taken away (0 seats), rather than failing to settle', async () => {
+        const { orderId, holdIds } = await placeNormal();
+        // The organizer removed Normal's only row with the money in flight:
+        // its seats went, the hold with them, and Normal now has 0 seats.
+        await pool.query(`DELETE FROM seat_holds WHERE id = ANY($1)`, [
+          holdIds,
+        ]);
+        await pool.query(`UPDATE ticket_types SET total = 0 WHERE id = $1`, [
+          ids.tiers.normal,
+        ]);
+        try {
+          const settled = await settle(orderId);
+          expect(settled.outcome).toBe('refund_required');
+          expect(await soldFor(ids.tiers.normal)).toBe(0);
+          expect(await refundReasons()).toEqual(['soldout']);
+        } finally {
+          await pool.query(`UPDATE ticket_types SET total = 2 WHERE id = $1`, [
+            ids.tiers.normal,
+          ]);
+        }
+      });
+    });
+  });
+
+  /*
+   * The user's own example (US-EVT-05): row 7 gives seats 1–5 to Free and
+   * seats 6–16 to Normal. Each seat sells as its own type — never its row's,
+   * nor whichever the buyer picked — on hold, on order and when money lands.
+   */
+  describe('a row split between ticket types seat by seat (US-DISC-04)', () => {
+    /** Row 7's seat `n` (1-based). */
+    const seat = (n: number) => ids.row7[n - 1];
+    const mixedHold = (ticketTypeId: string, seatNumbers: number[]) =>
+      request(server)
+        .post('/api/v1/public/checkout/hold')
+        .send({
+          eventId: ids.events[MIXED],
+          ticketTypeId,
+          seatIds: seatNumbers.map(seat),
+        });
+    const place = (
+      ticketTypeId: string,
+      seatNumbers: number[],
+      holdIds: number[],
+    ) =>
+      confirm({
+        eventId: ids.events[MIXED],
+        ticketTypeId,
+        seatIds: seatNumbers.map(seat),
+        holdIds,
+        buyer,
+        idempotencyKey: nextKey(),
+      });
+    const heldIds = (res: request.Response) =>
+      (res.body as Success<Held>).data.holdIds;
+    const seatedOn = async (): Promise<number[]> => {
+      const { rows } = await pool.query<{ seat_id: string }>(
+        `SELECT seat_id FROM seat_assignments WHERE organization_id = $1
+          ORDER BY seat_id`,
+        [ids.orgId],
+      );
+      return rows.map((r) => Number(r.seat_id));
+    };
+    const OTHER_TYPE =
+      'Those seats belong to a different ticket type. Please choose again.';
+
+    it("tells the checkout each seat's own type, so the map greys the rest", async () => {
+      const res = await request(server)
+        .get(`/api/v1/public/checkout/${MIXED}`)
+        .expect(200);
+      const view = (
+        res.body as Success<{
+          seatMap: { seats: { id: number; ticketTypeId: string | null }[] };
+        }>
+      ).data;
+      const typeOf = new Map(
+        view.seatMap.seats.map((s) => [s.id, s.ticketTypeId]),
+      );
+      expect(ids.row7.map((id) => typeOf.get(id))).toEqual([
+        ...Array<string>(5).fill(ids.tiers.mixedFree),
+        ...Array<string>(11).fill(ids.tiers.mixedNormal),
+      ]);
+    });
+
+    it('holds seats 1–5 only as Free (422 as Normal)', async () => {
+      for (const n of [1, 5]) {
+        const res = await mixedHold(ids.tiers.mixedNormal, [n]);
+        expect(res.status).toBe(422);
+        expect((res.body as { message: string }).message).toBe(OTHER_TYPE);
+      }
+      expect((await mixedHold(ids.tiers.mixedFree, [1, 5])).status).toBe(201);
+    });
+
+    it('holds seats 6–16 only as Normal (422 as Free)', async () => {
+      for (const n of [6, 16]) {
+        const res = await mixedHold(ids.tiers.mixedFree, [n]);
+        expect(res.status).toBe(422);
+        expect((res.body as { message: string }).message).toBe(OTHER_TYPE);
+      }
+      expect((await mixedHold(ids.tiers.mixedNormal, [6, 16])).status).toBe(
+        201,
+      );
+    });
+
+    it('refuses one hold across both halves of the row under either type (422)', async () => {
+      expect((await mixedHold(ids.tiers.mixedFree, [5, 6])).status).toBe(422);
+      expect((await mixedHold(ids.tiers.mixedNormal, [5, 6])).status).toBe(422);
+    });
+
+    it('places a Free order on seats 1–2 and seats each ticket there', async () => {
+      const held = await mixedHold(ids.tiers.mixedFree, [1, 2]);
+      expect(held.status).toBe(201);
+      const res = await place(ids.tiers.mixedFree, [1, 2], heldIds(held));
+      expect(res.status).toBe(201);
+      expect((res.body as Success<Placed>).data.tickets).toHaveLength(2);
+      expect(await seatedOn()).toEqual([seat(1), seat(2)]);
+      expect(await soldFor(ids.tiers.mixedFree)).toBe(2);
+    });
+
+    it('places a Normal order on seat 6 of the same row and seats it when the money lands', async () => {
+      const held = await mixedHold(ids.tiers.mixedNormal, [6]);
+      expect(held.status).toBe(201);
+      const res = await place(ids.tiers.mixedNormal, [6], heldIds(held));
+      expect(res.status).toBe(201);
+      const placed = (res.body as Success<Placed>).data;
+      expect(placed.status).toBe('pending');
+      const settled = await app
+        .get(OrderPaymentPort)
+        .settle(ids.orgId, placed.orderId, () => Promise.resolve());
+      expect(settled.outcome).toBe('settled');
+      expect(await seatedOn()).toEqual([seat(6)]);
+      expect(await soldFor(ids.tiers.mixedNormal)).toBe(1);
+    });
+
+    it('refuses to order a held Free seat as Normal (409) — nothing is placed', async () => {
+      const held = await mixedHold(ids.tiers.mixedFree, [5]);
+      expect(held.status).toBe(201);
+      const res = await place(ids.tiers.mixedNormal, [6], heldIds(held));
+      expect(res.status).toBe(409);
+      expect((res.body as { message: string }).message).toBe(
+        'Your seats changed. Please choose again.',
+      );
+      expect(await orderCount()).toBe(0);
+    });
+
+    it('refunds a payment whose lapsed hold’s seat went to Free, while the rest of the row still sells Normal', async () => {
+      const held = await mixedHold(ids.tiers.mixedNormal, [6]);
+      const res = await place(ids.tiers.mixedNormal, [6], heldIds(held));
+      expect(res.status).toBe(201);
+      const { orderId } = (res.body as Success<Placed>).data;
+      // The timer ran out with the money in flight, and the organizer gave
+      // just seat 6 to Free; seats 7–16 still sell Normal.
+      await pool.query(
+        `UPDATE seat_holds SET expires_at = now() - interval '1 minute'
+          WHERE id = ANY($1)`,
+        [heldIds(held)],
+      );
+      await pool.query(`UPDATE seats SET ticket_type_id = $1 WHERE id = $2`, [
+        ids.tiers.mixedFree,
+        seat(6),
+      ]);
+      try {
+        const settled = await app
+          .get(OrderPaymentPort)
+          .settle(ids.orgId, orderId, () => Promise.resolve());
+        expect(settled.outcome).toBe('refund_required');
+        expect(await seatedOn()).toEqual([]);
+        expect(await soldFor(ids.tiers.mixedNormal)).toBe(0);
+      } finally {
+        await pool.query(`UPDATE seats SET ticket_type_id = $1 WHERE id = $2`, [
+          ids.tiers.mixedNormal,
+          seat(6),
+        ]);
+      }
+    });
+  });
+
   describe('the selection is re-checked, never trusted', () => {
     it('refuses an order for an event that does not exist', async () => {
       const res = await confirm({
@@ -601,6 +942,8 @@ async function seed(pool: Pool): Promise<{
   events: Record<string, string>;
   tiers: Record<string, string>;
   seats: number[];
+  split: { vip: number[]; normal: number[]; untyped: number[] };
+  row7: number[];
 }> {
   const org = await pool.query<{ id: string }>(
     `INSERT INTO organizations (name, slug, vat_rate, service_fee_rate)
@@ -640,7 +983,63 @@ async function seed(pool: Pool): Promise<{
     total: 20,
   });
   const seats = await insertSeats(pool, orgId, events[GALA], tiers.gala);
-  return { orgId, events, tiers, seats };
+
+  events[SPLIT] = await insertEvent(
+    pool,
+    orgId,
+    SPLIT,
+    'Split Gala',
+    'reserved',
+  );
+  tiers.vip = await insertTier(pool, orgId, events[SPLIT], {
+    name: 'VIP',
+    price: 2_500 * BAHT,
+    total: 2,
+  });
+  tiers.normal = await insertTier(pool, orgId, events[SPLIT], {
+    name: 'Normal',
+    price: 890 * BAHT,
+    total: 2,
+  });
+  // Row 1 sells VIP, row 2 Normal (US-EVT-05); row 3 was left without a type.
+  const split = {
+    vip: await insertSeats(pool, orgId, events[SPLIT], tiers.vip, '1', 2),
+    normal: await insertSeats(pool, orgId, events[SPLIT], tiers.normal, '2', 2),
+    untyped: await insertSeats(pool, orgId, events[SPLIT], null, '3', 1),
+  };
+
+  events[MIXED] = await insertEvent(
+    pool,
+    orgId,
+    MIXED,
+    'Mixed Row Gala',
+    'reserved',
+  );
+  tiers.mixedFree = await insertTier(pool, orgId, events[MIXED], {
+    name: 'Free',
+    price: 0,
+    isFree: true,
+    total: 5,
+  });
+  tiers.mixedNormal = await insertTier(pool, orgId, events[MIXED], {
+    name: 'Normal',
+    price: 890 * BAHT,
+    total: 11,
+  });
+  // Row 7: seats 1–5 Free, seats 6–16 Normal (US-EVT-05).
+  const row7 = [
+    ...(await insertSeats(pool, orgId, events[MIXED], tiers.mixedFree, '7', 5)),
+    ...(await insertSeats(
+      pool,
+      orgId,
+      events[MIXED],
+      tiers.mixedNormal,
+      '7',
+      11,
+      6,
+    )),
+  ];
+  return { orgId, events, tiers, seats, split, row7 };
 }
 
 async function insertEvent(
@@ -682,21 +1081,26 @@ async function insertSeats(
   pool: Pool,
   orgId: number,
   eventId: string,
-  ticketTypeId: string,
+  ticketTypeId: string | null,
+  rowLabel = 'A',
+  count = 4,
+  firstSeat = 1,
 ): Promise<number[]> {
   const map = await pool.query<{ id: string }>(
     `INSERT INTO seat_maps (organization_id, event_id, name, total_seats)
-     VALUES ($1,$2,'Main',4) RETURNING id`,
+     VALUES ($1,$2,'Main',4)
+     ON CONFLICT (event_id) DO UPDATE SET name = EXCLUDED.name
+     RETURNING id`,
     [orgId, eventId],
   );
   const mapId = Number(map.rows[0].id);
   const ids: number[] = [];
-  for (let n = 1; n <= 4; n += 1) {
+  for (let n = 1; n <= count; n += 1) {
     const row = await pool.query<{ id: string }>(
       `INSERT INTO seats (organization_id, seat_map_id, section, row_label,
                           seat_number, ticket_type_id, status)
-       VALUES ($1,$2,'Stalls','A',$3,$4,'available') RETURNING id`,
-      [orgId, mapId, String(n), ticketTypeId],
+       VALUES ($1,$2,'Stalls',$3,$4,$5,'available') RETURNING id`,
+      [orgId, mapId, rowLabel, String(firstSeat + n - 1), ticketTypeId],
     );
     ids.push(Number(row.rows[0].id));
   }

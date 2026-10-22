@@ -13,6 +13,7 @@ import type { RegistrationsReportView } from './registrations-report.service';
 import type { TransactionsReportView } from './transactions-report.service';
 import type { PayoutsReportView } from './payouts-report.service';
 import type { ReportPayoutStatus } from './ports/payout-report.port';
+import { OFF } from '../../common/constants/reports.constants';
 
 /**
  * Each report as one typed table (US-RPT-11).
@@ -210,9 +211,6 @@ export function eventsBody(view: EventsReportView): ReportBody {
 }
 
 /* ── discount payback (US-RPT-10) ──────────────────────────────────────── */
-
-/** What follows a fixed code's amount, in the phrase the screen uses. */
-const OFF = 'off';
 
 /**
  * The API finishes a percentage code's wording and leaves a fixed one in

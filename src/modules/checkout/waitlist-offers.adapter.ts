@@ -11,18 +11,11 @@ import { CheckoutEventPort } from './ports/checkout-event.port';
 import { RegistrationApprovalAdapter } from './registration-approval.adapter';
 import { autoOffersWaitlist, confirmsOnOffer } from './waitlist-rules';
 import { safeError } from '../../common/errors/safe-error';
-
-/**
- * How long a free registration's place is held while its approval runs. The
- * hold only has to outlive the approval that converts it, and a short expiry
- * means a crash between the two cannot keep a place off sale for long.
- */
-const CONFIRM_HOLD_MS = 5 * 60 * 1000;
-
-/** Nobody chose them: the line did, in order. Recorded as no offerer/decider. */
-const NOBODY = null;
-
-const STOPPED_EARLY = 'Waitlist auto-offer stopped early';
+import {
+  CONFIRM_HOLD_MS,
+  NOBODY,
+  STOPPED_EARLY,
+} from '../../common/constants/checkout.constants';
 
 /**
  * Checkout's implementation of Ticketing's `WaitlistOffersPort` (US-REG-04):

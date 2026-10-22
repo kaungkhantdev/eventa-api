@@ -1,12 +1,13 @@
 import { defineConfig } from 'drizzle-kit';
+import { MIGRATIONS_FOLDER } from './src/db/drizzle.constants';
 
-// drizzle-kit config. `pnpm generate` diffs src/db/schema → SQL migrations in src/db/migrations;
-// `pnpm migrate` applies them. Falls back to the docker-compose DB when DATABASE_URL is unset so
-// codegen works offline. See development-guide §6.
+// drizzle-kit config. `pnpm generate` diffs src/db/schema → SQL migrations in MIGRATIONS_FOLDER,
+// the folder `pnpm migrate` and the production image's migration entry apply from. Falls back to
+// the docker-compose DB when DATABASE_URL is unset so codegen works offline. See development-guide §6.
 export default defineConfig({
   dialect: 'postgresql',
   schema: './src/db/schema/index.ts',
-  out: './src/db/migrations',
+  out: `./${MIGRATIONS_FOLDER}`,
   casing: 'snake_case',
   dbCredentials: {
     url:

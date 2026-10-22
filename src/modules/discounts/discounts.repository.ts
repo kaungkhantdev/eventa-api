@@ -23,8 +23,7 @@ import type {
   NewDiscountValues,
   SearchDiscountsOptions,
 } from './discounts.types';
-
-const DEFAULT_VAT_RATE = 0.07;
+import { DEFAULT_VAT_RATE } from '../../common/constants/discounts.constants';
 
 /** Data access for the Promotions context. Every read/write is tenant-scoped. */
 @Injectable()

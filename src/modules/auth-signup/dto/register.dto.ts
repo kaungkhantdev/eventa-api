@@ -15,7 +15,7 @@ import {
   PASSWORD_MIN_LENGTH,
   PASSWORD_PATTERN,
   PASSWORD_RULE_MESSAGE,
-} from '../../auth-password/auth-password.policy';
+} from '../../../common/constants/auth-password.constants';
 
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;

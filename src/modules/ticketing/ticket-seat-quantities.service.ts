@@ -1,0 +1,60 @@
+import { Injectable } from '@nestjs/common';
+import type { Tx } from '../../db/tenant';
+import type { EventActor } from '../events/events.types';
+import { EventsService } from '../events/events.service';
+import { TicketSeatsPort } from './ports/ticket-seats.port';
+import { TicketingPolicy } from './ticketing.policy';
+
+/**
+ * The seats each ticket type holds, on a reserved event whose seats have
+ * types (US-EVT-05) — null on any other event, whose quantities are typed.
+ */
+export type SeatQuantities = ReadonlyMap<string, number> | null;
+
+/**
+ * Whether an event's seat map sets its ticket types' quantities, and to what
+ * (US-EVT-05). A facet of Ticketing kept apart from `TicketingService`, which
+ * would otherwise carry the event lookup and Registration's seat counts on top
+ * of its own collaborators.
+ */
+@Injectable()
+export class TicketSeatQuantitiesService {
+  constructor(
+    private readonly events: EventsService,
+    private readonly seats: TicketSeatsPort,
+    private readonly policy: TicketingPolicy,
+  ) {}
+
+  /**
+   * The seats each ticket type holds when the event's seat map sets its
+   * quantities, else null. Reads the event through Events, so it is also the
+   * 404 for an event outside the caller's workspace.
+   */
+  async forEvent(actor: EventActor, eventId: string): Promise<SeatQuantities> {
+    const event = await this.events.getEvent(actor, eventId);
+    const seats = await this.seats.seatsByTicketType(
+      actor.organizationId,
+      eventId,
+    );
+    return this.policy.quantityFromSeats(event.seatingMode, seats.size > 0)
+      ? seats
+      : null;
+  }
+
+  /**
+   * Refuses (409) to remove a ticket type that still has seats, counted
+   * inside the removal's transaction under the type's lock (US-TKT-05).
+   */
+  async assertUnseatedIn(
+    tx: Tx,
+    organizationId: number,
+    ticket: { id: string; name: string },
+  ): Promise<void> {
+    const seats = await this.seats.seatsOfTicketTypeIn(
+      tx,
+      organizationId,
+      ticket.id,
+    );
+    this.policy.assertNoSeats(ticket.name, seats);
+  }
+}

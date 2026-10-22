@@ -10,6 +10,7 @@ import { eventPublishedEvent } from './events/event-published.event';
 import { toEventResponse } from './events.mapper';
 import { EventsRepository } from './events.repository';
 import { sanitizeDescription } from './rich-text';
+import { SeatingReadinessPort } from './ports/seating-readiness.port';
 import { TicketAvailabilityPort } from './ports/ticket-availability.port';
 import type {
   CancelEventInput,
@@ -26,9 +27,15 @@ import type {
   Visibility,
 } from './events.types';
 import { slugify } from '../../common/util/slugify';
-
-/** Slug used when a name carries no latin alphanumerics (e.g. a Thai-only name). */
-const EVENT_SLUG_FALLBACK = 'event';
+import {
+  EVENT_SLUG_FALLBACK,
+  FOREIGN_KEY_VIOLATION,
+  HAS_REGISTRATIONS,
+  PUBLISH_REQUIREMENTS,
+  RESERVED_SEATING,
+  SEATING_GAP,
+  UNTYPED_SEATS,
+} from '../../common/constants/events.constants';
 
 const DRAFT_STATUS: EventStatus = 'draft';
 const PUBLISHED_STATUS: EventStatus = 'upcoming';
@@ -36,21 +43,11 @@ const CANCELLED_STATUS: EventStatus = 'cancelled';
 const COMPLETED_STATUS: EventStatus = 'completed';
 const PRIVATE_VISIBILITY: Visibility = 'private';
 
-/** Why an event with registrations or payment history is never hard-deleted. */
-const HAS_REGISTRATIONS =
-  "This event has registrations and can't be deleted. Cancel it instead to refund and notify attendees.";
-/** Postgres SQLSTATE for a delete that would orphan rows still referring to it. */
-const FOREIGN_KEY_VIOLATION = '23503';
-
-/** Human phrase per publish requirement, listed back when one is missing. */
-const PUBLISH_REQUIREMENTS = {
-  title: 'a title',
-  description: 'a description',
-  schedule: 'a start date & time',
-  location: 'a venue or an online link',
-  tickets: 'at least one ticket type',
-} as const;
 type PublishRequirement = keyof typeof PUBLISH_REQUIREMENTS;
+
+type PublishGap = PublishRequirement | typeof SEATING_GAP;
+const seatlessTicketType = (name: string) =>
+  `${name} has no seats. Give it some seats or remove it.`;
 
 /**
  * The description is rich text an ORGANIZER authors and an ATTENDEE loads on a
@@ -117,6 +114,8 @@ export class EventsService {
     private readonly tickets: TicketAvailabilityPort,
     private readonly outbox: OutboxPort,
     private readonly clock: Clock,
+    @Inject(forwardRef(() => SeatingReadinessPort))
+    private readonly seating: SeatingReadinessPort,
   ) {}
 
   /** Create an event in Draft; derives a unique per-org slug and defaults. */
@@ -252,7 +251,10 @@ export class EventsService {
       throw this.staleEvent();
     }
     const gaps = await this.readinessGaps(actor.organizationId, event);
-    if (gaps.length > 0) throw this.notReady(gaps);
+    const seatGaps = await this.seatingGaps(actor.organizationId, event);
+    if (gaps.length > 0 || seatGaps.length > 0) {
+      throw this.notReady(gaps, seatGaps);
+    }
     if (this.startsInPast(event.startAt) && !input.confirmPastStart) {
       throw DomainException.validation(
         "This event's start date is already in the past. Confirm to publish it anyway.",
@@ -426,12 +428,39 @@ export class EventsService {
     return gaps;
   }
 
-  private notReady(gaps: PublishRequirement[]): DomainException {
+  /**
+   * A reserved, in-person event publishes only once every seat has a ticket
+   * type and every ticket type a seat (US-EVT-05). Only drafts reach here, so
+   * an event already published is never re-checked — but a draft whose map
+   * was laid out before seats had types must type them first.
+   */
+  private async seatingGaps(
+    organizationId: number,
+    e: EventRow,
+  ): Promise<string[]> {
+    if (e.seatingMode !== RESERVED_SEATING || e.isOnline) return [];
+    const readiness = await this.seating.seatsReadiness(organizationId, e.id);
+    return [
+      ...(readiness.seatsWithoutType > 0 ? [UNTYPED_SEATS] : []),
+      ...readiness.ticketTypesWithoutSeats.map(seatlessTicketType),
+    ];
+  }
+
+  /** One 422 naming everything still missing, the seating sentences last. */
+  private notReady(
+    gaps: PublishRequirement[],
+    seatGaps: string[],
+  ): DomainException {
     const items = gaps.map((g) => PUBLISH_REQUIREMENTS[g]).join(', ');
-    return DomainException.validation(
-      `Cannot publish yet — please add ${items}.`,
-      gaps,
-    );
+    const sentences = [
+      ...(gaps.length > 0 ? [`Cannot publish yet — please add ${items}.`] : []),
+      ...seatGaps,
+    ];
+    const details: PublishGap[] = [
+      ...gaps,
+      ...(seatGaps.length > 0 ? [SEATING_GAP] : []),
+    ];
+    return DomainException.validation(sentences.join(' '), details);
   }
 
   private startsInPast(startAt: Date): boolean {

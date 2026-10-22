@@ -1,3 +1,5 @@
+import type { PublicSeatMap } from './ports/public-seat-map.port';
+
 /** Everything the public page renders (US-PAGE-01…06). Anonymous, read-only. */
 export interface PublicPage {
   event: PublicEvent;
@@ -5,6 +7,12 @@ export interface PublicPage {
   agenda: PublicSession[];
   speakers: PublicSpeaker[];
   tickets: PublicTicket[];
+  /**
+   * How a reserved room's seats are split between the tickets, row by row
+   * (US-PAGE-05). Null for general admission, online, or a map none of whose
+   * seats has a type.
+   */
+  seatMap: PublicSeatMap | null;
   faqs: PublicFaq[];
   registration: RegistrationState;
   sections: SectionTitles;

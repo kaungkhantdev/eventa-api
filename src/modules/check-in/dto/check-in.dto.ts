@@ -2,9 +2,10 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { checkInMethodEnum, scanOutcomeEnum } from '../../../db/schema';
 import type { CheckInMethod, ScanOutcome } from '../check-in.types';
-
-const MAX_TOKEN = 256;
-const MAX_STATION = 64;
+import {
+  MAX_STATION,
+  MAX_TOKEN,
+} from '../../../common/constants/check-in.constants';
 
 /** Read a QR at the station (US-REG-12). */
 export class ScanTicketDto {

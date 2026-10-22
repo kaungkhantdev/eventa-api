@@ -9,7 +9,7 @@ side effects.
 
 ## Prerequisites
 
-- **Node.js 20+** (the tooling uses `node --env-file`)
+- **Node.js 24** — what CI and the image run (`pnpm seed` uses `--env-file-if-exists`, Node 22.9+)
 - **pnpm** — `npm i -g pnpm`
 - **Docker** + Docker Compose — runs Postgres, Redis, and RabbitMQ locally
 
@@ -157,18 +157,58 @@ pnpm test -- auth        # e.g. everything matching "auth"
 
 ## Common commands
 
-| Command          | What it does                                         |
-| ---------------- | ---------------------------------------------------- |
-| `pnpm dev`       | API in watch mode                                    |
-| `pnpm relay`     | Outbox relay (publishes events to RabbitMQ)          |
-| `pnpm migrate`   | Apply pending DB migrations                          |
-| `pnpm generate`  | Diff `src/db/schema` → a new SQL migration           |
-| `pnpm seed`      | Seed a dev tenant + admin                            |
-| `pnpm db:studio` | Drizzle Studio — browse the DB in the browser        |
-| `pnpm lint`      | ESLint (type-aware) + Prettier, autofix              |
-| `pnpm build`     | Compile to `dist/` (`dist/main.js`, `dist/relay.js`) |
+| Command             | What it does                                             |
+| ------------------- | -------------------------------------------------------- |
+| `pnpm dev`          | API in watch mode                                        |
+| `pnpm relay`        | Outbox relay (publishes events to RabbitMQ)              |
+| `pnpm migrate`      | Apply pending DB migrations                              |
+| `pnpm migrate:prod` | The same, from the build: `node dist/db/migrate.main.js` |
+| `pnpm generate`     | Diff `src/db/schema` → a new SQL migration               |
+| `pnpm seed`         | Seed a dev tenant + admin                                |
+| `pnpm db:studio`    | Drizzle Studio — browse the DB in the browser            |
+| `pnpm lint`         | ESLint (type-aware) + Prettier, autofix                  |
+| `pnpm build`        | Compile to `dist/` (`dist/main.js`, `dist/relay.js`)     |
 
-## Deploying: what has to travel with `dist/`
+## Production image
+
+One `Dockerfile` builds both images. Its last stage is production, so a plain build gives it:
+
+```bash
+docker build -t eventa-api .                       # production: compiled JS, production deps only
+docker build --target dev -t eventa-api:dev .      # development: what the umbrella compose runs
+```
+
+Config is the environment and nothing else — no `.env` is in the image, and none is needed:
+
+```bash
+docker run --rm -p 3000:3000 --env-file prod.env eventa-api
+```
+
+Migrations are a one-off run of the **same image** with the same environment (plain `node`: the image
+has no `tsx`, `drizzle-kit` or package manager to call):
+
+```bash
+docker run --rm --init --env-file prod.env eventa-api node dist/db/migrate.main.js
+```
+
+`--init` lets Ctrl-C stop it: as PID 1 with no signal handler of its own, node would ignore it. A
+stopped run is safe — each migration commits on its own, so the next run resumes after the last one.
+The entry point is `src/db/migrate.main.ts`; `pnpm migrate` runs the same code from source
+(`scripts/migrate.ts` → `src/db/migration-runner.ts`).
+
+The seed is **not** in the production image: it recreates `admin@acme.test` with the password this
+README publishes, so it is development data only. `pnpm seed` runs it from source with `tsx` (the
+umbrella compose runs it from the dev stage), and `tsconfig.build.json` keeps it out of `dist/`.
+
+The image follows the twelve-factor app; the `Dockerfile` header says where each factor is kept. In
+short: one Dockerfile per repo; a pinned base image, Corepack-pinned pnpm, a frozen lockfile and
+production-only `node_modules`; config from the environment; backing services as URLs; build, then an
+immutable image that runs `node dist/main`; a read-only filesystem (it runs under `--read-only`, as
+the Kubernetes pods do); `$PORT` (3000); one process type; exec-form `CMD`, so node gets `SIGTERM` and
+Nest's shutdown hooks close connections; dev and prod from the same base and lockfile; JSON logs on
+stdout; admin processes from the same image.
+
+### What has to travel with `dist/`
 
 The PDF report exports (`GET /reports/<report>.pdf`) embed the **Sarabun** Thai face, because a PDF
 carries the glyphs it draws — without it every Thai event name prints blank. The faces live in
@@ -176,6 +216,9 @@ carries the glyphs it draws — without it every Thai event name prints blank. T
 build. An image or artifact that ships `dist/` must therefore keep `dist/assets/` with it; the app
 falls back to the repo-root `assets/` when it is present, and otherwise refuses the export with a
 message naming both paths. Ship the `OFL.txt` beside the faces — the Open Font License requires it.
+
+The migration entry reads the SQL from `src/db/migrations` under the working directory, so the image
+ships that folder at `/app/src/db/migrations` beside `dist/`.
 
 ## Troubleshooting
 

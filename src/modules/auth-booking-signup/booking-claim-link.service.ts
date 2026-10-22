@@ -11,16 +11,11 @@ import { OutboxPort } from '../platform/outbox.port';
 import { invalidClaimLink } from './auth-booking-signup.errors';
 import { bookingAccountLinkRequestedEvent } from './events/booking-account-link-requested.event';
 import type { ClaimableBooking } from './ports/booking-claim-order.port';
-
-/**
- * The page on the web app the emailed link opens. It shows the booking's name
- * and address and asks only for a password.
- */
-const CLAIM_PAGE = '/portal/register';
-
-/** Where a used link is remembered; the rest of the key is a digest of it. */
-const SPENT_PREFIX = 'booking-claim:spent:';
-const MS_PER_SECOND = 1000;
+import {
+  CLAIM_PAGE,
+  MS_PER_SECOND,
+  SPENT_PREFIX,
+} from '../../common/constants/auth-booking-signup.constants';
 
 /** A claim link that verified: which booking it names, and which inbox it proves. */
 export interface ClaimLink {

@@ -20,20 +20,13 @@ import type { ResetLinkResponseDto } from './dto/reset-link-response.dto';
 import { PasswordService } from './auth-password.service';
 import { TokenService } from '../auth/token.service';
 import { LoginThrottleService } from '../auth/login-throttle.service';
-
-/**
- * The same words however many links went out. Counting them would tell an
- * anonymous caller how many workspaces the address belongs to — which sign-in
- * reveals only after the password checks out. Each email names its own.
- */
-const LINK_ON_ITS_WAY = 'A password-reset link is on its way.';
-
-/**
- * How many accounts on one address a single request looks at. Each usable one
- * gets its own email, so this bounds what an anonymous caller can make the form
- * send — the same bound sign-in puts on the accounts it checks.
- */
-const MAX_RESET_ACCOUNTS = 10;
+import {
+  INVALID_LINK,
+  LINK_ON_ITS_WAY,
+  MAX_RESET_ACCOUNTS,
+  RESET_DONE,
+  REUSED_PASSWORD,
+} from '../../common/constants/auth-password.constants';
 
 /** What each audience's account is called, for a message someone has to act on. */
 const AUDIENCE: Record<Persona, string> = {
@@ -45,12 +38,6 @@ function noSuchAccount(persona: Persona): string {
   const other = persona === Persona.Admin ? 'attendee' : 'organizer';
   return `No ${AUDIENCE[persona]} account uses that email address. Check the spelling, try your ${other} account, or create one.`;
 }
-
-const RESET_DONE = 'Your password has been reset. Please sign in.';
-const INVALID_LINK =
-  'This reset link is invalid or has expired. Request a new one.';
-const REUSED_PASSWORD =
-  'Please choose a password different from your current one.';
 
 /**
  * Which workspace a link should say it opens — in its email, and on the page

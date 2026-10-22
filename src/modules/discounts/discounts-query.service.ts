@@ -12,10 +12,11 @@ import type {
   DiscountStatus,
   ListDiscountsQuery,
 } from './discounts.types';
-
-const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 100;
-const ALL_EVENTS_LABEL = 'All events';
+import {
+  ALL_EVENTS_LABEL,
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+} from '../../common/constants/discounts.constants';
 
 /**
  * Browsing promotions (US-TKT-12): type, scope, live redemption counts and

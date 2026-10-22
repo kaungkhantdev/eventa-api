@@ -6,12 +6,11 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
-
-/** The exact phrase the danger zone makes the user type — no accidental clicks. */
-export const DELETE_CONFIRMATION = 'DELETE';
-/** A recovery code is longer than a TOTP; both arrive through `code`. */
-const MIN_CODE = 6;
-const MAX_CODE = 32;
+import {
+  DELETE_CONFIRMATION,
+  MAX_CODE,
+  MIN_CODE,
+} from '../../../common/constants/account-deletion.constants';
 
 /** Confirm + re-verify identity before the account is deleted (US-DISC-14). */
 export class DeleteAccountDto {

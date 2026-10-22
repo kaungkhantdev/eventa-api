@@ -42,6 +42,3 @@ export function undirectedChange(
 ): PeriodChange {
   return { ...changeBetween(current, previous), improved: null };
 }
-
-/** Down is the improvement: refunds, fees, cancellations, no-shows. */
-export const LOWER_IS_BETTER = { higherIsBetter: false } as const;

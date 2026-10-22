@@ -1,7 +1,5 @@
 import type { OutboxEventInput } from '../../platform/outbox.port';
-
-/** Routing key for a cancellation (consumed by eventa-worker: refunds, notices). */
-export const EVENTS_CANCELLED = 'events.cancelled';
+import { EVENTS_CANCELLED } from '../../../common/constants/events.constants';
 
 export interface EventCancelledInput {
   organizationId: number;

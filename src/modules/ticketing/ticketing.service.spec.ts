@@ -3,11 +3,14 @@ import { Clock } from '../../common/time/clock';
 import { DomainException } from '../../common/errors/domain.exception';
 import { EventsService } from '../events/events.service';
 import { CheckoutActivityPort } from './ports/checkout-activity.port';
+import { TicketSeatsPort } from './ports/ticket-seats.port';
 import { WaitlistOffersPort } from './ports/waitlist-offers.port';
+import { TicketSeatQuantitiesService } from './ticket-seat-quantities.service';
 import { TicketingPolicy } from './ticketing.policy';
 import { TicketingRepository } from './ticketing.repository';
 import { TicketingService } from './ticketing.service';
 import type { TicketRow } from './ticketing.types';
+import type { Tx } from '../../db/tenant';
 
 const actor = { organizationId: 1, userId: 'u1' };
 const eventId = 'e1';
@@ -52,6 +55,7 @@ describe('TicketingService', () => {
   let events: jest.Mocked<EventsService>;
   let checkout: jest.Mocked<CheckoutActivityPort>;
   let waitlist: jest.Mocked<WaitlistOffersPort>;
+  let seats: jest.Mocked<TicketSeatsPort>;
   let service: TicketingService;
 
   beforeEach(() => {
@@ -78,19 +82,25 @@ describe('TicketingService', () => {
       hasActiveHolds: jest.fn().mockResolvedValue(false),
     };
     events = {
-      getEvent: jest.fn().mockResolvedValue({ id: eventId }),
+      getEvent: jest.fn().mockResolvedValue({ id: eventId, seatingMode: 'ga' }),
     } as unknown as jest.Mocked<EventsService>;
+    seats = {
+      seatsByTicketType: jest.fn().mockResolvedValue(new Map()),
+      eventsWithTypedSeats: jest.fn().mockResolvedValue(new Set()),
+      seatsOfTicketTypeIn: jest.fn().mockResolvedValue(0),
+    };
     waitlist = {
       offerNewPlaces: jest.fn().mockResolvedValue(OFFERS_FINISHED(0)),
     };
     const clock: Clock = { now: () => NOW };
+    const policy = new TicketingPolicy();
     service = new TicketingService(
       repo,
-      events,
-      new TicketingPolicy(),
+      policy,
       clock,
       checkout,
       waitlist,
+      new TicketSeatQuantitiesService(events, seats, policy),
     );
   });
 
@@ -402,7 +412,11 @@ describe('TicketingService', () => {
       repo.countActive.mockResolvedValue(3);
       const res = await service.deleteTicket(actor, eventId, 't1');
       expect(res).toEqual({ outcome: 'removed' });
-      expect(repo.hardDelete).toHaveBeenCalledWith(1, 't1');
+      expect(repo.hardDelete).toHaveBeenCalledWith(
+        1,
+        't1',
+        expect.any(Function),
+      );
       expect(repo.softDelete).not.toHaveBeenCalled();
     });
 
@@ -412,7 +426,11 @@ describe('TicketingService', () => {
       const res = await service.deleteTicket(actor, eventId, 't1');
       expect(res).toEqual({ outcome: 'retired' });
       // retire = soft delete: the row survives, so issued tickets keep resolving
-      expect(repo.softDelete).toHaveBeenCalledWith(1, 't1');
+      expect(repo.softDelete).toHaveBeenCalledWith(
+        1,
+        't1',
+        expect.any(Function),
+      );
       expect(repo.hardDelete).not.toHaveBeenCalled();
     });
 
@@ -438,6 +456,147 @@ describe('TicketingService', () => {
       expect((err as DomainException).getStatus()).toBe(422);
       expect(repo.softDelete).not.toHaveBeenCalled();
       expect(repo.hardDelete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('on a reserved event whose rows have ticket types (US-EVT-05)', () => {
+    beforeEach(() => {
+      events.getEvent.mockResolvedValue({
+        id: eventId,
+        seatingMode: 'reserved',
+      } as never);
+      seats.seatsByTicketType.mockResolvedValue(
+        new Map([
+          ['t1', 4],
+          ['t2', 60],
+        ]),
+      );
+      repo.findTicket.mockResolvedValue(ticketRow({ total: 4 }));
+    });
+
+    it('marks every ticket as taking its quantity from the seat map', async () => {
+      repo.listByEvent.mockResolvedValue([
+        ticketRow({ id: 't1' }),
+        ticketRow({ id: 't2', name: 'Normal' }),
+      ]);
+      const list = await service.listTickets(actor, eventId);
+      expect(list.map((t) => t.quantityFromSeats)).toEqual([true, true]);
+      expect(seats.seatsByTicketType).toHaveBeenCalledWith(1, eventId);
+    });
+
+    it('starts a new ticket type at 0 seats, whatever quantity was sent', async () => {
+      const res = await service.createTicket(actor, eventId, {
+        name: 'Late VIP',
+        priceSatang: 250000,
+        total: 50,
+      });
+      expect(repo.insert.mock.calls[0][0].total).toBe(0);
+      expect(res.quantityFromSeats).toBe(true);
+    });
+
+    it('refuses a quantity other than the seats its rows hold (409)', async () => {
+      const err = await service
+        .updateTicket(actor, eventId, 't1', { total: 100 })
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(409);
+      expect((err as DomainException).message).toBe(
+        "This event's ticket quantities come from its seat map. Give rows to a ticket type instead.",
+      );
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('saves its other fields, with the same quantity or none', async () => {
+      const res = await service.updateTicket(actor, eventId, 't1', {
+        name: 'VIP Lounge',
+        total: 4,
+      });
+      expect(repo.update.mock.calls[0][2]).toMatchObject({
+        name: 'VIP Lounge',
+        total: 4,
+      });
+      expect(res.quantityFromSeats).toBe(true);
+      await service.updateTicket(actor, eventId, 't1', { name: 'VIP' });
+      expect(repo.update).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps a per-order limit above the seats its rows hold editable', async () => {
+      // 4 seats, 8 per order: the rows decide how many there are.
+      await service.updateTicket(actor, eventId, 't1', { maxPerOrder: 6 });
+      expect(repo.update).toHaveBeenCalled();
+    });
+
+    it('refuses to delete or retire a type that still has seats (409)', async () => {
+      const err = await service
+        .deleteTicket(actor, eventId, 't1')
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(409);
+      expect((err as DomainException).message).toBe(
+        'VIP still has seats. Give them to another ticket type first.',
+      );
+      expect(repo.hardDelete).not.toHaveBeenCalled();
+      expect(repo.softDelete).not.toHaveBeenCalled();
+    });
+
+    /*
+     * A seat map save that gives this type a row between the check above and
+     * the delete would have its row's type cleared by the seats' foreign key
+     * (ON DELETE SET NULL), so the removal looks again, under the type's lock.
+     */
+    it('checks the seats again inside the removal, under the type’s lock (409)', async () => {
+      const TX = {} as Tx;
+      repo.findTicket.mockResolvedValue(ticketRow({ id: 't3', name: 'Gold' }));
+      seats.seatsOfTicketTypeIn.mockResolvedValue(3);
+      repo.hardDelete.mockImplementation(
+        async (_org: number, _id: string, guard: (tx: Tx) => Promise<void>) => {
+          await guard(TX);
+          return true;
+        },
+      );
+      const err = await service
+        .deleteTicket(actor, eventId, 't3')
+        .catch((e: unknown) => e);
+      expect((err as DomainException).getStatus()).toBe(409);
+      expect((err as DomainException).message).toBe(
+        'Gold still has seats. Give them to another ticket type first.',
+      );
+      expect(seats.seatsOfTicketTypeIn).toHaveBeenCalledWith(TX, 1, 't3');
+    });
+
+    it('removes a type that has no seats', async () => {
+      repo.findTicket.mockResolvedValue(ticketRow({ id: 't3', total: 0 }));
+      await expect(service.deleteTicket(actor, eventId, 't3')).resolves.toEqual(
+        { outcome: 'removed' },
+      );
+    });
+
+    it('says so on a paused or resumed ticket too', async () => {
+      const paused = await service.pauseTicket(actor, eventId, 't1');
+      expect(paused.quantityFromSeats).toBe(true);
+    });
+  });
+
+  describe('on any other event', () => {
+    it('keeps the typed quantity and says the seat map does not set it', async () => {
+      const res = await service.createTicket(actor, eventId, {
+        name: 'GA',
+        priceSatang: 50000,
+        total: 100,
+      });
+      expect(repo.insert.mock.calls[0][0].total).toBe(100);
+      expect(res.quantityFromSeats).toBe(false);
+    });
+
+    it('lets a reserved map with no typed seat change its quantity freely', async () => {
+      events.getEvent.mockResolvedValue({
+        id: eventId,
+        seatingMode: 'reserved',
+      } as never);
+      repo.findTicket.mockResolvedValue(ticketRow({ total: 100 }));
+      const res = await service.updateTicket(actor, eventId, 't1', {
+        total: 120,
+      });
+      expect(repo.update.mock.calls[0][2]).toMatchObject({ total: 120 });
+      expect(res.quantityFromSeats).toBe(false);
     });
   });
 

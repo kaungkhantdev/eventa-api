@@ -16,11 +16,12 @@ import type {
   ListEventsFilters,
   ListEventsQuery,
 } from './events.types';
-
-const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 100;
-const DEFAULT_UPCOMING_LIMIT = 20;
-const MAX_UPCOMING_LIMIT = 100;
+import {
+  DEFAULT_LIMIT,
+  DEFAULT_UPCOMING_LIMIT,
+  MAX_LIMIT,
+  MAX_UPCOMING_LIMIT,
+} from '../../common/constants/events.constants';
 
 /**
  * The Events read side: the organizer's list, the tab badge counts, the calendar
@@ -164,6 +165,7 @@ export class EventsQueryService {
       sold,
       capacity,
       fillPercent: capacity > 0 ? Math.round((sold / capacity) * 100) : 0,
+      coverImage: e.coverImage ?? null,
     };
   }
 

@@ -9,32 +9,10 @@ import type {
   PhoneChallengeInput,
   ProfileRow,
 } from './users.types';
-
-const PROFILE_COLUMNS = {
-  id: users.id,
-  organizationId: users.organizationId,
-  name: users.name,
-  email: users.email,
-  pendingEmail: users.pendingEmail,
-  phone: users.phone,
-  phoneVerifiedAt: users.phoneVerifiedAt,
-  pendingPhone: users.pendingPhone,
-  timezone: users.timezone,
-  locale: users.locale,
-  avatarUrl: users.avatarUrl,
-  city: users.city,
-  dateOfBirth: users.dateOfBirth,
-  bio: users.bio,
-  displayCurrency: users.displayCurrency,
-};
-
-/** Clears every trace of a code in flight. */
-const NO_PHONE_CHALLENGE = {
-  pendingPhone: null,
-  phoneCodeHash: null,
-  phoneCodeExpiresAt: null,
-  phoneCodeAttempts: 0,
-} as const;
+import {
+  NO_PHONE_CHALLENGE,
+  PROFILE_COLUMNS,
+} from '../../common/constants/users.constants';
 
 /** Data access for a member's own profile (US-SET-01, US-DISC-11). */
 @Injectable()

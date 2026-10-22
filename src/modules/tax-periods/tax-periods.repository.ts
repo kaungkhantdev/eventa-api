@@ -4,10 +4,11 @@ import { DRIZZLE, type Database } from '../../db/drizzle.constants';
 import { organizations, taxPeriods } from '../../db/schema';
 import { withTenant } from '../../db/tenant';
 import type { FiledPeriod } from './tax-periods.types';
-import { MONTHS_IN_YEAR, monthLabel, periodDueDate } from './vat-period';
-
-/** The Thai statutory rate, if a workspace row somehow carries none. */
-const DEFAULT_VAT_RATE = 0.07;
+import { monthLabel, periodDueDate } from './vat-period';
+import {
+  DEFAULT_VAT_RATE,
+  MONTHS_IN_YEAR,
+} from '../../common/constants/tax-periods.constants';
 
 /**
  * Data access for filed VAT periods. Only FILED periods are stored — an open

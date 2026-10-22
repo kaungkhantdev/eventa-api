@@ -10,15 +10,14 @@ import type {
   PreviewPage,
   UpdatePageInput,
 } from './event-page.types';
-
-/** Used when no accent is set, or the one given is unusable (US-PAGE-10). */
-const DEFAULT_ACCENT = '#2563EB';
-const ACCENT_PATTERN = /^#[0-9a-f]{6}$/i;
-const DEFAULT_TEMPLATE = 'aurora';
-const DEFAULT_AGENDA_TITLE = 'Agenda';
-const DEFAULT_SPEAKERS_TITLE = 'Speakers';
-/** A preview with no date still needs one to render; an hour is a sane default. */
-const PREVIEW_DEFAULT_DURATION_MS = 60 * 60 * 1000;
+import {
+  ACCENT_PATTERN,
+  DEFAULT_ACCENT,
+  DEFAULT_AGENDA_TITLE,
+  DEFAULT_SPEAKERS_TITLE,
+  DEFAULT_TEMPLATE,
+  PREVIEW_DEFAULT_DURATION_MS,
+} from '../../common/constants/event-page.constants';
 
 /**
  * The organizer's control over the public page: which design it uses, the public
@@ -130,6 +129,8 @@ export class EventPageService {
       agenda: [],
       speakers: [],
       tickets: [],
+      // No tickets, so no rows to split between them (US-PAGE-05).
+      seatMap: null,
       faqs: [],
       registration: { open: false, reason: 'This is a preview.' },
       sections: {

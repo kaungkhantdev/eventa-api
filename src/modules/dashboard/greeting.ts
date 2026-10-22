@@ -1,12 +1,12 @@
 import { BANGKOK_OFFSET_MS, DAY_MS } from '../../common/time/bangkok';
+import {
+  AFTERNOON_FROM,
+  EVENING_FROM,
+  HOUR_MS,
+} from '../../common/constants/dashboard.constants';
 
 /** The two languages the product speaks (US-DASH-01/13). */
 export type Language = 'en' | 'th';
-
-const HOUR_MS = 60 * 60 * 1000;
-/** Bangkok-local hours the day turns over at. */
-const AFTERNOON_FROM = 12;
-const EVENING_FROM = 18;
 
 type PartOfDay = 'morning' | 'afternoon' | 'evening';
 

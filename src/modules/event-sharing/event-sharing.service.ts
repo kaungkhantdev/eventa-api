@@ -5,9 +5,7 @@ import type { EventResponseDto } from '../events/dto/event-response.dto';
 import type { EventActor } from '../events/events.types';
 import { EventsService } from '../events/events.service';
 import { ShareResponseDto } from './dto/share-response.dto';
-
-const NOT_PUBLIC_WARNING =
-  "This event isn't public yet — the share link may not be reachable until you publish it.";
+import { NOT_PUBLIC_WARNING } from '../../common/constants/event-sharing.constants';
 
 /** Build share links + a pre-filled message for promoting an event (US-EVT-15). */
 @Injectable()

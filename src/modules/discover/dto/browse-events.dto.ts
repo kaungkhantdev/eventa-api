@@ -8,9 +8,10 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-
-const MAX_LIMIT = 48;
-const MAX_TEXT = 120;
+import {
+  MAX_LIMIT,
+  MAX_TEXT,
+} from '../../../common/constants/discover.constants';
 
 /** What an anonymous visitor may ask the Discover grid for (US-DISC-02). */
 export class BrowseEventsDto {

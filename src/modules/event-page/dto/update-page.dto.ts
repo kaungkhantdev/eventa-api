@@ -6,9 +6,7 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator';
-import { templateIdEnum } from '../../../db/schema';
-
-const TEMPLATES = templateIdEnum.enumValues;
+import { TEMPLATES } from '../../../common/constants/event-page.constants';
 
 /** Design, public address and branding for an event's page (US-PAGE-10). */
 export class UpdatePageDto {

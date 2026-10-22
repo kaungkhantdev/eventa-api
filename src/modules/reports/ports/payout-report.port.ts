@@ -1,3 +1,5 @@
+import { REPORT_PAYOUT_STATUSES } from '../../../common/constants/reports.constants';
+
 /**
  * What Reports needs to show payouts and settlement (US-RPT-07), without
  * reading the payouts tables.
@@ -9,11 +11,6 @@
  * Payouts screen's to show, with its retry (US-FIN-04).
  */
 
-export const REPORT_PAYOUT_STATUSES = [
-  'paid',
-  'in_transit',
-  'pending',
-] as const;
 export type ReportPayoutStatus = (typeof REPORT_PAYOUT_STATUSES)[number];
 
 /** An event a payout settles money for. */

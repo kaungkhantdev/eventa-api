@@ -11,10 +11,10 @@ import type {
 import type { RegistrationRefundPort } from './ports/registration-refund.port';
 import {
   APPROVE_BLOCKED_UNPAID,
+  NO_SEAT_FREE,
   OFFER_NOT_WAITLISTED,
   REJECT_NEEDS_REFUND_PERMISSION,
-} from './registration-decision';
-import { NO_SEAT_FREE } from './registration-decisions.service';
+} from '../../common/constants/registrations.constants';
 
 const ORG = 7;
 const ORDER = 'o-1';

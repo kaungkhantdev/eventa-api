@@ -16,8 +16,7 @@ import type { Persona } from '../auth/auth.types';
 import { LoginResponseDto } from '../auth/dto/token-response.dto';
 import { AuthSocialService } from './auth-social.service';
 import { SocialSignInDto } from './dto/social-sign-in.dto';
-
-const BEARER = 'Bearer';
+import { BEARER } from '../../common/constants/auth-social.constants';
 
 /**
  * Social sign-in (US-ACC-06). There are two endpoints on purpose: the AUDIENCE

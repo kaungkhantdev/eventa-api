@@ -26,7 +26,6 @@ import { ApiData } from '../../common/http/api-data.decorator';
 import { SkipResponseEnvelope } from '../../common/decorators/skip-envelope.decorator';
 import {
   EXPORT_FORMATS,
-  EXPORT_MIME,
   type ExportFormat,
   type TabularDocument,
 } from '../../common/export/tabular';
@@ -66,14 +65,7 @@ import {
   toOverviewReport,
   toRegistrationsReport,
 } from './reports.mapper';
-
-/**
- * Every MIME an export route can answer with, for the OpenAPI document.
- *
- * Declared before the controller: `@ApiProduces` runs when the class is
- * defined, which is before a `const` below it has been initialised.
- */
-const PRODUCES = Object.values(EXPORT_MIME);
+import { PRODUCES } from '../../common/constants/reports.constants';
 
 /**
  * The reporting surface (US-RPT-01…12). Read-only throughout: no endpoint here

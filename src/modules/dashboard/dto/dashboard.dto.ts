@@ -1,9 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
-
-export const RANGES = ['week', 'month', 'year'] as const;
-export const LANGUAGES = ['en', 'th'] as const;
-const MAX_NAME = 120;
+import {
+  LANGUAGES,
+  MAX_NAME,
+  RANGES,
+} from '../../../common/constants/dashboard.constants';
 
 export class HomeQueryDto {
   @ApiPropertyOptional({ enum: LANGUAGES, default: 'en' })

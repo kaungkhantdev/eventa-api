@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { DomainException } from '../../common/errors/domain.exception';
-import { paymentMethodEnum } from '../../db/schema';
 import {
   PAYMENT_METHOD_CHOICES,
   type PaymentMethodChoice,
@@ -8,9 +7,7 @@ import {
 import { PaymentSettingsRepository } from './payment-settings.repository';
 import type { PaymentMethod } from './payment-settings.types';
 import { TicketSalesPort } from './ports/ticket-sales.port';
-
-/** Every method the product knows about — derived from the schema enum. */
-const ALL_METHODS = paymentMethodEnum.enumValues;
+import { ALL_METHODS } from '../../common/constants/payment-settings.constants';
 
 /** Wallets ride on a connected provider account; they can't stand alone. */
 const WALLET_METHODS: readonly PaymentMethod[] = ['Apple Pay', 'Google Pay'];

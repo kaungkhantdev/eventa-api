@@ -6,16 +6,15 @@ import type {
   DiscountType,
   UpdateDiscountInput,
 } from './discounts.types';
-
-/** Readable off a poster and typed without ambiguity. */
-const CODE_PATTERN = /^[A-Z0-9-]+$/;
-const CODE_MIN = 3;
-const CODE_MAX = 24;
-const PERCENT_MIN = 1;
-const PERCENT_MAX = 100;
-const MIN_FIXED_SATANG = 1;
-/** A 0 limit means unlimited — for the total, per person, and the minimum order. */
-const UNLIMITED = 0;
+import {
+  CODE_MAX,
+  CODE_MIN,
+  CODE_PATTERN,
+  MIN_FIXED_SATANG,
+  PERCENT_MAX,
+  PERCENT_MIN,
+  UNLIMITED,
+} from '../../common/constants/discounts.constants';
 
 /**
  * The rules a discount code must satisfy (US-TKT-07/08/10). Pure and stateless.

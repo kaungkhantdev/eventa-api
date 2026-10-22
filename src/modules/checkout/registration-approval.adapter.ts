@@ -24,11 +24,10 @@ import { waitlistOfferedEvent } from './events/waitlist-offered.event';
 import { generateQrToken } from './order-reference';
 import { CheckoutEventPort } from './ports/checkout-event.port';
 import { ticketsUrlFor } from './ticket-links';
+import { GONE, MS_PER_HOUR } from '../../common/constants/checkout.constants';
 
 /** Approval moves no money, so the settlement's ledger hook does nothing. */
 const NO_PAYMENT = () => Promise.resolve();
-const MS_PER_HOUR = 60 * 60 * 1000;
-const GONE = "This registration isn't available.";
 
 /**
  * Checkout's implementation of the Registrations-owned decision port

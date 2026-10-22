@@ -1,13 +1,13 @@
 import { randomInt } from 'node:crypto';
 import { isUniqueViolation } from '../../common/errors/unique-violation';
-
-/** Crockford base32 minus I, L, O, U — no character a person can mis-copy. */
-const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-const LENGTH = 8;
-const PREFIX = 'ORD';
-/** How many fresh references to try before admitting defeat (32^8 collisions). */
-const REFERENCE_ATTEMPTS = 3;
-const REFERENCE_CONSTRAINT = 'uq_orders_org_reference';
+import {
+  CROCKFORD_ALPHABET,
+  ORDER_REFERENCE_LENGTH,
+  ORDER_REFERENCE_PREFIX,
+  QR_TOKEN_LENGTH,
+  REFERENCE_ATTEMPTS,
+  REFERENCE_CONSTRAINT,
+} from '../../common/constants/checkout.constants';
 
 /**
  * A booking reference an attendee can read down a phone line: `ORD-7K2M9QX4`.
@@ -19,10 +19,10 @@ const REFERENCE_CONSTRAINT = 'uq_orders_org_reference';
  */
 export function generateOrderReference(): string {
   let body = '';
-  for (let i = 0; i < LENGTH; i += 1) {
-    body += ALPHABET[randomInt(ALPHABET.length)];
+  for (let i = 0; i < ORDER_REFERENCE_LENGTH; i += 1) {
+    body += CROCKFORD_ALPHABET[randomInt(CROCKFORD_ALPHABET.length)];
   }
-  return `${PREFIX}-${body}`;
+  return `${ORDER_REFERENCE_PREFIX}-${body}`;
 }
 
 /**
@@ -33,13 +33,10 @@ export function generateOrderReference(): string {
 export function generateQrToken(): string {
   let token = '';
   for (let i = 0; i < QR_TOKEN_LENGTH; i += 1) {
-    token += ALPHABET[randomInt(ALPHABET.length)];
+    token += CROCKFORD_ALPHABET[randomInt(CROCKFORD_ALPHABET.length)];
   }
   return token;
 }
-
-/** 32^24 ≈ 1.3e36 — unguessable at any scale a scanner could be brute-forced at. */
-const QR_TOKEN_LENGTH = 24;
 
 /**
  * Insert something that carries a new reference, retrying ONLY when the

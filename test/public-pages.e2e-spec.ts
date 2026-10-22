@@ -15,6 +15,7 @@ import { listenOnLoopback } from './support/loopback';
 const ORG = { slug: 'page-e2e', name: 'Page E2E' };
 const LIVE = 'live-summit';
 const DRAFT = 'draft-summit';
+const SEATED = 'seated-summit';
 
 interface Success<T> {
   data: T;
@@ -32,6 +33,7 @@ interface Page {
   highlights: { text: string }[];
   faqs: { question: string }[];
   tickets: {
+    id: string;
     name: string;
     priceLabel: string;
     soldOut: boolean;
@@ -45,6 +47,14 @@ interface Page {
   sections: { agenda: string; speakers: string };
   agenda: { title: string; speakerNames: string[] }[];
   speakers: { name: string }[];
+  seatMap: {
+    seatsPerRow: number;
+    rows: {
+      label: string;
+      ticketTypeId: string | null;
+      seatTicketTypes: (string | null)[];
+    }[];
+  } | null;
 }
 
 describe('Public event page (e2e — US-PAGE-01…08)', () => {
@@ -189,6 +199,25 @@ describe('Public event page (e2e — US-PAGE-01…08)', () => {
     expect(free?.priceLabel).toBe('Free');
   });
 
+  // As the speakers above: ids and names both sort apart from the order of
+  // entry. Copper and Bronze share a moment, so their ids settle it — as the
+  // wizard's list does, so a ticket keeps its colour on both (US-EVT-05).
+  it('US-PAGE-05: tickets render in the order the organizer added them', async () => {
+    await pool.query(
+      `INSERT INTO ticket_types (id, organization_id, event_id, name, price_satang, is_free, total, created_at)
+       VALUES ('cccccccc-0000-4000-8000-000000000011',$1,$2,'Gold',90000,false,10, now() - interval '3 minutes'),
+              ('eeeeeeee-0000-4000-8000-000000000012',$1,$2,'Silver',60000,false,10, now() - interval '2 minutes'),
+              ('bbbbbbbb-0000-4000-8000-000000000013',$1,$2,'Bronze',30000,false,10, now() - interval '1 minute'),
+              ('aaaaaaaa-0000-4000-8000-000000000014',$1,$2,'Copper',10000,false,10, now() - interval '1 minute')`,
+      [orgId, liveId],
+    );
+    const p = ((await page(LIVE)).body as Success<Page>).data;
+    const added = ['Gold', 'Silver', 'Bronze', 'Copper'];
+    expect(
+      p.tickets.map((t) => t.name).filter((n) => added.includes(n)),
+    ).toEqual(['Gold', 'Silver', 'Copper', 'Bronze']);
+  });
+
   it('US-PAGE-05: an urgency line appears when few remain', async () => {
     await pool.query(
       `INSERT INTO ticket_types (organization_id, event_id, name, price_satang, is_free, total, sold)
@@ -216,6 +245,129 @@ describe('Public event page (e2e — US-PAGE-01…08)', () => {
     await pool.query(`UPDATE events SET is_online = false WHERE id = $1`, [
       liveId,
     ]);
+  });
+
+  describe('US-PAGE-05: the seat map split by ticket type (US-EVT-05)', () => {
+    let seatedId: string;
+
+    beforeAll(async () => {
+      seatedId = await seedSeatedEvent(pool, orgId);
+    });
+
+    const seated = async () =>
+      ((await page(SEATED)).body as Success<Page>).data;
+    const idOf = (p: Page, name: string) =>
+      p.tickets.find((t) => t.name === name)?.id;
+
+    /** One seat of the seated event's map given the named ticket type. */
+    const typeSeat = (row: string, seat: string, name: string) =>
+      pool.query(
+        `UPDATE seats SET ticket_type_id =
+           (SELECT id FROM ticket_types WHERE event_id = $1 AND name = $4)
+          WHERE seat_map_id = (SELECT id FROM seat_maps WHERE event_id = $1)
+            AND row_label = $2 AND seat_number = $3`,
+        [seatedId, row, seat, name],
+      );
+
+    it("shows each row, in number order, with its ticket type's id and each seat's", async () => {
+      const p = await seated();
+      const [vip, normal, free] = ['VIP', 'Normal', 'Free'].map((n) =>
+        idOf(p, n),
+      );
+      const row = (label: string, type: string | undefined) => ({
+        label,
+        ticketTypeId: type,
+        seatTicketTypes: [type, type],
+      });
+      expect(p.seatMap?.seatsPerRow).toBe(2);
+      expect(p.seatMap?.rows).toEqual([
+        row('1', vip),
+        row('2', vip),
+        ...['3', '4', '5', '6', '7', '8', '9'].map((label) =>
+          row(label, normal),
+        ),
+        row('10', free),
+      ]);
+    });
+
+    it('shows a row split between types seat by seat, with no type of its own', async () => {
+      await typeSeat('10', '1', 'Normal');
+      const p = await seated();
+      expect(p.seatMap?.rows.find((r) => r.label === '10')).toEqual({
+        label: '10',
+        ticketTypeId: null,
+        seatTicketTypes: [idOf(p, 'Normal'), idOf(p, 'Free')],
+      });
+      await typeSeat('10', '1', 'Free');
+    });
+
+    it('carries the layout only — no seat status, holds or sales', async () => {
+      const p = await seated();
+      expect(Object.keys(p.seatMap ?? {}).sort()).toEqual([
+        'rows',
+        'seatsPerRow',
+      ]);
+      for (const row of p.seatMap?.rows ?? []) {
+        expect(Object.keys(row).sort()).toEqual([
+          'label',
+          'seatTicketTypes',
+          'ticketTypeId',
+        ]);
+      }
+    });
+
+    it('shows a row given another type at once — nothing caches the page', async () => {
+      await pool.query(
+        `UPDATE seats SET ticket_type_id =
+           (SELECT id FROM ticket_types WHERE event_id = $1 AND name = 'Free')
+          WHERE seat_map_id = (SELECT id FROM seat_maps WHERE event_id = $1)
+            AND row_label = '9'`,
+        [seatedId],
+      );
+      const p = await seated();
+      const row9 = p.seatMap?.rows.find((r) => r.label === '9');
+      expect(row9?.ticketTypeId).toBe(idOf(p, 'Free'));
+    });
+
+    it('has none for general admission', async () => {
+      const p = ((await page(LIVE)).body as Success<Page>).data;
+      expect(p.seatMap).toBeNull();
+    });
+
+    it('has none once the event is online, even with its map still stored', async () => {
+      await pool.query(`UPDATE events SET is_online = true WHERE id = $1`, [
+        seatedId,
+      ]);
+      expect((await seated()).seatMap).toBeNull();
+      await pool.query(`UPDATE events SET is_online = false WHERE id = $1`, [
+        seatedId,
+      ]);
+    });
+
+    it('has none when no seat has a ticket type (a map from before seats had types)', async () => {
+      await pool.query(
+        `UPDATE seats SET ticket_type_id = NULL
+          WHERE seat_map_id = (SELECT id FROM seat_maps WHERE event_id = $1)`,
+        [seatedId],
+      );
+      expect((await seated()).seatMap).toBeNull();
+    });
+
+    it('shows the map once any seat has a type, a partly typed row included', async () => {
+      await typeSeat('3', '2', 'VIP');
+      const p = await seated();
+      expect(p.seatMap?.rows).toHaveLength(10);
+      expect(p.seatMap?.rows.find((r) => r.label === '3')).toEqual({
+        label: '3',
+        ticketTypeId: null,
+        seatTicketTypes: [null, idOf(p, 'VIP')],
+      });
+      expect(p.seatMap?.rows.find((r) => r.label === '4')).toEqual({
+        label: '4',
+        ticketTypeId: null,
+        seatTicketTypes: [null, null],
+      });
+    });
   });
 
   it('US-PAGE-08: the share card carries a clean public URL and is indexable', async () => {
@@ -278,6 +430,43 @@ async function seed(pool: Pool): Promise<{ orgId: number; liveId: string }> {
     [orgId, DRAFT],
   );
   return { orgId, liveId: live.rows[0].id };
+}
+
+/**
+ * An in-person, reserved event: 10 rows of 2 seats — rows 1–2 VIP, 3–9 Normal,
+ * 10 Free — as the seating wizard saves them (US-EVT-05). Row 10 sorts after 9
+ * only by number, never as text.
+ */
+async function seedSeatedEvent(pool: Pool, orgId: number): Promise<string> {
+  const event = await pool.query<{ id: string }>(
+    `INSERT INTO events (organization_id, slug, name, type, bucket, status, visibility,
+                         start_at, organizer_name, venue_name, published_at, seating_mode)
+     VALUES ($1,$2,'Seated Summit','Conference','active','upcoming','public',
+             now() + interval '30 days','Acme','BITEC', now(), 'reserved')
+     RETURNING id`,
+    [orgId, SEATED],
+  );
+  const eventId = event.rows[0].id;
+  await pool.query(
+    `INSERT INTO ticket_types (organization_id, event_id, name, price_satang, is_free, total)
+     VALUES ($1,$2,'VIP',300000,false,4), ($1,$2,'Normal',100000,false,14),
+            ($1,$2,'Free',0,true,2)`,
+    [orgId, eventId],
+  );
+  const map = await pool.query<{ id: string }>(
+    `INSERT INTO seat_maps (organization_id, event_id, name, layout, total_seats)
+     VALUES ($1,$2,'Main hall','{"rows":10,"seatsPerRow":2}',20) RETURNING id`,
+    [orgId, eventId],
+  );
+  await pool.query(
+    `INSERT INTO seats (organization_id, seat_map_id, section, row_label, seat_number, ticket_type_id)
+     SELECT $1, $2, '', r::text, s::text,
+            (SELECT id FROM ticket_types WHERE event_id = $3 AND name =
+               CASE WHEN r <= 2 THEN 'VIP' WHEN r <= 9 THEN 'Normal' ELSE 'Free' END)
+       FROM generate_series(1,10) r, generate_series(1,2) s`,
+    [orgId, map.rows[0].id, eventId],
+  );
+  return eventId;
 }
 
 async function cleanup(pool: Pool): Promise<void> {

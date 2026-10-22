@@ -1,7 +1,6 @@
 process.env.NODE_ENV = 'test';
 process.env.DATABASE_URL ??= 'postgres://eventa:eventa@localhost:5432/eventa';
 process.env.JWT_SECRET ??= 'test-secret-at-least-16-characters-long';
-
 import type { Server } from 'node:http';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -10,12 +9,12 @@ import { Pool } from 'pg';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { buildValidationPipe } from '../src/common/http/validation';
+import { contactAuditMeta } from '../src/modules/attendee-directory/attendee-contact.audit';
+import { listenOnLoopback } from './support/loopback';
 import {
   CONTACT_AUDIT_TITLE,
   CONTACT_AUDIT_TYPE,
-  contactAuditMeta,
-} from '../src/modules/attendee-directory/attendee-contact.audit';
-import { listenOnLoopback } from './support/loopback';
+} from '../src/common/constants/attendee-directory.constants';
 
 const PASSWORD = 'correct horse battery staple';
 const ORG = { slug: 'contact-e2e', name: 'Contact E2E' };

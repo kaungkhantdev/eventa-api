@@ -1,21 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import type { PeriodChange } from '../../common/analytics/period-change';
 import { Clock } from '../../common/time/clock';
-import {
-  DEFAULT_REPORT_LIMIT,
-  type ReportFilterQueryDto,
-} from './dto/report-filter.query.dto';
+import { type ReportFilterQueryDto } from './dto/report-filter.query.dto';
 import {
   IncomeReportPort,
   type IncomeRow,
   type IncomeTotals,
 } from './ports/income-report.port';
-import {
-  changeBetween,
-  LOWER_IS_BETTER,
-  undirectedChange,
-} from './report-change';
+import { changeBetween, undirectedChange } from './report-change';
 import { resolveReportPeriod, type ReportPeriod } from './reports-period';
+import {
+  DEFAULT_REPORT_LIMIT,
+  LOWER_IS_BETTER,
+} from '../../common/constants/reports.constants';
 
 /**
  * Income and reconciliation (US-RPT-05).

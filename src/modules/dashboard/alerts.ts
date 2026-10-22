@@ -1,3 +1,5 @@
+import { ALL_CAUGHT_UP } from '../../common/constants/dashboard.constants';
+
 /** What the home screen found outstanding across the modules it summarizes. */
 export interface OutstandingCounts {
   pendingApprovals: number;
@@ -28,8 +30,6 @@ export interface AlertsView {
   /** Set only when the list is empty, so the panel has something to say. */
   emptyMessage: string | null;
 }
-
-export const ALL_CAUGHT_UP = "You're all caught up.";
 
 /** Most urgent first — the order US-DASH-06 asks the panel to render in. */
 const SEVERITY_ORDER: Record<AlertSeverity, number> = {
